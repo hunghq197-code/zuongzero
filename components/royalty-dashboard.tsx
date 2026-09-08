@@ -93,6 +93,8 @@ const toneClass: Record<StatementMetric['tone'], string> = {
   violet: 'bg-[#7a67ad] text-white',
 };
 
+type DashboardAccessLevel = 'admin' | 'owner' | 'viewer' | 'finance';
+
 function formatMoney(value: number, currency: CurrencyCode) {
   return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
     style: 'currency',
@@ -154,22 +156,44 @@ function makeMetrics(
   ];
 }
 
-export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
-  const assignedClient = clients[0];
-  const months = useMemo(
-    () => Array.from(new Set(periods.map((period) => period.period))),
-    [],
+export function RoyaltyDashboard({
+  accessLevel,
+  clientId,
+  clientName,
+  userEmail,
+}: {
+  accessLevel: DashboardAccessLevel;
+  clientId: string;
+  clientName: string;
+  userEmail: string;
+}) {
+  const assignedClient = clients.find((client) => client.id === clientId) ?? {
+    code: clientId,
+    id: clientId,
+    name: clientName,
+  };
+  const clientPeriods = useMemo(
+    () => periods.filter((period) => period.clientId === assignedClient.id),
+    [assignedClient.id],
   );
-  const [selectedMonth, setSelectedMonth] = useState(months[0]);
+  const months = useMemo(
+    () => Array.from(new Set(clientPeriods.map((period) => period.period))),
+    [clientPeriods],
+  );
+  const [selectedMonth, setSelectedMonth] = useState(
+    clientPeriods[0]?.period ?? '',
+  );
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>('USD');
   const [activeTab, setActiveTab] = useState<BreakdownKey>('sources');
 
   const activePeriod =
-    periods.find(
+    clientPeriods.find(
       (period) =>
         period.period === selectedMonth && period.currency === selectedCurrency,
-    ) ?? periods[0];
-  const metrics = useMemo(() => makeMetrics(activePeriod), [activePeriod]);
+    ) ??
+    clientPeriods.find((period) => period.period === selectedMonth) ??
+    clientPeriods[0];
+  const metrics = activePeriod ? makeMetrics(activePeriod) : [];
   const activeSection =
     breakdownSections.find((section) => section.id === activeTab) ??
     breakdownSections[0];
@@ -225,6 +249,17 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
 
     return () => lifecycle.abort();
   }, [months]);
+
+  if (!activePeriod) {
+    return (
+      <NoStatements
+        accessLevel={accessLevel}
+        clientCode={assignedClient.code}
+        clientName={assignedClient.name}
+        userEmail={userEmail}
+      />
+    );
+  }
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -382,7 +417,9 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                       Quyền truy cập
                     </span>
                     <div className="flex min-h-10 items-center rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground">
-                      Khách chỉ xem dữ liệu đã publish cho client được gán.
+                      {accessLevel === 'admin'
+                        ? 'Admin preview read-only cho client này.'
+                        : `${accessLevel}: chỉ xem statement đã publish cho client được gán.`}
                     </div>
                   </div>
                 </div>
@@ -453,7 +490,7 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                   </div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {periods.slice(0, 6).map((period) => (
+                  {clientPeriods.slice(0, 6).map((period) => (
                     <div
                       className="rounded-lg border border-border bg-background px-3 py-3"
                       key={period.id}
@@ -530,7 +567,7 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {periods.map((period) => (
+                  {clientPeriods.map((period) => (
                     <TableRow key={period.id}>
                       <TableCell className="font-medium">
                         {period.label}: {period.clientName}
@@ -554,6 +591,52 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
           </div>
         </section>
       </div>
+    </main>
+  );
+}
+
+function NoStatements({
+  accessLevel,
+  clientCode,
+  clientName,
+  userEmail,
+}: {
+  accessLevel: DashboardAccessLevel;
+  clientCode: string;
+  clientName: string;
+  userEmail: string;
+}) {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-5 text-foreground">
+      <section className="w-full max-w-3xl rounded-lg border border-border bg-card p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">
+              Client Portal
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-normal">
+              Chưa có statement đã publish
+            </h1>
+          </div>
+          <Badge className="rounded-lg" variant="outline">
+            {clientCode}
+          </Badge>
+        </div>
+        <div className="mt-5 rounded-lg border border-[#b7d8c2] bg-[#f1faf3] p-4">
+          <div className="flex items-start gap-3">
+            <LockKeyhole className="mt-0.5 size-5 text-[#2f6f45]" />
+            <div>
+              <h2 className="font-semibold text-[#183d27]">{clientName}</h2>
+              <p className="mt-2 text-sm leading-6 text-[#326247]">
+                Tài khoản {userEmail} đã được xác thực với quyền {accessLevel},
+                nhưng chưa có kỳ báo cáo nào được admin publish cho client này.
+                Dashboard không hiển thị dữ liệu mẫu hoặc dữ liệu của client
+                khác.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

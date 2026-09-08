@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -42,6 +42,42 @@ import {
 
 const adminMonths = Array.from(new Set(periods.map((period) => period.period)));
 
+const roleRows = [
+  {
+    role: 'Owner / Super admin',
+    scope: 'Cấu hình server',
+    permissions: 'Quản lý ADMIN_EMAILS, duyệt admin, khóa hoặc mở quyền.',
+  },
+  {
+    role: 'Admin',
+    scope: 'Admin console',
+    permissions:
+      'Quản lý khách hàng, upload Excel, validate, publish statement.',
+  },
+  {
+    role: 'Client finance',
+    scope: 'Client portal',
+    permissions: 'Xem dashboard và statement của client được gán.',
+  },
+  {
+    role: 'Auditor',
+    scope: 'Audit view',
+    permissions: 'Xem log và trạng thái đối soát, không upload hoặc publish.',
+  },
+];
+
+type AccessRequestRow = {
+  id: string;
+  requesterEmail: string;
+  requestType: 'client_access' | 'admin_access';
+  companyName: string | null;
+  clientCode: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  createdAt: string;
+};
+
+type AccessRequestAction = 'approve' | 'reject';
+
 function formatMoney(value: number, currency: CurrencyCode = 'USD') {
   return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
     style: 'currency',
@@ -52,6 +88,40 @@ function formatMoney(value: number, currency: CurrencyCode = 'USD') {
 
 function periodLabel(period: StatementPeriod) {
   return `${period.label}: ${period.currency} - ${period.clientName}`;
+}
+
+function requestTypeLabel(type: AccessRequestRow['requestType']) {
+  return type === 'admin_access' ? 'Admin' : 'Client';
+}
+
+function accessStatusLabel(status: AccessRequestRow['status']) {
+  const labels: Record<AccessRequestRow['status'], string> = {
+    approved: 'Approved',
+    cancelled: 'Cancelled',
+    pending: 'Pending',
+    rejected: 'Rejected',
+  };
+
+  return labels[status];
+}
+
+function accessStatusClass(status: AccessRequestRow['status']) {
+  if (status === 'approved') return 'rounded-lg bg-[#e9f7f2] text-[#22735f]';
+  if (status === 'rejected' || status === 'cancelled') {
+    return 'rounded-lg bg-[#ffe9e7] text-[#a53a30]';
+  }
+
+  return 'rounded-lg bg-[#fff3d9] text-[#8a5b08]';
+}
+
+function formatAccessRequestDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
 }
 
 function validateWorkbook(file: File | null) {
@@ -113,6 +183,11 @@ export function AdminConsole({
   const [uploadMessage, setUploadMessage] = useState(
     'File chỉ được publish lên dashboard khách hàng sau khi parser và validation pass.',
   );
+  const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([]);
+  const [accessRequestMessage, setAccessRequestMessage] = useState(
+    'Đang tải yêu cầu đăng ký...',
+  );
+  const [actingRequestId, setActingRequestId] = useState<string | null>(null);
 
   const activeClient =
     clients.find((client) => client.id === selectedClient) ?? clients[0];
@@ -120,6 +195,43 @@ export function AdminConsole({
     () => validateWorkbook(selectedFile),
     [selectedFile],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAccessRequests() {
+      try {
+        const response = await fetch('/api/admin/access-requests');
+        const result = (await response.json()) as {
+          message?: string;
+          requests?: AccessRequestRow[];
+        };
+
+        if (!response.ok) {
+          throw new Error(result.message ?? 'Không thể tải yêu cầu đăng ký.');
+        }
+
+        if (!cancelled) {
+          setAccessRequests(result.requests ?? []);
+          setAccessRequestMessage(result.message ?? 'Loaded');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAccessRequestMessage(
+            error instanceof Error
+              ? error.message
+              : 'Không thể tải yêu cầu đăng ký.',
+          );
+        }
+      }
+    }
+
+    void loadAccessRequests();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function uploadWorkbook() {
     if (!selectedFile || validation.state !== 'ready') return;
@@ -158,6 +270,60 @@ export function AdminConsole({
     }
   }
 
+  async function updateAccessRequest(
+    accessRequest: AccessRequestRow,
+    action: AccessRequestAction,
+  ) {
+    setActingRequestId(accessRequest.id);
+    setAccessRequestMessage(
+      action === 'approve'
+        ? 'Đang duyệt quyền khách hàng...'
+        : 'Đang từ chối yêu cầu...',
+    );
+
+    try {
+      const response = await fetch(
+        `/api/admin/access-requests/${encodeURIComponent(accessRequest.id)}`,
+        {
+          body: JSON.stringify({
+            accessLevel: 'viewer',
+            action,
+            clientId: activeClient.id,
+          }),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          method: 'POST',
+        },
+      );
+      const result = (await response.json()) as { message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.message ?? 'Không thể xử lý yêu cầu.');
+      }
+
+      setAccessRequests((currentRequests) =>
+        currentRequests.map((request) =>
+          request.id === accessRequest.id
+            ? {
+                ...request,
+                status: action === 'approve' ? 'approved' : 'rejected',
+              }
+            : request,
+        ),
+      );
+      setAccessRequestMessage(result.message ?? 'Yêu cầu đã được xử lý.');
+    } catch (error) {
+      setAccessRequestMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể xử lý yêu cầu ở thời điểm này.',
+      );
+    } finally {
+      setActingRequestId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-card px-5 py-4 md:px-8">
@@ -189,6 +355,15 @@ export function AdminConsole({
               type="button"
             >
               Client portal
+            </button>
+            <button
+              className="inline-flex h-8 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+              onClick={() => {
+                window.location.assign('/register');
+              }}
+              type="button"
+            >
+              Register
             </button>
           </div>
         </div>
@@ -273,6 +448,153 @@ export function AdminConsole({
                 </p>
               </div>
             </div>
+          </section>
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_520px]">
+          <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Role & permission</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Đăng ký chỉ tạo request. Quyền thật phải được duyệt và ghi ở
+                  server.
+                </p>
+              </div>
+              <ShieldCheck className="size-5 text-primary" />
+            </div>
+            <div className="mt-4 overflow-hidden rounded-lg border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Scope</TableHead>
+                    <TableHead>Permissions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {roleRows.map((row) => (
+                    <TableRow key={row.role}>
+                      <TableCell className="font-medium">{row.role}</TableCell>
+                      <TableCell>{row.scope}</TableCell>
+                      <TableCell>{row.permissions}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Registration requests</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Admin duyệt rồi mới gán email vào role hoặc client cụ thể.
+                </p>
+              </div>
+              <Users className="size-5 text-primary" />
+            </div>
+
+            {accessRequests.length > 0 ? (
+              <div className="mt-4 overflow-hidden rounded-lg border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Company</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {accessRequests.map((request) => (
+                      <TableRow key={request.id}>
+                        <TableCell className="font-medium">
+                          {request.requesterEmail}
+                        </TableCell>
+                        <TableCell>
+                          {requestTypeLabel(request.requestType)}
+                        </TableCell>
+                        <TableCell>
+                          <span className="block">
+                            {request.companyName ?? 'Chưa khai báo'}
+                          </span>
+                          {request.clientCode ? (
+                            <span className="text-xs text-muted-foreground">
+                              {request.clientCode}
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={accessStatusClass(request.status)}
+                            variant="secondary"
+                          >
+                            {accessStatusLabel(request.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {formatAccessRequestDate(request.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          {request.status === 'pending' ? (
+                            <div className="flex flex-wrap gap-2">
+                              {request.requestType === 'client_access' ? (
+                                <Button
+                                  disabled={actingRequestId === request.id}
+                                  onClick={() => {
+                                    void updateAccessRequest(
+                                      request,
+                                      'approve',
+                                    );
+                                  }}
+                                  size="sm"
+                                  variant="outline"
+                                >
+                                  Approve
+                                </Button>
+                              ) : (
+                                <Badge className="rounded-lg" variant="outline">
+                                  Owner only
+                                </Badge>
+                              )}
+                              <Button
+                                disabled={actingRequestId === request.id}
+                                onClick={() => {
+                                  void updateAccessRequest(request, 'reject');
+                                }}
+                                size="sm"
+                                variant="destructive"
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">
+                              Done
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-lg border border-border bg-background p-4 text-sm leading-6 text-muted-foreground">
+                {accessRequestMessage === 'Loaded'
+                  ? 'Chưa có yêu cầu đăng ký đang chờ xử lý.'
+                  : accessRequestMessage}
+              </p>
+            )}
+            {accessRequests.length > 0 && accessRequestMessage !== 'Loaded' ? (
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                {accessRequestMessage}
+              </p>
+            ) : null}
           </section>
         </section>
 

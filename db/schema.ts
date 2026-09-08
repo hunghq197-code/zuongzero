@@ -14,7 +14,7 @@ export const users = sqliteTable(
     email: text('email').notNull().unique(),
     displayName: text('display_name'),
     role: text('role', {
-      enum: ['super_admin', 'admin', 'client', 'auditor'],
+      enum: ['super_admin', 'admin', 'client', 'auditor', 'pending'],
     }).notNull(),
     status: text('status', { enum: ['active', 'disabled'] }).notNull(),
     createdAt: text('created_at').notNull(),
@@ -202,6 +202,43 @@ export const revenueBreakdowns = sqliteTable(
       table.clientId,
       table.reportPeriodId,
       table.dimension,
+    ),
+  ],
+);
+
+export const accessRequests = sqliteTable(
+  'access_requests',
+  {
+    id: text('id').primaryKey(),
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id),
+    requesterEmail: text('requester_email').notNull(),
+    requestType: text('request_type', {
+      enum: ['client_access', 'admin_access'],
+    }).notNull(),
+    companyName: text('company_name'),
+    clientCode: text('client_code'),
+    contactName: text('contact_name'),
+    reason: text('reason'),
+    status: text('status', {
+      enum: ['pending', 'approved', 'rejected', 'cancelled'],
+    }).notNull(),
+    metadata: text('metadata'),
+    reviewedByUserId: text('reviewed_by_user_id').references(() => users.id),
+    reviewedAt: text('reviewed_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_access_requests_requester').on(table.requesterUserId),
+    index('idx_access_requests_status_created').on(
+      table.status,
+      table.createdAt,
+    ),
+    index('idx_access_requests_type_status').on(
+      table.requestType,
+      table.status,
     ),
   ],
 );

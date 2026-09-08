@@ -17,6 +17,7 @@ export type BreakdownItem = {
 
 export type StatementPeriod = {
   id: string;
+  clientId: string;
   period: string;
   label: string;
   clientName: string;
@@ -87,6 +88,7 @@ export const clients = [
 export const periods: StatementPeriod[] = [
   {
     id: '2025-03-usd',
+    clientId: 'vieent-sample-catalog',
     period: '2025-03',
     label: '2025 - M3',
     clientName: 'VIEENT Sample Catalog',
@@ -101,6 +103,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2025-03-vnd',
+    clientId: 'vieent-sample-catalog',
     period: '2025-03',
     label: '2025 - M3',
     clientName: 'VIEENT Sample Catalog',
@@ -115,6 +118,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2025-02-usd',
+    clientId: 'vieent-sample-catalog',
     period: '2025-02',
     label: '2025 - M2',
     clientName: 'VIEENT Sample Catalog',
@@ -129,6 +133,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2025-02-vnd',
+    clientId: 'vieent-sample-catalog',
     period: '2025-02',
     label: '2025 - M2',
     clientName: 'VIEENT Sample Catalog',
@@ -143,6 +148,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2025-01-usd',
+    clientId: 'vieent-sample-catalog',
     period: '2025-01',
     label: '2025 - M1',
     clientName: 'VIEENT Sample Catalog',
@@ -157,6 +163,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2025-01-vnd',
+    clientId: 'vieent-sample-catalog',
     period: '2025-01',
     label: '2025 - M1',
     clientName: 'VIEENT Sample Catalog',
@@ -171,6 +178,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2024-12-usd',
+    clientId: 'vieent-sample-catalog',
     period: '2024-12',
     label: '2024 - M12',
     clientName: 'VIEENT Sample Catalog',
@@ -185,6 +193,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2024-12-vnd',
+    clientId: 'vieent-sample-catalog',
     period: '2024-12',
     label: '2024 - M12',
     clientName: 'VIEENT Sample Catalog',
@@ -199,6 +208,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2024-11-usd',
+    clientId: 'vieent-sample-catalog',
     period: '2024-11',
     label: '2024 - M11',
     clientName: 'VIEENT Sample Catalog',
@@ -213,6 +223,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2024-11-vnd',
+    clientId: 'vieent-sample-catalog',
     period: '2024-11',
     label: '2024 - M11',
     clientName: 'VIEENT Sample Catalog',
@@ -227,6 +238,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2024-10-usd',
+    clientId: 'vieent-sample-catalog',
     period: '2024-10',
     label: '2024 - M10',
     clientName: 'VIEENT Sample Catalog',
@@ -241,6 +253,7 @@ export const periods: StatementPeriod[] = [
   },
   {
     id: '2024-10-vnd',
+    clientId: 'vieent-sample-catalog',
     period: '2024-10',
     label: '2024 - M10',
     clientName: 'VIEENT Sample Catalog',
