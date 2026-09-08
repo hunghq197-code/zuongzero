@@ -3,8 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { ChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
 import { clients } from '@/lib/dashboard-data';
-
-const LOCAL_PREVIEW_DOMAIN = '@sites.test';
+import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
 
 export type ClientPortalAccess =
   | {
@@ -30,7 +29,7 @@ type ClientAssignment = {
 export async function getClientPortalAccess(
   user: ChatGPTUser,
 ): Promise<ClientPortalAccess> {
-  const adminAccess = getAdminAccess(user.email);
+  const adminAccess = await getAdminAccess(user.email);
   if (adminAccess.allowed) {
     return {
       allowed: true,
@@ -99,6 +98,4 @@ export async function getClientPortalAccess(
   };
 }
 
-export function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
+export { normalizeEmail };

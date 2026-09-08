@@ -4,5 +4,6 @@ declare namespace Cloudflare {
     AUTH_PROVIDER?: string;
     DB: D1Database;
     FILES: R2Bucket;
+    SUPER_ADMIN_EMAILS?: string;
   }
 }

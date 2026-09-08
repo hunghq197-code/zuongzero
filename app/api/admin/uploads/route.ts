@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
 import { clients } from '@/lib/dashboard-data';
+import { ensureUserRecord } from '@/lib/user-records';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
     return jsonError('Bạn cần đăng nhập trước khi upload.', 401);
   }
 
-  const adminAccess = getAdminAccess(user.email);
+  const adminAccess = await getAdminAccess(user.email);
   if (!adminAccess.allowed) {
     return jsonError(adminAccess.reason, adminAccess.status);
   }
@@ -53,6 +54,13 @@ export async function POST(request: Request) {
   const uploadId = crypto.randomUUID();
   const reportPeriodId = `${selectedClient.id}:${period}:staging`;
   const now = new Date().toISOString();
+  const uploader = await ensureUserRecord(env.DB, {
+    displayName: user.displayName,
+    email: user.email,
+    lastSeenAt: now,
+    role: adminAccess.role,
+    userId: user.userId,
+  });
   const buffer = await file.arrayBuffer();
   const sha256 = await hashBuffer(buffer);
   const objectKey = `clients/${selectedClient.id}/periods/${period}/uploads/${uploadId}.xlsx`;
@@ -65,20 +73,12 @@ export async function POST(request: Request) {
       clientId: selectedClient.id,
       period,
       sha256,
-      uploadedBy: user.userId,
+      uploadedBy: uploader.id,
       originalFilename: file.name,
     },
   });
 
   await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO users (id, email, display_name, role, status, created_at, last_seen_at)
-       VALUES (?, ?, ?, 'admin', 'active', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         email = excluded.email,
-         display_name = excluded.display_name,
-         last_seen_at = excluded.last_seen_at`,
-    ).bind(user.userId, user.email, user.displayName, now, now),
     env.DB.prepare(
       `INSERT INTO clients (id, code, legal_name, display_name, default_currency, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'USD', 'active', ?, ?)
@@ -121,7 +121,7 @@ export async function POST(request: Request) {
       uploadId,
       selectedClient.id,
       reportPeriodId,
-      user.userId,
+      uploader.id,
       file.name,
       objectKey,
       XLSX_MIME,
@@ -164,7 +164,7 @@ export async function POST(request: Request) {
        VALUES (?, ?, ?, 'admin_statement_upload_received', 'upload', ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
-      user.userId,
+      uploader.id,
       selectedClient.id,
       uploadId,
       JSON.stringify({

@@ -7,22 +7,28 @@ export const dynamic = 'force-dynamic';
 
 export default async function AdminPage() {
   const user = await requireChatGPTUser('/admin');
-  const access = getAdminAccess(user.email);
+  const access = await getAdminAccess(user.email);
 
   if (!access.allowed) {
     return (
       <AccessRequired
         badge="Admin access required"
         email={user.email}
-        primaryHref="/register?type=admin_access"
-        primaryLabel="Đăng ký quyền admin"
+        primaryHref="/login"
+        primaryLabel="Về trang đăng nhập"
         reason={`${access.reason} Đây là lớp deny-by-default để khách hàng không thể upload hoặc sửa dữ liệu báo cáo.`}
         secondaryHref="/login"
-        secondaryLabel="Về trang đăng nhập"
+        secondaryLabel="Kiểm tra lại"
         title="Khu quản trị đang được bảo vệ"
       />
     );
   }
 
-  return <AdminConsole accessMode={access.mode} userEmail={user.email} />;
+  return (
+    <AdminConsole
+      accessMode={access.mode}
+      adminRole={access.role}
+      userEmail={user.email}
+    />
+  );
 }

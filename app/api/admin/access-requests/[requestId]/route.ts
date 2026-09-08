@@ -1,8 +1,9 @@
 import { env } from 'cloudflare:workers';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { normalizeEmail } from '@/lib/access-control';
 import { getAdminAccess } from '@/lib/admin-auth';
+import { normalizeEmail } from '@/lib/identity';
+import { ensureUserRecord } from '@/lib/user-records';
 
 type RouteContext = {
   params: { requestId?: string } | Promise<{ requestId?: string }>;
@@ -39,9 +40,13 @@ export async function POST(request: Request, context: RouteContext) {
     return jsonError('Bạn cần đăng nhập trước khi xử lý yêu cầu.', 401);
   }
 
-  const adminAccess = getAdminAccess(user.email);
+  const adminAccess = await getAdminAccess(user.email);
   if (!adminAccess.allowed) {
     return jsonError(adminAccess.reason, adminAccess.status);
+  }
+
+  if (adminAccess.role !== 'super_admin') {
+    return jsonError('Chỉ super admin được xử lý yêu cầu cấp quyền.', 403);
   }
 
   const params = await Promise.resolve(context.params);
@@ -97,7 +102,14 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   if (action === 'reject') {
-    await rejectAccessRequest(accessRequest, user);
+    const reviewer = await ensureUserRecord(env.DB, {
+      displayName: user.displayName,
+      email: user.email,
+      lastSeenAt: new Date().toISOString(),
+      role: adminAccess.role,
+      userId: user.userId,
+    });
+    await rejectAccessRequest(accessRequest, reviewer.id);
     return Response.json({
       requestId: accessRequest.id,
       status: 'rejected',
@@ -107,7 +119,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (accessRequest.requestType === 'admin_access') {
     return jsonError(
-      'Không thể cấp quyền admin bằng nút approve trong app. Owner phải thêm email vào ADMIN_EMAILS để tránh tự leo thang quyền.',
+      'Không duyệt quyền quản lý từ request tự gửi. Super admin tạo tài khoản quản lý trong mục Tài khoản hệ thống.',
       403,
     );
   }
@@ -129,7 +141,20 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  await approveClientAccessRequest(accessRequest, user, client, accessLevel);
+  const reviewer = await ensureUserRecord(env.DB, {
+    displayName: user.displayName,
+    email: user.email,
+    lastSeenAt: new Date().toISOString(),
+    role: adminAccess.role,
+    userId: user.userId,
+  });
+
+  await approveClientAccessRequest(
+    accessRequest,
+    reviewer.id,
+    client,
+    accessLevel,
+  );
 
   return Response.json({
     requestId: accessRequest.id,
@@ -141,12 +166,11 @@ export async function POST(request: Request, context: RouteContext) {
 
 async function rejectAccessRequest(
   accessRequest: StoredAccessRequest,
-  reviewer: NonNullable<Awaited<ReturnType<typeof getChatGPTUser>>>,
+  reviewerUserId: string,
 ) {
   const now = new Date().toISOString();
 
   await env.DB.batch([
-    upsertReviewerUser(reviewer, now),
     env.DB.prepare(
       `UPDATE access_requests
        SET status = 'rejected',
@@ -154,7 +178,7 @@ async function rejectAccessRequest(
            reviewed_at = ?,
            updated_at = ?
        WHERE id = ?`,
-    ).bind(reviewer.userId, now, now, accessRequest.id),
+    ).bind(reviewerUserId, now, now, accessRequest.id),
     env.DB.prepare(
       `INSERT INTO audit_logs (
          id,
@@ -169,7 +193,7 @@ async function rejectAccessRequest(
        VALUES (?, ?, NULL, 'access_request_rejected', 'access_request', ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
-      reviewer.userId,
+      reviewerUserId,
       accessRequest.id,
       JSON.stringify({
         requesterEmail: accessRequest.requesterEmail,
@@ -182,14 +206,13 @@ async function rejectAccessRequest(
 
 async function approveClientAccessRequest(
   accessRequest: StoredAccessRequest,
-  reviewer: NonNullable<Awaited<ReturnType<typeof getChatGPTUser>>>,
+  reviewerUserId: string,
   client: ClientRow,
   accessLevel: ClientAccessLevel,
 ) {
   const now = new Date().toISOString();
 
   await env.DB.batch([
-    upsertReviewerUser(reviewer, now),
     env.DB.prepare(
       `UPDATE users
        SET role = CASE
@@ -227,7 +250,7 @@ async function approveClientAccessRequest(
            reviewed_at = ?,
            updated_at = ?
        WHERE id = ?`,
-    ).bind(reviewer.userId, now, now, accessRequest.id),
+    ).bind(reviewerUserId, now, now, accessRequest.id),
     env.DB.prepare(
       `INSERT INTO audit_logs (
          id,
@@ -242,7 +265,7 @@ async function approveClientAccessRequest(
        VALUES (?, ?, ?, 'client_access_approved', 'access_request', ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
-      reviewer.userId,
+      reviewerUserId,
       client.id,
       accessRequest.id,
       JSON.stringify({
@@ -252,20 +275,6 @@ async function approveClientAccessRequest(
       now,
     ),
   ]);
-}
-
-function upsertReviewerUser(
-  user: NonNullable<Awaited<ReturnType<typeof getChatGPTUser>>>,
-  now: string,
-) {
-  return env.DB.prepare(
-    `INSERT INTO users (id, email, display_name, role, status, created_at, last_seen_at)
-     VALUES (?, ?, ?, 'admin', 'active', ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       email = excluded.email,
-       display_name = excluded.display_name,
-       last_seen_at = excluded.last_seen_at`,
-  ).bind(user.userId, normalizeEmail(user.email), user.displayName, now, now);
 }
 
 async function resolveClient(

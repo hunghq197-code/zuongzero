@@ -11,11 +11,13 @@ import {
   RefreshCcw,
   ShieldCheck,
   Upload,
+  UserPlus,
   Users,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import {
   Select,
@@ -45,14 +47,15 @@ const adminMonths = Array.from(new Set(periods.map((period) => period.period)));
 const roleRows = [
   {
     role: 'Owner / Super admin',
-    scope: 'Cấu hình server',
-    permissions: 'Quản lý ADMIN_EMAILS, duyệt admin, khóa hoặc mở quyền.',
+    scope: 'Cấu hình và tài khoản',
+    permissions:
+      'Tạo tài khoản quản lý, gán khách hàng, khóa hoặc mở quyền truy cập.',
   },
   {
-    role: 'Admin',
+    role: 'Quản lý / Admin',
     scope: 'Admin console',
     permissions:
-      'Quản lý khách hàng, upload Excel, validate, publish statement.',
+      'Quản lý khách hàng, upload Excel, validate, publish statement. Không tạo tài khoản.',
   },
   {
     role: 'Client finance',
@@ -77,6 +80,22 @@ type AccessRequestRow = {
 };
 
 type AccessRequestAction = 'approve' | 'reject';
+type AdminRole = 'super_admin' | 'admin';
+type ManagedAccountRole = 'admin' | 'client';
+type ClientAccessLevel = 'owner' | 'viewer' | 'finance';
+
+type ManagedAccountRow = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  role: 'super_admin' | 'admin' | 'client' | 'auditor' | 'pending';
+  status: 'active' | 'disabled';
+  createdAt: string;
+  lastSeenAt: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  accessLevel: ClientAccessLevel | null;
+};
 
 function formatMoney(value: number, currency: CurrencyCode = 'USD') {
   return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
@@ -112,6 +131,40 @@ function accessStatusClass(status: AccessRequestRow['status']) {
   }
 
   return 'rounded-lg bg-[#fff3d9] text-[#8a5b08]';
+}
+
+function accountRoleLabel(
+  role: ManagedAccountRow['role'] | ManagedAccountRole,
+) {
+  const labels: Record<ManagedAccountRow['role'], string> = {
+    admin: 'Quản lý',
+    auditor: 'Auditor',
+    client: 'Khách hàng',
+    pending: 'Pending',
+    super_admin: 'Super admin',
+  };
+
+  return labels[role];
+}
+
+function accountRoleClass(role: ManagedAccountRow['role']) {
+  if (role === 'super_admin') {
+    return 'rounded-lg bg-primary/10 text-primary';
+  }
+  if (role === 'admin') return 'rounded-lg bg-[#e9f7f2] text-[#22735f]';
+  if (role === 'client') return 'rounded-lg bg-[#eef4ff] text-[#2f5da8]';
+
+  return 'rounded-lg';
+}
+
+function accessLevelLabel(accessLevel: ClientAccessLevel | null) {
+  const labels: Record<ClientAccessLevel, string> = {
+    finance: 'Finance',
+    owner: 'Owner',
+    viewer: 'Viewer',
+  };
+
+  return accessLevel ? labels[accessLevel] : 'Không gán client';
 }
 
 function formatAccessRequestDate(value: string) {
@@ -169,11 +222,14 @@ function validateWorkbook(file: File | null) {
 
 export function AdminConsole({
   accessMode,
+  adminRole,
   userEmail,
 }: {
-  accessMode: 'configured' | 'local-preview';
+  accessMode: 'super-admin-allowlist' | 'assigned' | 'local-preview';
+  adminRole: AdminRole;
   userEmail: string;
 }) {
+  const isSuperAdmin = adminRole === 'super_admin';
   const [selectedClient, setSelectedClient] = useState(clients[0].id);
   const [selectedMonth, setSelectedMonth] = useState(adminMonths[0]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -185,9 +241,28 @@ export function AdminConsole({
   );
   const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([]);
   const [accessRequestMessage, setAccessRequestMessage] = useState(
-    'Đang tải yêu cầu đăng ký...',
+    isSuperAdmin
+      ? 'Đang tải yêu cầu đăng ký...'
+      : 'Chỉ super admin được xem yêu cầu cấp quyền.',
   );
   const [actingRequestId, setActingRequestId] = useState<string | null>(null);
+  const [managedAccounts, setManagedAccounts] = useState<ManagedAccountRow[]>(
+    [],
+  );
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountDisplayName, setAccountDisplayName] = useState('');
+  const [accountRole, setAccountRole] = useState<ManagedAccountRole>('client');
+  const [accountClientId, setAccountClientId] = useState(clients[0].id);
+  const [accountAccessLevel, setAccountAccessLevel] =
+    useState<ClientAccessLevel>('viewer');
+  const [accountState, setAccountState] = useState<
+    'idle' | 'loading' | 'saving' | 'saved' | 'failed'
+  >('idle');
+  const [accountMessage, setAccountMessage] = useState(
+    isSuperAdmin
+      ? 'Tạo tài khoản theo email. Người dùng vẫn cần qua Cloudflare Access trước khi vào app.'
+      : 'Tài khoản quản lý không có quyền tạo thêm người dùng.',
+  );
 
   const activeClient =
     clients.find((client) => client.id === selectedClient) ?? clients[0];
@@ -200,6 +275,8 @@ export function AdminConsole({
     let cancelled = false;
 
     async function loadAccessRequests() {
+      if (!isSuperAdmin) return;
+
       try {
         const response = await fetch('/api/admin/access-requests');
         const result = (await response.json()) as {
@@ -231,7 +308,93 @@ export function AdminConsole({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadManagedAccounts() {
+      if (!isSuperAdmin) return;
+
+      try {
+        const response = await fetch('/api/admin/accounts');
+        const result = (await response.json()) as {
+          accounts?: ManagedAccountRow[];
+          message?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(result.message ?? 'Không thể tải tài khoản.');
+        }
+
+        if (!cancelled) {
+          setManagedAccounts(result.accounts ?? []);
+          setAccountMessage(result.message ?? 'Loaded');
+          setAccountState('idle');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAccountMessage(
+            error instanceof Error
+              ? error.message
+              : 'Không thể tải danh sách tài khoản.',
+          );
+          setAccountState('failed');
+        }
+      }
+    }
+
+    void loadManagedAccounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSuperAdmin]);
+
+  async function createManagedAccount(event: { preventDefault: () => void }) {
+    event.preventDefault();
+    if (!isSuperAdmin || accountState === 'saving') return;
+
+    setAccountState('saving');
+    setAccountMessage('Đang tạo tài khoản và ghi audit log...');
+
+    try {
+      const response = await fetch('/api/admin/accounts', {
+        body: JSON.stringify({
+          accessLevel: accountAccessLevel,
+          clientId: accountClientId,
+          displayName: accountDisplayName,
+          email: accountEmail,
+          role: accountRole,
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      });
+      const result = (await response.json()) as {
+        accounts?: ManagedAccountRow[];
+        message?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.message ?? 'Không thể tạo tài khoản.');
+      }
+
+      setManagedAccounts(result.accounts ?? []);
+      setAccountEmail('');
+      setAccountDisplayName('');
+      setAccountMessage(result.message ?? 'Đã tạo tài khoản.');
+      setAccountState('saved');
+    } catch (error) {
+      setAccountMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể tạo tài khoản ở thời điểm này.',
+      );
+      setAccountState('failed');
+    }
+  }
 
   async function uploadWorkbook() {
     if (!selectedFile || validation.state !== 'ready') return;
@@ -342,7 +505,7 @@ export function AdminConsole({
               variant="secondary"
             >
               <ShieldCheck className="size-3.5" />
-              Admin-only
+              {isSuperAdmin ? 'Super admin' : 'Quản lý'}
             </Badge>
             <Badge className="h-7 rounded-lg" variant="outline">
               {userEmail}
@@ -355,15 +518,6 @@ export function AdminConsole({
               type="button"
             >
               Client portal
-            </button>
-            <button
-              className="inline-flex h-8 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
-              onClick={() => {
-                window.location.assign('/register');
-              }}
-              type="button"
-            >
-              Register
             </button>
           </div>
         </div>
@@ -444,12 +598,249 @@ export function AdminConsole({
                   admin-only.
                 </p>
                 <p className="mt-3 text-xs font-medium uppercase text-[#7c5d18]">
-                  Access mode: {accessMode}
+                  Access mode: {accessMode} · Role: {adminRole}
                 </p>
               </div>
             </div>
           </section>
         </section>
+
+        {isSuperAdmin ? (
+          <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+            <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Tạo tài khoản</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Super admin cấp role cho quản lý hoặc khách hàng theo email.
+                  </p>
+                </div>
+                <UserPlus className="size-5 text-primary" />
+              </div>
+
+              <form className="mt-5 grid gap-3" onSubmit={createManagedAccount}>
+                <div className="space-y-2">
+                  <span className="block text-sm font-medium">Email</span>
+                  <Input
+                    autoComplete="email"
+                    inputMode="email"
+                    onChange={(event) => {
+                      setAccountEmail(event.target.value);
+                    }}
+                    placeholder="name@company.com"
+                    required
+                    type="email"
+                    value={accountEmail}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <span className="block text-sm font-medium">
+                    Tên hiển thị
+                  </span>
+                  <Input
+                    autoComplete="name"
+                    onChange={(event) => {
+                      setAccountDisplayName(event.target.value);
+                    }}
+                    placeholder="Tên người dùng hoặc công ty"
+                    value={accountDisplayName}
+                  />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <span className="block text-sm font-medium">Role</span>
+                    <Select
+                      onValueChange={(value) => {
+                        if (value === 'admin' || value === 'client') {
+                          setAccountRole(value);
+                        }
+                      }}
+                      value={accountRole}
+                    >
+                      <SelectTrigger aria-label="Role" className="h-10 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="client">Khách hàng</SelectItem>
+                        <SelectItem value="admin">Quản lý</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {accountRole === 'client' ? (
+                    <div className="space-y-2">
+                      <span className="block text-sm font-medium">
+                        Quyền xem
+                      </span>
+                      <Select
+                        onValueChange={(value) => {
+                          if (
+                            value === 'owner' ||
+                            value === 'viewer' ||
+                            value === 'finance'
+                          ) {
+                            setAccountAccessLevel(value);
+                          }
+                        }}
+                        value={accountAccessLevel}
+                      >
+                        <SelectTrigger
+                          aria-label="Quyền xem"
+                          className="h-10 w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="viewer">Viewer</SelectItem>
+                          <SelectItem value="finance">Finance</SelectItem>
+                          <SelectItem value="owner">Owner</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                </div>
+
+                {accountRole === 'client' ? (
+                  <div className="space-y-2">
+                    <span className="block text-sm font-medium">
+                      Khách hàng
+                    </span>
+                    <Select
+                      onValueChange={(value) => {
+                        if (value) setAccountClientId(value);
+                      }}
+                      value={accountClientId}
+                    >
+                      <SelectTrigger
+                        aria-label="Khách hàng của tài khoản"
+                        className="h-10 w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {clients.map((client) => (
+                          <SelectItem key={client.id} value={client.id}>
+                            {client.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+
+                <Button
+                  className="h-10 w-full"
+                  disabled={accountState === 'saving'}
+                  type="submit"
+                >
+                  <UserPlus className="size-4" />
+                  {accountState === 'saving' ? 'Đang tạo...' : 'Tạo tài khoản'}
+                </Button>
+              </form>
+
+              <p
+                className={`mt-3 text-sm leading-6 ${
+                  accountState === 'failed'
+                    ? 'text-[#a53a30]'
+                    : accountState === 'saved'
+                      ? 'text-[#22735f]'
+                      : 'text-muted-foreground'
+                }`}
+              >
+                {accountMessage === 'Loaded'
+                  ? 'Danh sách tài khoản đã được cập nhật.'
+                  : accountMessage}
+              </p>
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Tài khoản hệ thống</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Danh sách role đang active trong dashboard.
+                  </p>
+                </div>
+                <ShieldCheck className="size-5 text-primary" />
+              </div>
+
+              {managedAccounts.length > 0 ? (
+                <div className="mt-4 overflow-hidden rounded-lg border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Last seen</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {managedAccounts.map((account) => (
+                        <TableRow key={`${account.id}:${account.clientId}`}>
+                          <TableCell className="font-medium">
+                            <span className="block">{account.email}</span>
+                            {account.displayName ? (
+                              <span className="text-xs text-muted-foreground">
+                                {account.displayName}
+                              </span>
+                            ) : null}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={accountRoleClass(account.role)}
+                              variant="secondary"
+                            >
+                              {accountRoleLabel(account.role)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <span className="block">
+                              {account.clientName ?? 'Không gán client'}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {accessLevelLabel(account.accessLevel)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="rounded-lg" variant="outline">
+                              {account.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {account.lastSeenAt
+                              ? formatAccessRequestDate(account.lastSeenAt)
+                              : 'Chưa đăng nhập'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <p className="mt-4 rounded-lg border border-border bg-background p-4 text-sm leading-6 text-muted-foreground">
+                  {accountState === 'loading'
+                    ? 'Đang tải danh sách tài khoản...'
+                    : accountMessage}
+                </p>
+              )}
+            </section>
+          </section>
+        ) : (
+          <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 size-5 text-primary" />
+              <p className="text-sm leading-6 text-muted-foreground">
+                Tài khoản quản lý được phép upload và quản lý dữ liệu khách
+                hàng, nhưng không được tạo thêm tài khoản. Việc cấp quyền chỉ
+                nằm ở super admin.
+              </p>
+            </div>
+          </section>
+        )}
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_520px]">
           <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
@@ -457,8 +848,8 @@ export function AdminConsole({
               <div>
                 <h2 className="text-lg font-semibold">Role & permission</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Đăng ký chỉ tạo request. Quyền thật phải được duyệt và ghi ở
-                  server.
+                  Super admin tạo tài khoản. Server kiểm tra role ở mọi route và
+                  API quan trọng.
                 </p>
               </div>
               <ShieldCheck className="size-5 text-primary" />
@@ -488,9 +879,10 @@ export function AdminConsole({
           <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">Registration requests</h2>
+                <h2 className="text-lg font-semibold">Legacy requests</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Admin duyệt rồi mới gán email vào role hoặc client cụ thể.
+                  Chỉ dùng để xử lý request cũ nếu đã có trước khi tắt đăng ký
+                  tự do.
                 </p>
               </div>
               <Users className="size-5 text-primary" />
@@ -852,8 +1244,8 @@ export function AdminConsole({
             <CheckCircle2 className="mt-0.5 size-5 text-[#2f6f45]" />
             <p className="text-sm leading-6 text-[#326247]">
               Khách hàng không thể upload từ dashboard. Nếu họ gọi thẳng API
-              admin, backend vẫn kiểm tra session và allowlist admin trước khi
-              ghi R2/D1.
+              admin, backend vẫn kiểm tra session, role và quyền super admin
+              trước khi ghi R2/D1 hoặc tạo tài khoản.
             </p>
           </div>
         </section>

@@ -14,11 +14,11 @@ export default async function Home() {
       <AccessRequired
         badge="Client access required"
         email={user.email}
-        primaryHref="/register?type=client_access"
-        primaryLabel="Đăng ký quyền khách hàng"
-        reason={access.reason}
+        primaryHref="/login"
+        primaryLabel="Về trang đăng nhập"
+        reason={`${access.reason} Tài khoản khách hàng phải được super admin tạo và gán vào đúng client trước khi xem dashboard.`}
         secondaryHref="/login"
-        secondaryLabel="Về trang đăng nhập"
+        secondaryLabel="Kiểm tra lại"
         title="Dashboard khách hàng đang được bảo vệ"
       />
     );

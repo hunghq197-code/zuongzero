@@ -1,20 +1,14 @@
 /* eslint-disable next/no-html-link-for-pages */
-import {
-  Building2,
-  CheckCircle2,
-  KeyRound,
-  LockKeyhole,
-  ShieldCheck,
-} from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ArrowRight, KeyRound, LockKeyhole, ShieldCheck } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { getClientPortalAccess } from '@/lib/access-control';
 import { getAdminAccess } from '@/lib/admin-auth';
 import {
+  authProviderName,
   chatGPTSignInPath,
   chatGPTSignOutPath,
-  authProviderName,
   getChatGPTUser,
 } from '../chatgpt-auth';
 
@@ -23,160 +17,142 @@ export const dynamic = 'force-dynamic';
 export default async function LoginPage() {
   const user = await getChatGPTUser();
   const authProvider = authProviderName();
-  const adminAccess = user ? getAdminAccess(user.email) : null;
+  const adminAccess = user ? await getAdminAccess(user.email) : null;
   const clientAccess = user ? await getClientPortalAccess(user) : null;
+  const destination = resolveDestination({
+    adminAllowed: adminAccess?.allowed ?? false,
+    clientAllowed: clientAccess?.allowed ?? false,
+    hasUser: Boolean(user),
+    authProvider,
+  });
+  const status = resolveStatus({
+    adminRole: adminAccess?.allowed ? adminAccess.role : null,
+    clientAccessLevel: clientAccess?.allowed ? clientAccess.accessLevel : null,
+    hasUser: Boolean(user),
+  });
+  const buttonLabel = resolveButtonLabel({
+    adminRole: adminAccess?.allowed ? adminAccess.role : null,
+    clientAllowed: clientAccess?.allowed ?? false,
+    hasUser: Boolean(user),
+  });
 
   return (
-    <main className="min-h-screen bg-background px-5 py-8 text-foreground md:px-8">
-      <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col justify-center">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">
-              Secure access
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-normal md:text-4xl">
-              Đăng nhập dashboard royalty
-            </h1>
-          </div>
-          {user ? (
-            <Badge className="h-8 rounded-lg bg-primary/10 px-3 text-primary">
-              <KeyRound className="size-4" />
-              {user.email}
-            </Badge>
-          ) : null}
+    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-8 text-foreground md:px-8">
+      <section className="w-full max-w-[520px]">
+        <div className="mb-6">
+          <p className="text-sm font-medium text-muted-foreground">
+            Secure access
+          </p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-normal md:text-4xl">
+            Đăng nhập dashboard royalty
+          </h1>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <AuthCard
-            body="Khách hàng xem dashboard đã publish, không có quyền upload, sửa, replace hoặc publish dữ liệu."
-            ctaHref={user ? '/' : chatGPTSignInPath('/')}
-            ctaLabel={
-              user && clientAccess?.allowed
-                ? 'Vào dashboard khách hàng'
-                : user
-                  ? 'Kiểm tra quyền dashboard'
-                  : 'Đăng nhập khách hàng'
-            }
-            icon="client"
-            status={
-              user
-                ? clientAccess?.allowed
-                  ? `Đã có quyền ${clientAccess.accessLevel}`
-                  : 'Chưa được gán client'
-                : 'Cần đăng nhập'
-            }
-            title="Khách hàng"
-          />
-
-          <AuthCard
-            body="Admin quản lý khách hàng, upload file Excel theo tháng, kiểm tra dữ liệu và publish statement cho khách xem."
-            ctaHref={user ? '/admin' : chatGPTSignInPath('/admin')}
-            ctaLabel={
-              user && adminAccess?.allowed
-                ? 'Vào admin console'
-                : user
-                  ? 'Kiểm tra quyền admin'
-                  : 'Đăng nhập admin'
-            }
-            icon="admin"
-            status={
-              user
-                ? adminAccess?.allowed
-                  ? 'Có trong admin allowlist'
-                  : 'Chưa có quyền admin'
-                : 'Cần đăng nhập'
-            }
-            title="Admin"
-          />
-        </div>
-
-        <div className="mt-5 rounded-lg border border-border bg-card p-4 shadow-sm">
-          {user ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm leading-6 text-muted-foreground">
-                Tài khoản đã xác thực bằng {authProvider}. Nếu cần quyền khác,
-                gửi yêu cầu đăng ký để admin duyệt.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <a
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
-                  href="/register"
-                >
-                  Đăng ký quyền
-                </a>
-                <a
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
-                  href={chatGPTSignOutPath('/login')}
-                >
-                  Đăng xuất
-                </a>
-              </div>
+        <form
+          action={destination}
+          className="rounded-lg border border-border bg-card p-5 shadow-sm md:p-6"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <LockKeyhole className="size-5" />
             </div>
-          ) : (
-            <p className="text-sm leading-6 text-muted-foreground">
-              Hệ thống không dùng mật khẩu riêng trong MVP. Đăng nhập qua{' '}
-              {authProvider} trước, sau đó server kiểm tra role và client
-              assignment.
-            </p>
-          )}
-        </div>
+            <Badge className="rounded-lg" variant="outline">
+              {status}
+            </Badge>
+          </div>
+
+          <h2 className="mt-5 text-2xl font-semibold tracking-normal">
+            Một cổng đăng nhập
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Đăng nhập bằng {authProvider}. Sau khi xác thực, hệ thống kiểm tra
+            role phía server để đưa super admin, quản lý hoặc khách hàng vào
+            đúng khu vực.
+          </p>
+
+          {user ? (
+            <div className="mt-5 rounded-lg border border-border bg-background p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <KeyRound className="size-4 text-primary" />
+                {user.email}
+              </div>
+              {!adminAccess?.allowed && !clientAccess?.allowed ? (
+                <p className="mt-2 text-sm leading-6 text-[#a53a30]">
+                  Email này chưa được super admin cấp quyền truy cập dashboard.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <Button className="mt-5 h-10 w-full" type="submit">
+            <ShieldCheck className="size-4" />
+            {buttonLabel}
+            <ArrowRight className="size-4" />
+          </Button>
+        </form>
+
+        {user ? (
+          <a
+            className="mt-3 inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+            href={chatGPTSignOutPath('/login')}
+          >
+            Đăng xuất
+          </a>
+        ) : null}
       </section>
     </main>
   );
 }
 
-function AuthCard({
-  body,
-  ctaHref,
-  ctaLabel,
-  icon,
-  status,
-  title,
+function resolveDestination({
+  adminAllowed,
+  authProvider,
+  clientAllowed,
+  hasUser,
 }: {
-  body: string;
-  ctaHref: string;
-  ctaLabel: string;
-  icon: 'client' | 'admin';
-  status: string;
-  title: string;
+  adminAllowed: boolean;
+  authProvider: string;
+  clientAllowed: boolean;
+  hasUser: boolean;
 }) {
-  const Icon = icon === 'admin' ? ShieldCheck : Building2;
+  if (adminAllowed) return '/admin';
+  if (clientAllowed) return '/';
+  if (hasUser) return '/login';
+  if (authProvider === 'Cloudflare Access') return '/';
 
-  return (
-    <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Icon className="size-5" />
-        </div>
-        <Badge className="rounded-lg" variant="outline">
-          {status}
-        </Badge>
-      </div>
-      <h2 className="mt-5 text-2xl font-semibold tracking-normal">{title}</h2>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">{body}</p>
-      <CtaLink href={ctaHref}>
-        {icon === 'admin' ? (
-          <LockKeyhole className="size-4" />
-        ) : (
-          <CheckCircle2 className="size-4" />
-        )}
-        {ctaLabel}
-      </CtaLink>
-    </section>
-  );
+  return chatGPTSignInPath('/');
 }
 
-function CtaLink({ children, href }: { children: ReactNode; href: string }) {
-  const className =
-    'mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90';
+function resolveStatus({
+  adminRole,
+  clientAccessLevel,
+  hasUser,
+}: {
+  adminRole: 'super_admin' | 'admin' | null;
+  clientAccessLevel: 'admin' | 'owner' | 'viewer' | 'finance' | null;
+  hasUser: boolean;
+}) {
+  if (!hasUser) return 'Cần đăng nhập';
+  if (adminRole === 'super_admin') return 'Super admin';
+  if (adminRole === 'admin') return 'Quản lý';
+  if (clientAccessLevel) return `Khách hàng: ${clientAccessLevel}`;
 
-  return (
-    <a
-      className={className}
-      href={href}
-      target={href.startsWith('/signin-with-chatgpt') ? '_top' : undefined}
-    >
-      {children}
-    </a>
-  );
+  return 'Chưa được cấp quyền';
+}
+
+function resolveButtonLabel({
+  adminRole,
+  clientAllowed,
+  hasUser,
+}: {
+  adminRole: 'super_admin' | 'admin' | null;
+  clientAllowed: boolean;
+  hasUser: boolean;
+}) {
+  if (!hasUser) return 'Đăng nhập';
+  if (adminRole === 'super_admin') return 'Vào trang super admin';
+  if (adminRole === 'admin') return 'Vào trang quản lý';
+  if (clientAllowed) return 'Vào dashboard khách hàng';
+
+  return 'Kiểm tra lại quyền truy cập';
 }

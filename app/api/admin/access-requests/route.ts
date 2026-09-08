@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:workers';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { normalizeEmail } from '@/lib/access-control';
 import { getAdminAccess } from '@/lib/admin-auth';
+import { normalizeEmail } from '@/lib/identity';
 
 type AccessRequestRow = {
   id: string;
@@ -22,9 +22,16 @@ export async function GET() {
     return jsonError('Bạn cần đăng nhập trước khi xem yêu cầu.', 401);
   }
 
-  const access = getAdminAccess(user.email);
+  const access = await getAdminAccess(user.email);
   if (!access.allowed) {
     return jsonError(access.reason, access.status);
+  }
+
+  if (access.role !== 'super_admin') {
+    return jsonError(
+      'Chỉ super admin được xem và xử lý yêu cầu tạo quyền tài khoản.',
+      403,
+    );
   }
 
   if (!env.DB) {
