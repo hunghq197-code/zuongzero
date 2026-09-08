@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   chatGPTSignInPath,
   chatGPTSignOutPath,
+  authProviderName,
   getChatGPTUser,
 } from '../chatgpt-auth';
 
@@ -17,6 +18,7 @@ export default async function RegisterPage({
   searchParams?: { type?: string } | Promise<{ type?: string }>;
 }) {
   const user = await getChatGPTUser();
+  const authProvider = authProviderName();
   const params = await Promise.resolve(searchParams);
   const initialRequestType =
     params?.type === 'admin_access' ? 'admin_access' : 'client_access';
@@ -86,7 +88,7 @@ export default async function RegisterPage({
                     target="_top"
                   >
                     <ShieldCheck className="size-4" />
-                    Đăng nhập bằng ChatGPT
+                    Đăng nhập bằng {authProvider}
                   </a>
                 </div>
               </div>

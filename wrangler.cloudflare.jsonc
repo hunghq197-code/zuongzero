@@ -1,0 +1,33 @@
+{
+  "name": "royalty-dashboard",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "no_bundle": true,
+  "preview_urls": false,
+  "workers_dev": true,
+  "assets": {
+    "directory": "dist/client",
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "vars": {
+    "AUTH_PROVIDER": "cloudflare-access",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "royalty-dashboard-db",
+      "database_id": "84e8a77b-13b1-440e-bbdb-f3b7ef69055b",
+      "migrations_dir": "drizzle",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "royalty-dashboard-files",
+    },
+  ],
+  "rules": [{ "type": "ESModule", "globs": ["**/*.js", "**/*.mjs"] }],
+}

@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -13,6 +14,7 @@ const USER_EMAIL_HEADER = 'oai-authenticated-user-email';
 const USER_FULL_NAME_HEADER = 'oai-authenticated-user-full-name';
 const USER_FULL_NAME_ENCODING_HEADER =
   'oai-authenticated-user-full-name-encoding';
+const CLOUDFLARE_ACCESS_EMAIL_HEADER = 'cf-access-authenticated-user-email';
 const PERCENT_ENCODED_UTF8 = 'percent-encoded-utf-8';
 const SIGN_IN_PATH = '/signin-with-chatgpt';
 const SIGN_OUT_PATH = '/signout-with-chatgpt';
@@ -22,21 +24,37 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
-  if (!userId || !email) return null;
+  const accessEmail = requestHeaders.get(CLOUDFLARE_ACCESS_EMAIL_HEADER);
 
-  const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
-      ? safeDecodeURIComponent(encodedFullName)
-      : null;
+  if (userId && email) {
+    const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
+    const fullName =
+      encodedFullName &&
+      requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) ===
+        PERCENT_ENCODED_UTF8
+        ? safeDecodeURIComponent(encodedFullName)
+        : null;
 
-  return {
-    userId,
-    displayName: fullName ?? email,
-    email,
-    fullName,
-  };
+    return {
+      userId,
+      displayName: fullName ?? email,
+      email,
+      fullName,
+    };
+  }
+
+  if (isCloudflareAccessAuth() && accessEmail) {
+    const normalizedEmail = accessEmail.trim().toLowerCase();
+
+    return {
+      userId: `cloudflare-access:${normalizedEmail}`,
+      displayName: normalizedEmail,
+      email: normalizedEmail,
+      fullName: null,
+    };
+  }
+
+  return null;
 }
 
 export async function requireChatGPTUser(
@@ -50,12 +68,24 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
+  if (isCloudflareAccessAuth()) return safeReturnTo;
+
   return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function chatGPTSignOutPath(returnTo = '/'): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
+  if (isCloudflareAccessAuth()) return '/cdn-cgi/access/logout';
+
   return `${SIGN_OUT_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
+}
+
+export function authProviderName() {
+  return isCloudflareAccessAuth() ? 'Cloudflare Access' : 'ChatGPT';
+}
+
+function isCloudflareAccessAuth() {
+  return env.AUTH_PROVIDER === 'cloudflare-access';
 }
 
 function safeRelativeReturnPath(value: string): string {

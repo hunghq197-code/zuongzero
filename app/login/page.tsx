@@ -14,6 +14,7 @@ import { getAdminAccess } from '@/lib/admin-auth';
 import {
   chatGPTSignInPath,
   chatGPTSignOutPath,
+  authProviderName,
   getChatGPTUser,
 } from '../chatgpt-auth';
 
@@ -21,6 +22,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function LoginPage() {
   const user = await getChatGPTUser();
+  const authProvider = authProviderName();
   const adminAccess = user ? getAdminAccess(user.email) : null;
   const clientAccess = user ? await getClientPortalAccess(user) : null;
 
@@ -92,8 +94,8 @@ export default async function LoginPage() {
           {user ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm leading-6 text-muted-foreground">
-                Tài khoản đã xác thực bằng ChatGPT. Nếu cần quyền khác, gửi yêu
-                cầu đăng ký để admin duyệt.
+                Tài khoản đã xác thực bằng {authProvider}. Nếu cần quyền khác,
+                gửi yêu cầu đăng ký để admin duyệt.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Link
@@ -112,8 +114,9 @@ export default async function LoginPage() {
             </div>
           ) : (
             <p className="text-sm leading-6 text-muted-foreground">
-              Hệ thống không dùng mật khẩu riêng trong MVP. Đăng nhập bằng
-              ChatGPT trước, sau đó server kiểm tra role và client assignment.
+              Hệ thống không dùng mật khẩu riêng trong MVP. Đăng nhập qua{' '}
+              {authProvider} trước, sau đó server kiểm tra role và client
+              assignment.
             </p>
           )}
         </div>
