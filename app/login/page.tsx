@@ -1,3 +1,4 @@
+/* eslint-disable next/no-html-link-for-pages */
 import {
   Building2,
   CheckCircle2,
@@ -5,7 +6,6 @@ import {
   LockKeyhole,
   ShieldCheck,
 } from 'lucide-react';
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -98,12 +98,12 @@ export default async function LoginPage() {
                 gửi yêu cầu đăng ký để admin duyệt.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Link
+                <a
                   className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
                   href="/register"
                 >
                   Đăng ký quyền
-                </Link>
+                </a>
                 <a
                   className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
                   href={chatGPTSignOutPath('/login')}
@@ -170,17 +170,13 @@ function CtaLink({ children, href }: { children: ReactNode; href: string }) {
   const className =
     'mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90';
 
-  if (href.startsWith('/signin-with-chatgpt')) {
-    return (
-      <a className={className} href={href} target="_top">
-        {children}
-      </a>
-    );
-  }
-
   return (
-    <Link className={className} href={href}>
+    <a
+      className={className}
+      href={href}
+      target={href.startsWith('/signin-with-chatgpt') ? '_top' : undefined}
+    >
       {children}
-    </Link>
+    </a>
   );
 }

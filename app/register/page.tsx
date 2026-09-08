@@ -1,5 +1,5 @@
+/* eslint-disable next/no-html-link-for-pages */
 import { ClipboardCheck, ShieldCheck } from 'lucide-react';
-import Link from 'next/link';
 
 import { RegistrationForm } from '@/components/registration-form';
 import { Badge } from '@/components/ui/badge';
@@ -40,12 +40,12 @@ export default async function RegisterPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link
+            <a
               className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
               href="/login"
             >
               Login
-            </Link>
+            </a>
             {user ? (
               <a
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
