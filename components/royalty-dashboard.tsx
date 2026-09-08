@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   CheckCircle2,
+  Coins,
   Database,
   Eye,
   Filter,
@@ -11,6 +12,7 @@ import {
   KeyRound,
   LockKeyhole,
   ShieldCheck,
+  TrendingUp,
   Users,
 } from 'lucide-react';
 
@@ -33,13 +35,15 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  breakdownSections,
+  breakdownsByCurrency,
   clients,
-  configurations,
-  metrics,
   periods,
-  sources,
-  territories,
+  revenueTrend,
   type BreakdownItem,
+  type BreakdownKey,
+  type BreakdownSection,
+  type CurrencyCode,
   type StatementMetric,
 } from '@/lib/dashboard-data';
 
@@ -68,7 +72,7 @@ declare global {
 
 const palette = [
   '#4b9db0',
-  '#f5b642',
+  '#f0b33f',
   '#4f6a8b',
   '#d95d52',
   '#24a37d',
@@ -77,6 +81,8 @@ const palette = [
   '#d67ba8',
   '#35424a',
 ];
+
+const currencies: CurrencyCode[] = ['USD', 'VND'];
 
 const toneClass: Record<StatementMetric['tone'], string> = {
   ink: 'bg-[#27313a] text-white',
@@ -87,11 +93,16 @@ const toneClass: Record<StatementMetric['tone'], string> = {
   violet: 'bg-[#7a67ad] text-white',
 };
 
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('en-US', {
+function formatMoney(value: number, currency: CurrencyCode) {
+  return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency,
+    maximumFractionDigits: currency === 'VND' ? 0 : 2,
   }).format(value);
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('en-US').format(value);
 }
 
 function statusLabel(status: string) {
@@ -100,21 +111,69 @@ function statusLabel(status: string) {
   return 'Validating';
 }
 
+function makeMetrics(
+  activePeriod: (typeof periods)[number],
+): StatementMetric[] {
+  return [
+    {
+      label: 'Opening Balance',
+      value: formatMoney(activePeriod.opening, activePeriod.currency),
+      helper: 'Số dư đầu kỳ đã khóa',
+      tone: 'ink',
+    },
+    {
+      label: 'Net Payable',
+      value: formatMoney(activePeriod.revenue, activePeriod.currency),
+      helper: 'Từ cột Net Payable',
+      tone: 'blue',
+    },
+    {
+      label: 'Units',
+      value: formatNumber(activePeriod.units),
+      helper: 'Tổng Units của kỳ',
+      tone: 'violet',
+    },
+    {
+      label: 'Source Rows',
+      value: formatNumber(activePeriod.rowCount),
+      helper: 'Dòng dữ liệu đã import',
+      tone: 'amber',
+    },
+    {
+      label: 'Net Costs',
+      value: formatMoney(activePeriod.costs, activePeriod.currency),
+      helper: 'Chưa có cột cost trong file mẫu',
+      tone: 'rose',
+    },
+    {
+      label: 'Closing Balance',
+      value: formatMoney(activePeriod.closing, activePeriod.currency),
+      helper: 'Opening + payable - costs',
+      tone: 'teal',
+    },
+  ];
+}
+
 export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
   const assignedClient = clients[0];
-  const [selectedPeriod, setSelectedPeriod] = useState(periods[0].id);
-  const [activeTab, setActiveTab] = useState<
-    'sources' | 'configurations' | 'territories'
-  >('sources');
+  const months = useMemo(
+    () => Array.from(new Set(periods.map((period) => period.period))),
+    [],
+  );
+  const [selectedMonth, setSelectedMonth] = useState(months[0]);
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>('USD');
+  const [activeTab, setActiveTab] = useState<BreakdownKey>('sources');
 
   const activePeriod =
-    periods.find((period) => period.id === selectedPeriod) ?? periods[0];
-  const activeBreakdown = useMemo(() => {
-    if (activeTab === 'configurations') return configurations;
-    if (activeTab === 'territories') return territories;
-    return sources;
-  }, [activeTab]);
-  const activeChartType = activeTab === 'configurations' ? 'pie' : 'bar';
+    periods.find(
+      (period) =>
+        period.period === selectedMonth && period.currency === selectedCurrency,
+    ) ?? periods[0];
+  const metrics = useMemo(() => makeMetrics(activePeriod), [activePeriod]);
+  const activeSection =
+    breakdownSections.find((section) => section.id === activeTab) ??
+    breakdownSections[0];
+  const activeBreakdown = breakdownsByCurrency[selectedCurrency][activeTab];
 
   useEffect(() => {
     const context =
@@ -126,19 +185,23 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
     void Promise.resolve(
       context.registerTool(
         {
-          name: 'select_statement_period',
-          title: 'Select statement period',
+          name: 'select_statement_scope',
+          title: 'Select statement scope',
           description:
-            'Select the visible read-only reporting period in the client royalty dashboard.',
+            'Select the visible read-only reporting month and currency in the client royalty dashboard.',
           inputSchema: {
             type: 'object',
             properties: {
-              periodId: {
+              month: {
                 type: 'string',
-                enum: periods.map((period) => period.id),
+                enum: months,
+              },
+              currency: {
+                type: 'string',
+                enum: currencies,
               },
             },
-            required: ['periodId'],
+            required: ['month', 'currency'],
             additionalProperties: false,
           },
           annotations: {
@@ -146,10 +209,12 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
             untrustedContentHint: false,
           },
           execute(input: unknown) {
-            const parsed = parsePeriodInput(input);
-            setSelectedPeriod(parsed.periodId);
+            const parsed = parseScopeInput(input, months);
+            setSelectedMonth(parsed.month);
+            setSelectedCurrency(parsed.currency);
             return {
-              periodId: parsed.periodId,
+              month: parsed.month,
+              currency: parsed.currency,
               status: 'selected',
             };
           },
@@ -159,7 +224,7 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
     ).catch(() => undefined);
 
     return () => lifecycle.abort();
-  }, []);
+  }, [months]);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -240,7 +305,7 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                   </Badge>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-[220px_170px_minmax(0,1fr)]">
+                <div className="grid gap-3 md:grid-cols-[180px_150px_160px_minmax(0,1fr)]">
                   <div className="space-y-2">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       <Filter className="size-4 text-primary" />
@@ -248,9 +313,9 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                     </span>
                     <Select
                       onValueChange={(value) => {
-                        if (value) setSelectedPeriod(value);
+                        if (value) setSelectedMonth(value);
                       }}
-                      value={selectedPeriod}
+                      value={selectedMonth}
                     >
                       <SelectTrigger
                         aria-label="Tháng báo cáo"
@@ -259,9 +324,43 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {periods.map((period) => (
-                          <SelectItem key={period.id} value={period.id}>
-                            {period.label}
+                        {months.map((month) => {
+                          const label =
+                            periods.find((period) => period.period === month)
+                              ?.label ?? month;
+                          return (
+                            <SelectItem key={month} value={month}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                      <Coins className="size-4 text-primary" />
+                      Currency
+                    </span>
+                    <Select
+                      onValueChange={(value) => {
+                        if (value === 'USD' || value === 'VND') {
+                          setSelectedCurrency(value);
+                        }
+                      }}
+                      value={selectedCurrency}
+                    >
+                      <SelectTrigger
+                        aria-label="Loại tiền"
+                        className="h-10 w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currencies.map((currency) => (
+                          <SelectItem key={currency} value={currency}>
+                            {currency}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -283,7 +382,7 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                       Quyền truy cập
                     </span>
                     <div className="flex min-h-10 items-center rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground">
-                      Chỉ xem dữ liệu đã publish cho tài khoản được gán client.
+                      Khách chỉ xem dữ liệu đã publish cho client được gán.
                     </div>
                   </div>
                 </div>
@@ -299,9 +398,8 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                       Không có quyền upload
                     </h2>
                     <p className="mt-1 text-sm leading-6 text-[#326247]">
-                      File Excel, mapping dữ liệu và publish statement chỉ nằm
-                      trong khu admin riêng. Portal này không có nút ghi dữ
-                      liệu.
+                      File Excel và dữ liệu raw chỉ nằm trong khu admin. Portal
+                      này chỉ render số đã tổng hợp theo tháng và currency.
                     </p>
                   </div>
                 </div>
@@ -326,40 +424,21 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-              <Tabs
-                className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5"
-                onValueChange={(value) =>
-                  setActiveTab(
-                    value as 'sources' | 'configurations' | 'territories',
-                  )
-                }
-                value={activeTab}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold">
-                      Phân tích doanh thu
-                    </h2>
+                    <h2 className="text-lg font-semibold">Monthly trend</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Dữ liệu đã được admin import và publish.
+                      Tách USD và VND, không cộng lẫn khi chưa có FX mapping.
                     </p>
                   </div>
-                  <TabsList className="h-9">
-                    <TabsTrigger value="sources">Sources</TabsTrigger>
-                    <TabsTrigger value="configurations">
-                      Configurations
-                    </TabsTrigger>
-                    <TabsTrigger value="territories">Territories</TabsTrigger>
-                  </TabsList>
+                  <TrendingUp className="size-5 text-primary" />
                 </div>
-
-                <TabsContent className="mt-5" value={activeTab}>
-                  <BreakdownChart
-                    chartType={activeChartType}
-                    data={activeBreakdown}
-                  />
-                </TabsContent>
-              </Tabs>
+                <RevenueTrendChart
+                  currency={selectedCurrency}
+                  data={revenueTrend}
+                />
+              </section>
 
               <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
                 <div className="flex items-start gap-3">
@@ -369,31 +448,63 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                       Statement mới nhất
                     </h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Các kỳ hiển thị ở đây chỉ là những kỳ đã publish cho
-                      client.
+                      Mỗi tháng có statement riêng theo từng currency.
                     </p>
                   </div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {periods.slice(0, 4).map((period) => (
+                  {periods.slice(0, 6).map((period) => (
                     <div
                       className="rounded-lg border border-border bg-background px-3 py-3"
                       key={period.id}
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">{period.label}</p>
+                        <p className="text-sm font-medium">
+                          {period.label} - {period.currency}
+                        </p>
                         <Badge className="rounded-lg" variant="outline">
                           {statusLabel(period.status)}
                         </Badge>
                       </div>
                       <p className="mt-2 text-xl font-semibold">
-                        {formatMoney(period.closing)}
+                        {formatMoney(period.closing, period.currency)}
                       </p>
                     </div>
                   ))}
                 </div>
               </section>
             </section>
+
+            <Tabs
+              className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5"
+              onValueChange={(value) => setActiveTab(value as BreakdownKey)}
+              value={activeTab}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Phân tích doanh thu</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Biểu đồ được bố trí theo các cột có trong file mẫu.
+                  </p>
+                </div>
+                <TabsList className="h-auto flex-wrap justify-start">
+                  {breakdownSections.map((section) => (
+                    <TabsTrigger key={section.id} value={section.id}>
+                      {section.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+
+              <TabsContent className="mt-5" value={activeTab}>
+                <BreakdownChart
+                  chartType={activeSection.chartType}
+                  currency={selectedCurrency}
+                  data={activeBreakdown}
+                  section={activeSection}
+                />
+              </TabsContent>
+            </Tabs>
 
             <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -411,10 +522,10 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Period</TableHead>
-                    <TableHead>Opening</TableHead>
-                    <TableHead>Revenue</TableHead>
-                    <TableHead>Costs</TableHead>
-                    <TableHead>Closing</TableHead>
+                    <TableHead>Currency</TableHead>
+                    <TableHead>Rows</TableHead>
+                    <TableHead>Units</TableHead>
+                    <TableHead>Net Payable</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -422,12 +533,14 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
                   {periods.map((period) => (
                     <TableRow key={period.id}>
                       <TableCell className="font-medium">
-                        {period.label}: {period.currency} - {period.clientName}
+                        {period.label}: {period.clientName}
                       </TableCell>
-                      <TableCell>{formatMoney(period.opening)}</TableCell>
-                      <TableCell>{formatMoney(period.revenue)}</TableCell>
-                      <TableCell>{formatMoney(period.costs)}</TableCell>
-                      <TableCell>{formatMoney(period.closing)}</TableCell>
+                      <TableCell>{period.currency}</TableCell>
+                      <TableCell>{formatNumber(period.rowCount)}</TableCell>
+                      <TableCell>{formatNumber(period.units)}</TableCell>
+                      <TableCell>
+                        {formatMoney(period.revenue, period.currency)}
+                      </TableCell>
                       <TableCell>
                         <Badge className="rounded-lg" variant="outline">
                           {statusLabel(period.status)}
@@ -445,71 +558,146 @@ export function RoyaltyDashboard({ userEmail }: { userEmail: string }) {
   );
 }
 
-function parsePeriodInput(input: unknown) {
+function parseScopeInput(input: unknown, months: string[]) {
   if (!input || typeof input !== 'object') {
     throw new Error('Input must be an object.');
   }
 
-  const candidate = input as { periodId?: unknown };
+  const candidate = input as {
+    month?: unknown;
+    currency?: unknown;
+  };
   if (
-    typeof candidate.periodId !== 'string' ||
-    !periods.some((period) => period.id === candidate.periodId)
+    typeof candidate.month !== 'string' ||
+    !months.includes(candidate.month)
   ) {
-    throw new Error('Invalid periodId.');
+    throw new Error('Invalid month.');
+  }
+  if (candidate.currency !== 'USD' && candidate.currency !== 'VND') {
+    throw new Error('Invalid currency.');
   }
 
   return {
-    periodId: candidate.periodId,
+    month: candidate.month,
+    currency: candidate.currency as CurrencyCode,
   };
 }
 
 function BreakdownChart({
   data,
   chartType,
+  currency,
+  section,
 }: {
   data: BreakdownItem[];
-  chartType: 'bar' | 'pie';
+  chartType: BreakdownSection['chartType'];
+  currency: CurrencyCode;
+  section: BreakdownSection;
 }) {
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="h-[340px] min-w-0 rounded-lg border border-border bg-background p-3">
-        {chartType === 'pie' ? (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_430px]">
+      <div className="min-h-[360px] min-w-0 rounded-lg border border-border bg-background p-3">
+        {chartType === 'donut' ? (
           <DonutChart data={data} />
+        ) : chartType === 'ranked' ? (
+          <RankedBreakdown currency={currency} data={data} />
         ) : (
-          <BarBreakdown data={data} />
+          <BarBreakdown currency={currency} data={data} />
         )}
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Type</TableHead>
-            <TableHead>Value</TableHead>
-            <TableHead>%</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.map((item) => (
-            <TableRow key={item.name}>
-              <TableCell className="font-medium">{item.name}</TableCell>
-              <TableCell>{formatMoney(item.value)}</TableCell>
-              <TableCell>{item.percentage.toFixed(2)}%</TableCell>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="border-b border-border bg-muted/35 px-4 py-3">
+          <p className="text-sm font-semibold">{section.label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Source column: {section.sourceColumn}
+          </p>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Type</TableHead>
+              <TableHead>Value</TableHead>
+              <TableHead>Units</TableHead>
+              <TableHead>%</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {data.map((item) => (
+              <TableRow key={item.name}>
+                <TableCell className="font-medium">{item.name}</TableCell>
+                <TableCell>{formatMoney(item.value, currency)}</TableCell>
+                <TableCell>{formatNumber(item.units)}</TableCell>
+                <TableCell>{item.percentage.toFixed(2)}%</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
 
-function BarBreakdown({ data }: { data: BreakdownItem[] }) {
-  const maxValue = Math.max(...data.map((item) => item.value));
+function RevenueTrendChart({
+  data,
+  currency,
+}: {
+  data: typeof revenueTrend;
+  currency: CurrencyCode;
+}) {
+  const values = data.map((item) => (currency === 'USD' ? item.usd : item.vnd));
+  const maxValue = Math.max(...values, 1);
 
   return (
-    <div className="grid h-full grid-cols-[44px_minmax(0,1fr)] gap-3">
+    <div className="grid h-[330px] grid-cols-[56px_minmax(0,1fr)] gap-3">
       <div className="flex flex-col justify-between border-r border-border pr-2 text-right text-xs text-muted-foreground">
         {[100, 75, 50, 25, 0].map((tick) => (
-          <span key={tick}>{tick}</span>
+          <span key={tick}>{tick}%</span>
+        ))}
+      </div>
+      <div className="flex min-w-0 items-end gap-3 overflow-hidden pb-3">
+        {data.map((item, index) => {
+          const value = currency === 'USD' ? item.usd : item.vnd;
+          return (
+            <div
+              className="flex min-w-0 flex-1 flex-col items-center gap-2"
+              key={item.period}
+            >
+              <div className="flex h-[250px] w-full items-end border-b border-border">
+                <div
+                  aria-label={`${item.label}: ${formatMoney(value, currency)}`}
+                  className="w-full rounded-t-md"
+                  style={{
+                    backgroundColor: palette[index % palette.length],
+                    height: `${Math.max(4, (value / maxValue) * 100)}%`,
+                  }}
+                />
+              </div>
+              <span className="w-full truncate text-center text-xs text-muted-foreground">
+                {item.label.replace('202', "'2")}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BarBreakdown({
+  data,
+  currency,
+}: {
+  data: BreakdownItem[];
+  currency: CurrencyCode;
+}) {
+  const maxValue = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div className="grid h-[330px] grid-cols-[48px_minmax(0,1fr)] gap-3">
+      <div className="flex flex-col justify-between border-r border-border pr-2 text-right text-xs text-muted-foreground">
+        {[100, 75, 50, 25, 0].map((tick) => (
+          <span key={tick}>{tick}%</span>
         ))}
       </div>
       <div className="flex min-w-0 items-end gap-2 overflow-hidden pb-3">
@@ -518,9 +706,9 @@ function BarBreakdown({ data }: { data: BreakdownItem[] }) {
             className="flex min-w-0 flex-1 flex-col items-center gap-2"
             key={item.name}
           >
-            <div className="flex h-[270px] w-full items-end border-b border-border">
+            <div className="flex h-[250px] w-full items-end border-b border-border">
               <div
-                aria-label={`${item.name}: ${formatMoney(item.value)}`}
+                aria-label={`${item.name}: ${formatMoney(item.value, currency)}`}
                 className="w-full rounded-t-md"
                 style={{
                   backgroundColor: palette[index % palette.length],
@@ -538,6 +726,43 @@ function BarBreakdown({ data }: { data: BreakdownItem[] }) {
   );
 }
 
+function RankedBreakdown({
+  data,
+  currency,
+}: {
+  data: BreakdownItem[];
+  currency: CurrencyCode;
+}) {
+  const maxValue = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div className="flex h-full min-h-[330px] flex-col justify-center gap-3">
+      {data.map((item, index) => (
+        <div className="grid gap-2" key={item.name}>
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0 truncate text-sm font-medium">
+              {item.name}
+            </span>
+            <span className="shrink-0 text-sm text-muted-foreground">
+              {formatMoney(item.value, currency)}
+            </span>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-muted">
+            <div
+              aria-label={`${item.name}: ${item.percentage.toFixed(2)}%`}
+              className="h-full rounded-full"
+              style={{
+                backgroundColor: palette[index % palette.length],
+                width: `${Math.max(4, (item.value / maxValue) * 100)}%`,
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DonutChart({ data }: { data: BreakdownItem[] }) {
   const stops = data
     .map((item, index) => {
@@ -551,13 +776,26 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
     .join(', ');
 
   return (
-    <div className="flex h-full items-center justify-center">
+    <div className="flex h-full min-h-[330px] flex-col items-center justify-center gap-4">
       <div
-        aria-label="Configuration revenue share"
+        aria-label="Revenue share"
         className="relative size-[230px] rounded-full"
         style={{ background: `conic-gradient(${stops})` }}
       >
         <div className="absolute inset-[64px] rounded-full border border-border bg-background" />
+      </div>
+      <div className="grid w-full gap-2 sm:grid-cols-2">
+        {data.map((item, index) => (
+          <div className="flex min-w-0 items-center gap-2" key={item.name}>
+            <span
+              className="size-3 shrink-0 rounded-sm"
+              style={{ backgroundColor: palette[index % palette.length] }}
+            />
+            <span className="truncate text-xs text-muted-foreground">
+              {item.name} - {item.percentage.toFixed(2)}%
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

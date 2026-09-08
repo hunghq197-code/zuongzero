@@ -15,6 +15,13 @@
       "when": 1788850058909,
       "tag": "0001_slim_skaar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788854802317,
+      "tag": "0002_useful_the_captain",
+      "breakpoints": true
     }
   ]
 }

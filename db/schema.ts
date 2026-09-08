@@ -91,9 +91,10 @@ export const reportPeriods = sqliteTable(
     updatedAt: text('updated_at').notNull(),
   },
   (table) => [
-    uniqueIndex('idx_report_periods_unique_client_period').on(
+    uniqueIndex('idx_report_periods_unique_client_period_currency').on(
       table.clientId,
       table.period,
+      table.currency,
     ),
     index('idx_report_periods_client_period').on(table.clientId, table.period),
     index('idx_report_periods_status').on(table.status),
@@ -152,6 +153,8 @@ export const statements = sqliteTable(
     reservesWithheld: real('reserves_withheld').notNull(),
     reservesReleased: real('reserves_released').notNull(),
     closingBalance: real('closing_balance').notNull(),
+    units: integer('units').notNull().default(0),
+    rowCount: integer('row_count').notNull().default(0),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -175,11 +178,23 @@ export const revenueBreakdowns = sqliteTable(
       .notNull()
       .references(() => reportPeriods.id),
     dimension: text('dimension', {
-      enum: ['channel', 'configuration', 'territory', 'source', 'sub_source'],
+      enum: [
+        'channel',
+        'configuration',
+        'territory',
+        'source',
+        'sub_source',
+        'track',
+        'artist',
+        'release',
+        'label',
+      ],
     }).notNull(),
     label: text('label').notNull(),
     value: real('value').notNull(),
     percentage: real('percentage').notNull(),
+    units: integer('units').notNull().default(0),
+    rowCount: integer('row_count').notNull().default(0),
     createdAt: text('created_at').notNull(),
   },
   (table) => [

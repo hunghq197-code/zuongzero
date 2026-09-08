@@ -36,3 +36,5 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/.codex_xlrd/
+.codex-dashboard-dev.*.log

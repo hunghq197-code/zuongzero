@@ -36,22 +36,17 @@ import {
   clients,
   periods,
   uploadChecks,
+  type CurrencyCode,
   type StatementPeriod,
 } from '@/lib/dashboard-data';
 
-const adminMonths = [
-  '2026-06',
-  '2026-05',
-  '2026-04',
-  '2026-03',
-  '2026-02',
-  '2026-01',
-];
+const adminMonths = Array.from(new Set(periods.map((period) => period.period)));
 
-function formatMoney(value: number) {
-  return new Intl.NumberFormat('en-US', {
+function formatMoney(value: number, currency: CurrencyCode = 'USD') {
+  return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency,
+    maximumFractionDigits: currency === 'VND' ? 0 : 2,
   }).format(value);
 }
 
@@ -221,7 +216,7 @@ export function AdminConsole({
                     <TableHead>Viewer email</TableHead>
                     <TableHead>Latest</TableHead>
                     <TableHead>Months</TableHead>
-                    <TableHead>Total</TableHead>
+                    <TableHead>Revenue</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -237,7 +232,16 @@ export function AdminConsole({
                       <TableCell>{client.viewerEmail}</TableCell>
                       <TableCell>{client.latestPeriod}</TableCell>
                       <TableCell>{client.uploadedMonths}</TableCell>
-                      <TableCell>{formatMoney(client.totalRevenue)}</TableCell>
+                      <TableCell>
+                        <span className="block">
+                          {formatMoney(client.totalRevenue, 'USD')}
+                        </span>
+                        {'secondaryRevenue' in client ? (
+                          <span className="text-xs text-muted-foreground">
+                            {formatMoney(client.secondaryRevenue, 'VND')}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <Badge className="rounded-lg" variant="outline">
                           {client.status}
@@ -278,7 +282,8 @@ export function AdminConsole({
               <div>
                 <h2 className="text-lg font-semibold">Upload dữ liệu tháng</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  File gốc lưu riêng tư, dashboard chỉ nhận dữ liệu đã publish.
+                  File gốc lưu riêng tư, dashboard chỉ nhận aggregate đã
+                  publish.
                 </p>
               </div>
               <FileSpreadsheet className="size-6 text-primary" />
@@ -466,8 +471,12 @@ export function AdminConsole({
                         <TableCell className="font-medium">
                           {periodLabel(period)}
                         </TableCell>
-                        <TableCell>{formatMoney(period.revenue)}</TableCell>
-                        <TableCell>{formatMoney(period.closing)}</TableCell>
+                        <TableCell>
+                          {formatMoney(period.revenue, period.currency)}
+                        </TableCell>
+                        <TableCell>
+                          {formatMoney(period.closing, period.currency)}
+                        </TableCell>
                         <TableCell>
                           <Badge className="rounded-lg" variant="outline">
                             {period.status}
@@ -485,7 +494,8 @@ export function AdminConsole({
                   <div>
                     <h3 className="font-semibold">Upload controls</h3>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      Những rule này chạy lại ở backend, không tin vào UI.
+                      Những rule này chạy lại ở backend. File .xls mẫu chỉ dùng
+                      để phân tích bố cục, không mở upload production.
                     </p>
                   </div>
                 </div>

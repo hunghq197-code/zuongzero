@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   }
 
   const uploadId = crypto.randomUUID();
-  const reportPeriodId = `${selectedClient.id}:${period}`;
+  const reportPeriodId = `${selectedClient.id}:${period}:staging`;
   const now = new Date().toISOString();
   const buffer = await file.arrayBuffer();
   const sha256 = await hashBuffer(buffer);
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     ),
     env.DB.prepare(
       `INSERT INTO report_periods (id, client_id, period, currency, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'USD', 'validating', ?, ?)
+       VALUES (?, ?, ?, 'MULTI', 'validating', ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          status = 'validating',
          updated_at = excluded.updated_at`,
@@ -130,6 +130,21 @@ export async function POST(request: Request) {
       JSON.stringify({
         fileType: 'xlsx',
         signature: 'zip',
+        expectedColumns: [
+          'Source',
+          'Territory',
+          'Track Title',
+          'ISRC',
+          'Release Title',
+          'Track Artist',
+          'Release Label',
+          'Configuration',
+          'Units',
+          'Net Payable',
+          'Sale Date',
+          'Currency',
+        ],
+        currencyPolicy: 'split-by-currency-before-publish',
         malwareScan: 'pending',
         importStatus: 'awaiting-server-parser',
       }),
