@@ -1,12 +1,14 @@
 import { env } from 'cloudflare:workers';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { getAdminAccess } from '@/lib/admin-auth';
+import { clients } from '@/lib/dashboard-data';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const ALLOWED_MIME_TYPES = new Set([XLSX_MIME, 'application/octet-stream']);
-const LOCAL_PREVIEW_DOMAIN = '@sites.test';
+const PERIOD_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 
 export const dynamic = 'force-dynamic';
 
@@ -16,9 +18,9 @@ export async function POST(request: Request) {
     return jsonError('Bạn cần đăng nhập trước khi upload.', 401);
   }
 
-  const adminCheck = authorizeAdminUpload(user.email);
-  if (!adminCheck.ok) {
-    return jsonError(adminCheck.reason, adminCheck.status);
+  const adminAccess = getAdminAccess(user.email);
+  if (!adminAccess.allowed) {
+    return jsonError(adminAccess.reason, adminAccess.status);
   }
 
   if (!env.DB || !env.FILES) {
@@ -28,9 +30,16 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const file = formData.get('file');
   const clientId = readRequiredText(formData, 'clientId');
-  const clientName = readRequiredText(formData, 'clientName');
-  const clientCode = readRequiredText(formData, 'clientCode');
   const period = readRequiredText(formData, 'period');
+  const selectedClient = clients.find((client) => client.id === clientId);
+
+  if (!selectedClient) {
+    return jsonError('Client không hợp lệ hoặc chưa được admin quản lý.', 400);
+  }
+
+  if (!PERIOD_PATTERN.test(period)) {
+    return jsonError('Kỳ báo cáo phải có dạng YYYY-MM.', 400);
+  }
 
   if (!(file instanceof File)) {
     return jsonError('Thiếu file Excel.', 400);
@@ -42,18 +51,18 @@ export async function POST(request: Request) {
   }
 
   const uploadId = crypto.randomUUID();
-  const reportPeriodId = `${clientId}:${period}`;
+  const reportPeriodId = `${selectedClient.id}:${period}`;
   const now = new Date().toISOString();
   const buffer = await file.arrayBuffer();
   const sha256 = await hashBuffer(buffer);
-  const objectKey = `clients/${clientId}/periods/${period}/uploads/${uploadId}.xlsx`;
+  const objectKey = `clients/${selectedClient.id}/periods/${period}/uploads/${uploadId}.xlsx`;
 
   await env.FILES.put(objectKey, buffer, {
     httpMetadata: {
       contentType: XLSX_MIME,
     },
     customMetadata: {
-      clientId,
+      clientId: selectedClient.id,
       period,
       sha256,
       uploadedBy: user.userId,
@@ -74,16 +83,24 @@ export async function POST(request: Request) {
       `INSERT INTO clients (id, code, legal_name, display_name, default_currency, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'USD', 'active', ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         legal_name = excluded.legal_name,
          display_name = excluded.display_name,
          updated_at = excluded.updated_at`,
-    ).bind(clientId, clientCode, clientName, clientName, now, now),
+    ).bind(
+      selectedClient.id,
+      selectedClient.code,
+      selectedClient.legalName,
+      selectedClient.name,
+      now,
+      now,
+    ),
     env.DB.prepare(
       `INSERT INTO report_periods (id, client_id, period, currency, status, created_at, updated_at)
        VALUES (?, ?, ?, 'USD', 'validating', ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          status = 'validating',
          updated_at = excluded.updated_at`,
-    ).bind(reportPeriodId, clientId, period, now, now),
+    ).bind(reportPeriodId, selectedClient.id, period, now, now),
     env.DB.prepare(
       `INSERT INTO uploads (
          id,
@@ -102,7 +119,7 @@ export async function POST(request: Request) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)`,
     ).bind(
       uploadId,
-      clientId,
+      selectedClient.id,
       reportPeriodId,
       user.userId,
       file.name,
@@ -129,11 +146,11 @@ export async function POST(request: Request) {
          metadata,
          created_at
        )
-       VALUES (?, ?, ?, 'statement_upload_received', 'upload', ?, ?, ?)`,
+       VALUES (?, ?, ?, 'admin_statement_upload_received', 'upload', ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
       user.userId,
-      clientId,
+      selectedClient.id,
       uploadId,
       JSON.stringify({
         period,
@@ -149,44 +166,13 @@ export async function POST(request: Request) {
     uploadId,
     status: 'uploaded',
     message:
-      'File đã được lưu riêng tư. Bước tiếp theo là parser Excel và malware scan trước khi import.',
+      'File đã được lưu riêng tư cho client/tháng đã chọn. Parser server sẽ xử lý trước khi publish lên dashboard khách hàng.',
   });
 }
 
 function readRequiredText(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function authorizeAdminUpload(
-  email: string,
-): { ok: true } | { ok: false; reason: string; status: number } {
-  const configuredAdmins = (env.ADMIN_EMAILS ?? '')
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-
-  if (configuredAdmins.length === 0) {
-    if (email.toLowerCase().endsWith(LOCAL_PREVIEW_DOMAIN)) {
-      return { ok: true };
-    }
-
-    return {
-      ok: false,
-      reason: 'Upload đang bị khóa vì production chưa cấu hình ADMIN_EMAILS.',
-      status: 503,
-    };
-  }
-
-  if (!configuredAdmins.includes(email.toLowerCase())) {
-    return {
-      ok: false,
-      reason: 'Tài khoản này chưa nằm trong admin allowlist.',
-      status: 403,
-    };
-  }
-
-  return { ok: true };
 }
 
 async function validateWorkbookFile(
