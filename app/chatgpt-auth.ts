@@ -68,7 +68,9 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  if (isCloudflareAccessAuth()) return safeReturnTo;
+  if (isCloudflareAccessAuth()) {
+    return `/login?return_to=${encodeURIComponent(safeReturnTo)}`;
+  }
 
   return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
