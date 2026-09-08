@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX `idx_client_users_unique_client_user` ON `client_users` (`client_id`,`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_report_periods_unique_client_period` ON `report_periods` (`client_id`,`period`);
