@@ -72,14 +72,12 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 - Worker production: `royalty-dashboard`.
 - URL production chinh: https://artistportal.zuongzeroent.com
-- URL Sites fallback: https://zuong-zero-royalty-dashboard.hung-hq197.chatgpt.site
 - D1 database: `royalty-dashboard-db`.
 - R2 bucket: `royalty-dashboard-files`.
 - Cau hinh deploy nam trong `wrangler.cloudflare.jsonc`.
 - Lenh build: `npm run build`.
 - Lenh deploy: `npx wrangler deploy --config wrangler.cloudflare.jsonc`.
-- Custom domain `artistportal.zuongzeroent.com` da duoc gan vao Sites/Cloudflare; DNS can co CNAME/TXT validation theo cau hinh custom domain.
-- Ban moi nhat da deploy tren Sites: version 3.
+- Chinh sach deploy tu 2026-09-09: chi deploy production bang Cloudflare/Wrangler va chi ban giao URL `https://artistportal.zuongzeroent.com`; khong deploy/ban giao qua URL `chatgpt.site`.
 
 ## Kiem thu da chay
 
