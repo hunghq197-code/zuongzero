@@ -39,7 +39,7 @@ export default async function ResetPasswordPage({
             Password reset
           </p>
           <h1 className="font-display mt-4 text-3xl font-semibold">
-            Royalty Console
+            Zuong Zero Artist Portal
           </h1>
           <EqualizerBars className="mt-10" />
         </div>
@@ -93,7 +93,7 @@ function ResetForm({
       <div className="rounded-lg border border-border bg-white p-3">
         <p className="break-all text-sm font-medium">{invite.email}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {invite.displayName ?? invite.clientName ?? 'Royalty account'}
+          {invite.displayName ?? invite.clientName ?? 'Artist portal account'}
         </p>
       </div>
 

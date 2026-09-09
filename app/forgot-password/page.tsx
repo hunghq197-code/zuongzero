@@ -26,7 +26,7 @@ export default async function ForgotPasswordPage({
             Password recovery
           </p>
           <h1 className="font-display mt-4 text-3xl font-semibold">
-            Royalty Console
+            Zuong Zero Artist Portal
           </h1>
           <EqualizerBars className="mt-10" />
         </div>

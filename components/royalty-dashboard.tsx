@@ -364,10 +364,10 @@ export function RoyaltyDashboard({
                 <BrandMark className="lg:hidden" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Client Portal
+                    Artist Portal
                   </p>
                   <h1 className="font-display truncate text-2xl font-semibold md:text-3xl">
-                    Royalty Console
+                    Zuong Zero Artist Portal
                   </h1>
                 </div>
               </div>

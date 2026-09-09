@@ -78,9 +78,9 @@ type ResetTargetRow = {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    return await listAccountsResponse();
+    return await listAccountsResponse(request);
   } catch (error) {
     return serverErrorResponse(
       error,
@@ -89,8 +89,8 @@ export async function GET() {
   }
 }
 
-async function listAccountsResponse() {
-  const authorization = await authorizeSuperAdmin();
+async function listAccountsResponse(request: Request) {
+  const authorization = await authorizeSuperAdmin(request.headers);
   if (!authorization.ok) {
     return jsonError(authorization.message, authorization.status);
   }
@@ -149,14 +149,14 @@ async function updateAccountResponse(request: Request) {
   }
 
   if (body.action === 'set_status') {
-    return updateAccountStatusResponse(body);
+    return updateAccountStatusResponse(request, body);
   }
 
   return createAccountResetResponse(request, body);
 }
 
 async function createAccountResponse(request: Request) {
-  const authorization = await authorizeSuperAdmin();
+  const authorization = await authorizeSuperAdmin(request.headers);
   if (!authorization.ok) {
     return jsonError(authorization.message, authorization.status);
   }
@@ -388,7 +388,7 @@ async function createAccountResetResponse(
   request: Request,
   body: ResetAccountBody,
 ) {
-  const authorization = await authorizeSuperAdmin();
+  const authorization = await authorizeSuperAdmin(request.headers);
   if (!authorization.ok) {
     return jsonError(authorization.message, authorization.status);
   }
@@ -484,8 +484,11 @@ async function createAccountResetResponse(
   });
 }
 
-async function updateAccountStatusResponse(body: ResetAccountBody) {
-  const authorization = await authorizeSuperAdmin();
+async function updateAccountStatusResponse(
+  request: Request,
+  body: ResetAccountBody,
+) {
+  const authorization = await authorizeSuperAdmin(request.headers);
   if (!authorization.ok) {
     return jsonError(authorization.message, authorization.status);
   }
@@ -562,8 +565,8 @@ async function updateAccountStatusResponse(body: ResetAccountBody) {
   });
 }
 
-async function authorizeSuperAdmin() {
-  const user = await getChatGPTUser();
+async function authorizeSuperAdmin(requestHeaders: Headers) {
+  const user = await getChatGPTUser(requestHeaders);
   if (!user) {
     return {
       ok: false as const,

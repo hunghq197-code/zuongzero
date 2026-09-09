@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Royalty Console',
+  title: 'Zuong Zero Artist Portal',
   description:
-    'Security-first music royalty console for client statements, Excel uploads, and monthly media metrics.',
+    'Security-first artist portal for client statements, Excel uploads, and monthly media metrics.',
 };
 
 export default function RootLayout({

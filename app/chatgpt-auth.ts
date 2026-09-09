@@ -31,8 +31,14 @@ type SessionUserRow = {
   displayName: string | null;
 };
 
-export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
-  const requestHeaders = await headers();
+type HeaderReader = {
+  get(name: string): string | null;
+};
+
+export async function getChatGPTUser(
+  sourceHeaders?: HeaderReader,
+): Promise<ChatGPTUser | null> {
+  const requestHeaders = sourceHeaders ?? (await headers());
   const sessionToken = readCookie(
     requestHeaders.get('cookie'),
     SESSION_COOKIE_NAME,
@@ -98,7 +104,7 @@ export function chatGPTSignOutPath(returnTo = '/'): string {
 }
 
 export function authProviderName() {
-  return 'Dashboard account';
+  return 'Zuong Zero Artist Portal account';
 }
 
 function isCloudflareAccessAuth() {

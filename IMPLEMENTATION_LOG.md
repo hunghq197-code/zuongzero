@@ -1,4 +1,4 @@
-# Royalty Dashboard - Implementation Log
+# Zuong Zero Artist Portal - Implementation Log
 
 Cap nhat ngay 2026-09-09, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 

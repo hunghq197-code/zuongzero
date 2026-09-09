@@ -47,7 +47,7 @@ export default async function LoginPage({
               Secure music rights workspace
             </p>
             <h1 className="font-display mt-4 max-w-xl text-5xl font-semibold leading-tight">
-              Royalty Console
+              Zuong Zero Artist Portal
             </h1>
           </div>
           <div>
@@ -80,7 +80,7 @@ export default async function LoginPage({
             Đăng nhập
           </h2>
           <p className="mt-3 text-sm text-muted-foreground">
-            Truy cập dashboard royalty theo quyền đã được cấp.
+            Truy cập artist portal theo quyền đã được cấp.
           </p>
 
           <form action="/api/auth/login" className="mt-7" method="post">

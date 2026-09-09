@@ -267,6 +267,13 @@ async function readJsonResponse<T extends { message?: string }>(
   }
 }
 
+function fetchWithSession(input: RequestInfo | URL, init?: RequestInit) {
+  return fetch(input, {
+    ...init,
+    credentials: 'same-origin',
+  });
+}
+
 function rowMatchesSearch(query: string, values: Array<string | null>) {
   if (!query) return true;
 
@@ -462,14 +469,16 @@ export function AdminConsole({
           statementsResponse,
           activityResponse,
         ] = await Promise.all([
-          fetch(isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers'),
-          fetch(
+          fetchWithSession(
+            isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers',
+          ),
+          fetchWithSession(
             `/api/admin/overview?period=${encodeURIComponent(selectedMonth)}`,
           ),
-          fetch(
+          fetchWithSession(
             `/api/admin/statements?period=${encodeURIComponent(selectedMonth)}`,
           ),
-          fetch('/api/admin/activity?limit=12'),
+          fetchWithSession('/api/admin/activity?limit=12'),
         ]);
         const result = await readJsonResponse<{
           accounts?: ManagedAccountRow[];
@@ -563,10 +572,14 @@ export function AdminConsole({
       statementsResponse,
       activityResponse,
     ] = await Promise.all([
-      fetch('/api/admin/customers'),
-      fetch(`/api/admin/overview?period=${encodeURIComponent(period)}`),
-      fetch(`/api/admin/statements?period=${encodeURIComponent(period)}`),
-      fetch('/api/admin/activity?limit=12'),
+      fetchWithSession('/api/admin/customers'),
+      fetchWithSession(
+        `/api/admin/overview?period=${encodeURIComponent(period)}`,
+      ),
+      fetchWithSession(
+        `/api/admin/statements?period=${encodeURIComponent(period)}`,
+      ),
+      fetchWithSession('/api/admin/activity?limit=12'),
     ]);
     const customersResult = await readJsonResponse<{
       customers?: ManagedCustomerRow[];
@@ -628,7 +641,7 @@ export function AdminConsole({
     setInviteCopyMessage('');
 
     try {
-      const response = await fetch('/api/admin/accounts', {
+      const response = await fetchWithSession('/api/admin/accounts', {
         body: JSON.stringify({
           accessLevel: accountAccessLevel,
           clientCode: accountRole === 'client' ? accountClientCode : undefined,
@@ -719,7 +732,7 @@ export function AdminConsole({
     setResetCopyMessage('');
 
     try {
-      const response = await fetch('/api/admin/accounts', {
+      const response = await fetchWithSession('/api/admin/accounts', {
         body: JSON.stringify({
           userId: account.id,
         }),
@@ -778,7 +791,7 @@ export function AdminConsole({
     setResetCopyMessage('');
 
     try {
-      const response = await fetch('/api/admin/accounts', {
+      const response = await fetchWithSession('/api/admin/accounts', {
         body: JSON.stringify({
           action: 'set_status',
           status: nextStatus,
@@ -837,7 +850,7 @@ export function AdminConsole({
     body.append('period', selectedMonth);
 
     try {
-      const response = await fetch('/api/admin/uploads', {
+      const response = await fetchWithSession('/api/admin/uploads', {
         method: 'POST',
         body,
       });
@@ -907,7 +920,7 @@ export function AdminConsole({
     setCustomerActionMessage('');
 
     try {
-      const response = await fetch('/api/admin/customers', {
+      const response = await fetchWithSession('/api/admin/customers', {
         body: JSON.stringify({
           clientId: editingCustomerId,
           code: editingCustomerCode,
@@ -953,7 +966,7 @@ export function AdminConsole({
     setCustomerActionMessage('');
 
     try {
-      const response = await fetch('/api/admin/customers', {
+      const response = await fetchWithSession('/api/admin/customers', {
         body: JSON.stringify({
           action: 'archive',
           clientId: customer.id,
@@ -999,7 +1012,7 @@ export function AdminConsole({
     setCustomerActionMessage('');
 
     try {
-      const response = await fetch('/api/admin/customers', {
+      const response = await fetchWithSession('/api/admin/customers', {
         body: JSON.stringify({
           action: 'delete',
           clientId: customer.id,
@@ -1048,7 +1061,7 @@ export function AdminConsole({
     setStatementActionMessage('');
 
     try {
-      const response = await fetch('/api/admin/statements', {
+      const response = await fetchWithSession('/api/admin/statements', {
         body: JSON.stringify({
           action,
           reportPeriodId: statement.reportPeriodId,
@@ -1096,7 +1109,7 @@ export function AdminConsole({
     setStatementActionMessage('');
 
     try {
-      const response = await fetch('/api/admin/statements', {
+      const response = await fetchWithSession('/api/admin/statements', {
         body: JSON.stringify({
           reportPeriodId: statement.reportPeriodId,
         }),
@@ -1158,10 +1171,10 @@ export function AdminConsole({
                 <BrandMark className="lg:hidden" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Admin Console
+                    Zuong Zero Artist Portal
                   </p>
                   <h1 className="font-display truncate text-2xl font-semibold md:text-3xl">
-                    Rights Operations
+                    Admin Operations
                   </h1>
                 </div>
               </div>

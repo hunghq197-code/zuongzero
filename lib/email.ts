@@ -24,18 +24,18 @@ export async function sendAccountInviteEmail(input: {
   const roleLabel = input.role === 'admin' ? 'quản lý' : 'khách hàng';
   const expiresLabel = formatInviteExpiry(input.expiresAt);
   const recipientName = input.displayName || input.email;
-  const subject = 'Kích hoạt tài khoản Royalty Dashboard';
+  const subject = 'Kích hoạt tài khoản Zuong Zero Artist Portal';
   const text = [
     `Xin chào ${recipientName},`,
     '',
-    `Bạn được tạo tài khoản ${roleLabel} trên Royalty Dashboard.`,
+    `Bạn được tạo tài khoản ${roleLabel} trên Zuong Zero Artist Portal.`,
     `Mở link sau để xác minh email và đặt mật khẩu: ${input.inviteUrl}`,
     '',
     `Link hết hạn lúc ${expiresLabel}.`,
   ].join('\n');
   const html = [
     `<p>Xin chào ${escapeHtml(recipientName)},</p>`,
-    `<p>Bạn được tạo tài khoản ${escapeHtml(roleLabel)} trên Royalty Dashboard.</p>`,
+    `<p>Bạn được tạo tài khoản ${escapeHtml(roleLabel)} trên Zuong Zero Artist Portal.</p>`,
     `<p><a href="${escapeHtml(input.inviteUrl)}">Kích hoạt tài khoản</a></p>`,
     `<p>Link hết hạn lúc ${escapeHtml(expiresLabel)}.</p>`,
   ].join('');
@@ -91,18 +91,18 @@ export async function sendPasswordResetEmail(input: {
 
   const expiresLabel = formatInviteExpiry(input.expiresAt);
   const recipientName = input.displayName || input.email;
-  const subject = 'Đặt lại mật khẩu Royalty Console';
+  const subject = 'Đặt lại mật khẩu Zuong Zero Artist Portal';
   const text = [
     `Xin chào ${recipientName},`,
     '',
-    'Bạn hoặc super admin đã yêu cầu đặt lại mật khẩu Royalty Console.',
+    'Bạn hoặc super admin đã yêu cầu đặt lại mật khẩu Zuong Zero Artist Portal.',
     `Mở link sau để đặt mật khẩu mới: ${input.resetUrl}`,
     '',
     `Link hết hạn lúc ${expiresLabel}. Nếu bạn không yêu cầu thao tác này, hãy bỏ qua email.`,
   ].join('\n');
   const html = [
     `<p>Xin chào ${escapeHtml(recipientName)},</p>`,
-    '<p>Bạn hoặc super admin đã yêu cầu đặt lại mật khẩu Royalty Console.</p>',
+    '<p>Bạn hoặc super admin đã yêu cầu đặt lại mật khẩu Zuong Zero Artist Portal.</p>',
     `<p><a href="${escapeHtml(input.resetUrl)}">Đặt lại mật khẩu</a></p>`,
     `<p>Link hết hạn lúc ${escapeHtml(expiresLabel)}. Nếu bạn không yêu cầu thao tác này, hãy bỏ qua email.</p>`,
   ].join('');
