@@ -13,6 +13,7 @@ import {
   REPORT_PERIOD_PATTERN,
 } from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
+import { buildReverseGuaranteeRecoupmentStatements } from '@/lib/guarantees';
 import { ensureUserRecord } from '@/lib/user-records';
 
 type StatementBody = {
@@ -228,7 +229,15 @@ async function deleteStatementResponse(request: Request) {
     userId: authorization.user.userId,
   });
 
+  const guaranteeReversalStatements =
+    await buildReverseGuaranteeRecoupmentStatements(
+      env.DB,
+      reportPeriodId,
+      now,
+    );
+
   await env.DB.batch([
+    ...guaranteeReversalStatements,
     env.DB.prepare(
       `DELETE FROM revenue_breakdowns
        WHERE report_period_id = ?`,

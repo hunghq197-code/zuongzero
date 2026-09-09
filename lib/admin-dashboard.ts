@@ -73,6 +73,7 @@ export type AdminStatementRow = {
   clientId: string;
   clientName: string;
   closing: number;
+  costs: number;
   currency: CurrencyCode;
   filename: string | null;
   lockedAt: string | null;
@@ -95,6 +96,7 @@ type AdminStatementSqlRow = Omit<
   AdminStatementRow,
   | 'carryForward'
   | 'closing'
+  | 'costs'
   | 'paid'
   | 'payable'
   | 'periodLabel'
@@ -242,8 +244,9 @@ export async function listAdminStatements(
   return rows.results.map((row) => {
     const opening = Number(row.opening) || 0;
     const revenue = Number(row.revenue) || 0;
+    const costs = Number(row.costs) || 0;
     const settlement = summarizeSettlement({
-      costs: Number(row.costs) || 0,
+      costs,
       opening,
       reservesReleased: Number(row.reservesReleased) || 0,
       reservesWithheld: Number(row.reservesWithheld) || 0,
@@ -254,6 +257,7 @@ export async function listAdminStatements(
       ...row,
       carryForward: settlement.carryForward,
       closing: settlement.carryForward,
+      costs,
       currency: 'VND',
       paid: settlement.paidAmount,
       payable: settlement.payable,
@@ -331,6 +335,7 @@ export function fallbackAdminStatements(): AdminStatementRow[] {
     clientId: period.clientId,
     clientName: period.clientName,
     closing: period.carryForward,
+    costs: period.costs,
     currency: 'VND',
     filename: null,
     lockedAt: null,

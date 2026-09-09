@@ -277,6 +277,71 @@ export const revenueBreakdowns = sqliteTable(
   ],
 );
 
+export const trackGuarantees = sqliteTable(
+  'track_guarantees',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id),
+    trackTitle: text('track_title').notNull(),
+    trackKey: text('track_key').notNull(),
+    initialAmount: real('initial_amount').notNull(),
+    recoupedAmount: real('recouped_amount').notNull().default(0),
+    balanceAmount: real('balance_amount').notNull(),
+    status: text('status', {
+      enum: ['active', 'recouped', 'archived'],
+    }).notNull(),
+    notes: text('notes'),
+    createdByUserId: text('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_track_guarantees_client_status').on(
+      table.clientId,
+      table.status,
+    ),
+    index('idx_track_guarantees_client_track').on(
+      table.clientId,
+      table.trackKey,
+    ),
+  ],
+);
+
+export const trackGuaranteeRecoupments = sqliteTable(
+  'track_guarantee_recoupments',
+  {
+    id: text('id').primaryKey(),
+    guaranteeId: text('guarantee_id')
+      .notNull()
+      .references(() => trackGuarantees.id),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id),
+    reportPeriodId: text('report_period_id')
+      .notNull()
+      .references(() => reportPeriods.id),
+    sourceUploadId: text('source_upload_id')
+      .notNull()
+      .references(() => uploads.id),
+    trackTitle: text('track_title').notNull(),
+    revenueAmount: real('revenue_amount').notNull(),
+    amount: real('amount').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_track_recoupments_guarantee').on(table.guaranteeId),
+    index('idx_track_recoupments_client_period').on(
+      table.clientId,
+      table.reportPeriodId,
+    ),
+    index('idx_track_recoupments_upload').on(table.sourceUploadId),
+  ],
+);
+
 export const accessRequests = sqliteTable(
   'access_requests',
   {

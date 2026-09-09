@@ -16,6 +16,10 @@ import {
   dimensionToBreakdownKey,
 } from '@/lib/royalty-breakdowns';
 import { summarizeSettlement } from '@/lib/settlements';
+import {
+  listTrackGuarantees,
+  type TrackGuaranteeRow,
+} from '@/lib/guarantees';
 
 export type DashboardBreakdownsByPeriod = Record<
   string,
@@ -24,6 +28,7 @@ export type DashboardBreakdownsByPeriod = Record<
 
 export type ClientDashboardData = {
   breakdownsByPeriod: DashboardBreakdownsByPeriod;
+  guarantees: TrackGuaranteeRow[];
   statementPeriods: StatementPeriod[];
   trend: RevenueTrendPoint[];
 };
@@ -66,34 +71,40 @@ export async function getClientDashboardData({
     return staticDashboardData(clientId);
   }
 
-  const statementRows = await env.DB.prepare(
-    `SELECT
-       rp.id,
-       rp.period,
-       rp.currency,
-       rp.status,
-       c.display_name AS clientName,
-       s.opening_balance AS opening,
-       s.net_revenue AS revenue,
-       s.net_costs AS costs,
-       s.reserves_withheld AS reservesWithheld,
-       s.reserves_released AS reservesReleased,
-       s.closing_balance AS closing,
-       s.units,
-       s.row_count AS rowCount
-     FROM report_periods rp
-     JOIN statements s
-       ON s.report_period_id = rp.id
-     JOIN clients c
-       ON c.id = rp.client_id
-     WHERE rp.client_id = ?
-       AND rp.status IN ('published', 'locked')
-       AND rp.currency = 'VND'
-     ORDER BY rp.period DESC
-     LIMIT 120`,
-  )
-    .bind(clientId)
-    .all<StatementRow>();
+  const [statementRows, guarantees] = await Promise.all([
+    env.DB.prepare(
+      `SELECT
+         rp.id,
+         rp.period,
+         rp.currency,
+         rp.status,
+         c.display_name AS clientName,
+         s.opening_balance AS opening,
+         s.net_revenue AS revenue,
+         s.net_costs AS costs,
+         s.reserves_withheld AS reservesWithheld,
+         s.reserves_released AS reservesReleased,
+         s.closing_balance AS closing,
+         s.units,
+         s.row_count AS rowCount
+       FROM report_periods rp
+       JOIN statements s
+         ON s.report_period_id = rp.id
+       JOIN clients c
+         ON c.id = rp.client_id
+       WHERE rp.client_id = ?
+         AND rp.status IN ('published', 'locked')
+         AND rp.currency = 'VND'
+       ORDER BY rp.period DESC
+       LIMIT 120`,
+    )
+      .bind(clientId)
+      .all<StatementRow>(),
+    listTrackGuarantees(env.DB, {
+      clientId,
+      limit: 120,
+    }),
+  ]);
 
   const statementPeriods = statementRows.results.map((row) => {
     const opening = Number(row.opening) || 0;
@@ -131,6 +142,7 @@ export async function getClientDashboardData({
   if (statementPeriods.length === 0) {
     return {
       breakdownsByPeriod: {},
+      guarantees,
       statementPeriods: [],
       trend: [],
     };
@@ -161,6 +173,7 @@ export async function getClientDashboardData({
 
   return {
     breakdownsByPeriod: mapBreakdownsByPeriod(breakdownRows.results),
+    guarantees,
     statementPeriods,
     trend: mapTrend(statementPeriods),
   };
@@ -180,6 +193,7 @@ function staticDashboardData(clientId: string): ClientDashboardData {
             },
           }
         : {},
+    guarantees: [],
     statementPeriods,
     trend: statementPeriods.length > 0 ? revenueTrend : [],
   };

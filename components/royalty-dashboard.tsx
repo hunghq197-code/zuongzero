@@ -58,6 +58,7 @@ import {
 import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
 import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
+import type { TrackGuaranteeRow } from '@/lib/guarantees';
 
 declare global {
   interface Document {
@@ -133,6 +134,12 @@ function statusLabel(status: string) {
   return 'Validating';
 }
 
+function guaranteeStatusLabel(status: TrackGuaranteeRow['status']) {
+  if (status === 'active') return 'Đang trừ GM';
+  if (status === 'recouped') return 'Đã recoup';
+  return 'Archived';
+}
+
 function settlementStatusLabel(status: StatementPeriod['settlementStatus']) {
   return status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán';
 }
@@ -202,9 +209,9 @@ function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
       tone: 'amber',
     },
     {
-      label: 'Net Costs',
+      label: 'GM Recouped',
       value: formatMoney(activePeriod.costs),
-      helper: 'Deducted costs',
+      helper: 'Advance đã trừ trong quý',
       tone: 'rose',
     },
   ];
@@ -245,6 +252,7 @@ export function RoyaltyDashboard({
   breakdownsByPeriod,
   clientId,
   clientName,
+  guarantees = [],
   statementPeriods: statementPeriodsProp,
   trend: trendProp,
   userEmail,
@@ -253,6 +261,7 @@ export function RoyaltyDashboard({
   breakdownsByPeriod?: DashboardBreakdownsByPeriod;
   clientId: string;
   clientName: string;
+  guarantees?: TrackGuaranteeRow[];
   statementPeriods?: StatementPeriod[];
   trend?: RevenueTrendPoint[];
   userEmail: string;
@@ -314,6 +323,9 @@ export function RoyaltyDashboard({
     (usesProvidedData ? emptyBreakdowns : breakdownsByCurrency.VND);
   const activeBreakdown = hasStatements ? activeBreakdownData[activeTab] : [];
   const trendData = hasStatements ? dashboardTrend : [];
+  const activeGuarantees = guarantees.filter(
+    (guarantee) => guarantee.status !== 'archived',
+  );
 
   useEffect(() => {
     const context =
@@ -605,6 +617,58 @@ export function RoyaltyDashboard({
               </section>
             </section>
 
+            {activeGuarantees.length > 0 ? (
+              <section className="music-card p-4 md:p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      GM
+                    </p>
+                    <h2 className="mt-1 text-lg font-semibold">
+                      Guaranteed Minimum
+                    </h2>
+                  </div>
+                  <WalletCards className="size-5 text-[#ff4d6d]" />
+                </div>
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Track</TableHead>
+                        <TableHead>GM</TableHead>
+                        <TableHead>Đã trừ</TableHead>
+                        <TableHead>Còn lại</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {activeGuarantees.slice(0, 8).map((guarantee) => (
+                        <TableRow key={guarantee.id}>
+                          <TableCell className="font-medium">
+                            {guarantee.trackTitle}
+                          </TableCell>
+                          <TableCell>
+                            {formatMoney(guarantee.initialAmount)}
+                          </TableCell>
+                          <TableCell>
+                            {formatMoney(guarantee.recoupedAmount)}
+                          </TableCell>
+                          <TableCell>
+                            {formatMoney(guarantee.balanceAmount)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="rounded-lg" variant="outline">
+                              {guaranteeStatusLabel(guarantee.status)}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
+            ) : null}
+
             <Tabs
               className="music-card p-4 md:p-5"
               onValueChange={(value) => setActiveTab(value as BreakdownKey)}
@@ -658,6 +722,7 @@ export function RoyaltyDashboard({
                       <TableHead>Rows</TableHead>
                       <TableHead>Units</TableHead>
                       <TableHead>Net Payable</TableHead>
+                      <TableHead>GM</TableHead>
                       <TableHead>Payable</TableHead>
                       <TableHead>Đối soát</TableHead>
                       <TableHead>Status</TableHead>
@@ -673,6 +738,9 @@ export function RoyaltyDashboard({
                           <TableCell>{formatNumber(period.rowCount)}</TableCell>
                           <TableCell>{formatNumber(period.units)}</TableCell>
                           <TableCell>{formatMoney(period.revenue)}</TableCell>
+                          <TableCell>
+                            {period.costs > 0 ? formatMoney(period.costs) : '-'}
+                          </TableCell>
                           <TableCell>{formatMoney(period.payable)}</TableCell>
                           <TableCell>
                             <Badge
@@ -698,7 +766,7 @@ export function RoyaltyDashboard({
                       <TableRow>
                         <TableCell
                           className="h-24 text-center text-sm text-muted-foreground"
-                          colSpan={7}
+                          colSpan={8}
                         >
                           Chưa có statement cho khách hàng này.
                         </TableCell>

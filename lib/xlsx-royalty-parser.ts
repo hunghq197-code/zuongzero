@@ -43,6 +43,14 @@ type BreakdownAccumulator = {
 type CurrencyAccumulator = {
   breakdowns: Record<BreakdownKey, Map<string, BreakdownAccumulator>>;
   rowCount: number;
+  trackRevenue: Map<string, BreakdownAccumulator>;
+  units: number;
+  value: number;
+};
+
+export type ParsedTrackRevenue = {
+  rows: number;
+  trackTitle: string;
   units: number;
   value: number;
 };
@@ -52,6 +60,7 @@ export type ParsedCurrencyStatement = {
   currency: CurrencyCode;
   revenue: number;
   rowCount: number;
+  trackRevenue: ParsedTrackRevenue[];
   units: number;
 };
 
@@ -220,6 +229,15 @@ export function parseRoyaltyWorkbook(
           amount,
           Math.round(units),
         );
+
+        if (breakdownField.key === 'tracks') {
+          addBreakdownValue(
+            accumulator.trackRevenue,
+            label,
+            amount,
+            Math.round(units),
+          );
+        }
       }
     }
   }
@@ -242,6 +260,7 @@ export function parseRoyaltyWorkbook(
           currency,
           revenue: roundMoney(accumulator.value),
           rowCount: accumulator.rowCount,
+          trackRevenue: finalizeTrackRevenue(accumulator.trackRevenue),
           units: accumulator.units,
         }))
         .sort((left, right) => left.currency.localeCompare(right.currency));
@@ -505,6 +524,7 @@ function getCurrencyAccumulator(
       ]),
     ) as Record<BreakdownKey, Map<string, BreakdownAccumulator>>,
     rowCount: 0,
+    trackRevenue: new Map<string, BreakdownAccumulator>(),
     units: 0,
     value: 0,
   };
@@ -590,6 +610,19 @@ function finalizeBreakdownItems(
     units: entry.units,
     value: roundMoney(entry.value),
   }));
+}
+
+function finalizeTrackRevenue(
+  source: Map<string, BreakdownAccumulator>,
+): ParsedTrackRevenue[] {
+  return Array.from(source.entries())
+    .sort(([, left], [, right]) => Math.abs(right.value) - Math.abs(left.value))
+    .map(([trackTitle, entry]) => ({
+      rows: entry.rows,
+      trackTitle,
+      units: entry.units,
+      value: roundMoney(entry.value),
+    }));
 }
 
 function readCell(row: SheetRow, index: number | undefined) {

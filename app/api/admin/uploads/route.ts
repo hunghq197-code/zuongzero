@@ -22,6 +22,7 @@ import {
   SETTLEMENT_THRESHOLD_VND,
   summarizeSettlement,
 } from '@/lib/settlements';
+import { planTrackGuaranteeRecoupments } from '@/lib/guarantees';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
@@ -376,6 +377,14 @@ async function buildImportStatements({
   const settlementResults: Array<{
     carryForward: number;
     currency: CurrencyCode;
+    guaranteeRecouped: number;
+    guaranteeRecoupments: Array<{
+      amount: number;
+      balanceAfter: number;
+      guaranteeId: string;
+      status: string;
+      trackTitle: string;
+    }>;
     paidAmount: number;
     payable: number;
     revenue: number;
@@ -462,7 +471,15 @@ async function buildImportStatements({
       selectedClient.id,
       period,
     );
-    const costs = 0;
+    const guaranteePlan = await planTrackGuaranteeRecoupments({
+      clientId: selectedClient.id,
+      db,
+      now,
+      reportPeriodId,
+      sourceUploadId: uploadId,
+      trackRevenue: parsedStatement.trackRevenue,
+    });
+    const costs = guaranteePlan.deductionTotal;
     const reservesWithheld = 0;
     const reservesReleased = 0;
     const settlement = summarizeSettlement({
@@ -476,6 +493,14 @@ async function buildImportStatements({
     settlementResults.push({
       carryForward: settlement.carryForward,
       currency: parsedStatement.currency,
+      guaranteeRecouped: costs,
+      guaranteeRecoupments: guaranteePlan.recoupments.map((recoupment) => ({
+        amount: recoupment.amount,
+        balanceAfter: recoupment.balanceAfter,
+        guaranteeId: recoupment.guaranteeId,
+        status: recoupment.status,
+        trackTitle: recoupment.trackTitle,
+      })),
       paidAmount: settlement.paidAmount,
       payable: settlement.payable,
       revenue: parsedStatement.revenue,
@@ -511,6 +536,7 @@ async function buildImportStatements({
           now,
           now,
         ),
+      ...guaranteePlan.statements,
       db
         .prepare(
           `DELETE FROM statements

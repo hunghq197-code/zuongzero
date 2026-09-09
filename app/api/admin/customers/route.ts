@@ -262,6 +262,14 @@ async function deleteCustomerResponse(request: Request) {
          )`,
     ).bind(clientId),
     env.DB.prepare(
+      `DELETE FROM track_guarantee_recoupments
+       WHERE client_id = ?`,
+    ).bind(clientId),
+    env.DB.prepare(
+      `DELETE FROM track_guarantees
+       WHERE client_id = ?`,
+    ).bind(clientId),
+    env.DB.prepare(
       `DELETE FROM revenue_breakdowns
        WHERE client_id = ?`,
     ).bind(clientId),

@@ -96,6 +96,9 @@ function activityActionLabel(action: string) {
     managed_account_created: 'Tạo tài khoản',
     managed_account_status_updated: 'Cập nhật tài khoản',
     password_reset_requested: 'Gửi link đổi mật khẩu',
+    track_guarantee_archive: 'Archive GM',
+    track_guarantee_created: 'Tạo GM',
+    track_guarantee_reactivate: 'Kích hoạt GM',
   };
 
   return labels[action] ?? action.replace(/_/g, ' ');
@@ -149,6 +152,18 @@ function activitySummary(
     return compactParts([readString(metadata.name), readString(metadata.code)]);
   }
 
+  if (
+    action === 'track_guarantee_archive' ||
+    action === 'track_guarantee_created' ||
+    action === 'track_guarantee_reactivate'
+  ) {
+    return compactParts([
+      readString(metadata.trackTitle),
+      formatMoney(metadata.amount ?? metadata.balanceAmount),
+      readString(metadata.status),
+    ]);
+  }
+
   return '';
 }
 
@@ -177,4 +192,15 @@ function formatRows(value: unknown) {
   const rows = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(rows) || rows <= 0) return null;
   return `${new Intl.NumberFormat('en-US').format(rows)} rows`;
+}
+
+function formatMoney(value: unknown) {
+  const amount = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  return new Intl.NumberFormat('vi-VN', {
+    currency: 'VND',
+    maximumFractionDigits: 0,
+    style: 'currency',
+  }).format(amount);
 }

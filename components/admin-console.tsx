@@ -83,6 +83,10 @@ import {
   type AdminStatementRow,
   type AdminTrendItem,
 } from '@/lib/admin-dashboard';
+import type {
+  TrackGuaranteeRow,
+  TrackGuaranteeStatus,
+} from '@/lib/guarantees';
 
 type AdminRole = 'super_admin' | 'admin';
 type ManagedAccountRole = 'admin' | 'client';
@@ -117,6 +121,7 @@ type CustomerActionState = 'idle' | 'saving' | 'saved' | 'failed';
 type StatementAction = 'publish' | 'unpublish' | 'lock';
 type CustomerStatusFilter = 'all' | CustomerStatus;
 type StatementStatusFilter = 'all' | AdminStatementRow['status'];
+type GuaranteeStatusFilter = 'all' | TrackGuaranteeStatus;
 type UploadMode = 'single' | 'bulk';
 
 const adminPalette = [
@@ -244,6 +249,30 @@ function settlementHelper(statement: AdminStatementRow) {
   }
 
   return `Qua quý sau ${formatMoney(statement.carryForward)}`;
+}
+
+function guaranteeStatusLabel(status: TrackGuaranteeStatus) {
+  if (status === 'active') return 'Đang trừ GM';
+  if (status === 'recouped') return 'Đã recoup';
+  return 'Archived';
+}
+
+function guaranteeStatusFilterLabel(status: GuaranteeStatusFilter) {
+  if (status === 'all') return 'Tất cả GM';
+  return guaranteeStatusLabel(status);
+}
+
+function guaranteeBadgeClass(status: TrackGuaranteeStatus) {
+  if (status === 'active') return 'rounded-lg bg-[#e7fbf7] text-[#00796f]';
+  if (status === 'recouped') return 'rounded-lg bg-[#eef4ff] text-[#2f5da8]';
+  return 'rounded-lg bg-muted text-muted-foreground';
+}
+
+function parseVndInput(value: string) {
+  const digits = value.replace(/[^\d]/g, '');
+  if (!digits) return 0;
+
+  return Number(digits);
 }
 
 function trendLabel(trend: AdminTrendItem['trend']) {
@@ -423,9 +452,28 @@ export function AdminConsole({
   const [resetInviteUrl, setResetInviteUrl] = useState('');
   const [resetCopyMessage, setResetCopyMessage] = useState('');
   const [activeAccountActionId, setActiveAccountActionId] = useState('');
+  const [guarantees, setGuarantees] = useState<TrackGuaranteeRow[]>([]);
+  const [guaranteeClientId, setGuaranteeClientId] = useState(
+    fallbackCustomers[0]?.id ?? '',
+  );
+  const [guaranteeTrackTitle, setGuaranteeTrackTitle] = useState('');
+  const [guaranteeAmount, setGuaranteeAmount] = useState('');
+  const [guaranteeNotes, setGuaranteeNotes] = useState('');
+  const [guaranteeSearch, setGuaranteeSearch] = useState('');
+  const [guaranteeStatusFilter, setGuaranteeStatusFilter] =
+    useState<GuaranteeStatusFilter>('all');
+  const [guaranteeState, setGuaranteeState] = useState<
+    'idle' | 'saving' | 'saved' | 'failed'
+  >('idle');
+  const [guaranteeMessage, setGuaranteeMessage] = useState('');
+  const [activeGuaranteeActionId, setActiveGuaranteeActionId] = useState('');
 
   const activeClient =
     customers.find((client) => client.id === selectedClient) ??
+    customers[0] ??
+    null;
+  const activeGuaranteeClient =
+    customers.find((client) => client.id === guaranteeClientId) ??
     customers[0] ??
     null;
   const selectedPeriodLabel =
@@ -471,6 +519,26 @@ export function AdminConsole({
       );
     });
   }, [statementRows, statementSearch, statementStatusFilter]);
+  const visibleGuarantees = useMemo(() => {
+    const query = guaranteeSearch.trim().toLowerCase();
+
+    return guarantees.filter((guarantee) => {
+      const statusMatches =
+        guaranteeStatusFilter === 'all' ||
+        guarantee.status === guaranteeStatusFilter;
+
+      return (
+        statusMatches &&
+        rowMatchesSearch(query, [
+          guarantee.clientCode,
+          guarantee.clientName,
+          guarantee.notes,
+          guarantee.trackTitle,
+          guarantee.status,
+        ])
+      );
+    });
+  }, [guarantees, guaranteeSearch, guaranteeStatusFilter]);
   const validation = useMemo(
     () => validateWorkbook(selectedFile, uploadMode),
     [selectedFile, uploadMode],
@@ -478,6 +546,16 @@ export function AdminConsole({
   const activeCustomerCount = overview.summary.activeCustomers;
   const uploadedQuarterCount = overview.summary.statementCount;
   const totalRevenue = overview.summary.revenueVnd;
+  const activeGuaranteeCount = guarantees.filter(
+    (guarantee) => guarantee.status === 'active',
+  ).length;
+  const totalGuaranteeBalance = guarantees
+    .filter((guarantee) => guarantee.status === 'active')
+    .reduce((total, guarantee) => total + guarantee.balanceAmount, 0);
+  const totalGuaranteeRecouped = guarantees.reduce(
+    (total, guarantee) => total + guarantee.recoupedAmount,
+    0,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -490,6 +568,7 @@ export function AdminConsole({
           overviewResponse,
           statementsResponse,
           activityResponse,
+          guaranteesResponse,
         ] = await Promise.all([
           fetchWithSession(
             isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers',
@@ -501,6 +580,7 @@ export function AdminConsole({
             `/api/admin/statements?period=${encodeURIComponent(selectedPeriod)}`,
           ),
           fetchWithSession('/api/admin/activity?limit=12'),
+          fetchWithSession('/api/admin/guarantees'),
         ]);
         const result = await readJsonResponse<{
           accounts?: ManagedAccountRow[];
@@ -519,6 +599,10 @@ export function AdminConsole({
           activity?: AdminActivityRow[];
           message?: string;
         }>(activityResponse);
+        const guaranteesResult = await readJsonResponse<{
+          guarantees?: TrackGuaranteeRow[];
+          message?: string;
+        }>(guaranteesResponse);
 
         if (!accountsResponse.ok) {
           throw new Error(result.message ?? 'Không thể tải dữ liệu admin.');
@@ -538,6 +622,11 @@ export function AdminConsole({
             activityResult.message ?? 'Không thể tải lịch sử hoạt động.',
           );
         }
+        if (!guaranteesResponse.ok) {
+          throw new Error(
+            guaranteesResult.message ?? 'Không thể tải danh sách GM.',
+          );
+        }
 
         if (!cancelled) {
           if (isSuperAdmin) {
@@ -552,12 +641,18 @@ export function AdminConsole({
               ? currentClient
               : (nextCustomers[0]?.id ?? ''),
           );
+          setGuaranteeClientId((currentClient) =>
+            nextCustomers.some((client) => client.id === currentClient)
+              ? currentClient
+              : (nextCustomers[0]?.id ?? ''),
+          );
           setOverview(
             overviewResult.overview ??
               fallbackAdminOverviewData(selectedPeriod),
           );
           setStatementRows(statementsResult.statements ?? []);
           setActivityRows(activityResult.activity ?? []);
+          setGuarantees(guaranteesResult.guarantees ?? []);
           setOperationsMessage('');
           setOperationsState('ready');
         }
@@ -594,6 +689,7 @@ export function AdminConsole({
       overviewResponse,
       statementsResponse,
       activityResponse,
+      guaranteesResponse,
     ] = await Promise.all([
       fetchWithSession('/api/admin/customers'),
       fetchWithSession(
@@ -603,6 +699,7 @@ export function AdminConsole({
         `/api/admin/statements?period=${encodeURIComponent(period)}`,
       ),
       fetchWithSession('/api/admin/activity?limit=12'),
+      fetchWithSession('/api/admin/guarantees'),
     ]);
     const customersResult = await readJsonResponse<{
       customers?: ManagedCustomerRow[];
@@ -620,6 +717,10 @@ export function AdminConsole({
       activity?: AdminActivityRow[];
       message?: string;
     }>(activityResponse);
+    const guaranteesResult = await readJsonResponse<{
+      guarantees?: TrackGuaranteeRow[];
+      message?: string;
+    }>(guaranteesResponse);
 
     if (!customersResponse.ok) {
       throw new Error(
@@ -641,6 +742,11 @@ export function AdminConsole({
         activityResult.message ?? 'Không thể tải lại lịch sử hoạt động.',
       );
     }
+    if (!guaranteesResponse.ok) {
+      throw new Error(
+        guaranteesResult.message ?? 'Không thể tải lại danh sách GM.',
+      );
+    }
 
     const nextCustomers = customersResult.customers ?? fallbackCustomers;
     setCustomers(nextCustomers);
@@ -649,9 +755,15 @@ export function AdminConsole({
         ? currentClient
         : (nextCustomers[0]?.id ?? ''),
     );
+    setGuaranteeClientId((currentClient) =>
+      nextCustomers.some((client) => client.id === currentClient)
+        ? currentClient
+        : (nextCustomers[0]?.id ?? ''),
+    );
     setOverview(overviewResult.overview ?? fallbackAdminOverviewData(period));
     setStatementRows(statementsResult.statements ?? []);
     setActivityRows(activityResult.activity ?? []);
+    setGuarantees(guaranteesResult.guarantees ?? []);
   }
 
   async function createManagedAccount(event: { preventDefault: () => void }) {
@@ -924,6 +1036,117 @@ export function AdminConsole({
           ? error.message
           : 'Không thể upload file ở thời điểm này.',
       );
+    }
+  }
+
+  async function createTrackGuarantee(event: { preventDefault: () => void }) {
+    event.preventDefault();
+    if (guaranteeState === 'saving') return;
+
+    const amount = parseVndInput(guaranteeAmount);
+    if (!activeGuaranteeClient) {
+      setGuaranteeState('failed');
+      setGuaranteeMessage('Cần tạo khách hàng trước khi tạo GM.');
+      return;
+    }
+    if (!guaranteeTrackTitle.trim()) {
+      setGuaranteeState('failed');
+      setGuaranteeMessage('Cần nhập tên bài hát.');
+      return;
+    }
+    if (!amount || amount <= 0) {
+      setGuaranteeState('failed');
+      setGuaranteeMessage('Số tiền GM phải lớn hơn 0 VNĐ.');
+      return;
+    }
+
+    setGuaranteeState('saving');
+    setGuaranteeMessage('');
+
+    try {
+      const response = await fetchWithSession('/api/admin/guarantees', {
+        body: JSON.stringify({
+          amount,
+          clientId: activeGuaranteeClient.id,
+          notes: guaranteeNotes,
+          trackTitle: guaranteeTrackTitle,
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      });
+      const result = await readJsonResponse<{
+        guarantees?: TrackGuaranteeRow[];
+        message?: string;
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(result.message ?? `Không thể tạo GM (${response.status}).`);
+      }
+
+      setGuarantees(result.guarantees ?? []);
+      setGuaranteeTrackTitle('');
+      setGuaranteeAmount('');
+      setGuaranteeNotes('');
+      setGuaranteeMessage(result.message ?? 'Đã tạo GM.');
+      setGuaranteeState('saved');
+      await refreshAdminSnapshot(selectedPeriod);
+    } catch (error) {
+      setGuaranteeMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể tạo GM ở thời điểm này.',
+      );
+      setGuaranteeState('failed');
+    }
+  }
+
+  async function updateTrackGuarantee(
+    guarantee: TrackGuaranteeRow,
+    action: 'archive' | 'reactivate',
+  ) {
+    if (activeGuaranteeActionId) return;
+
+    setActiveGuaranteeActionId(guarantee.id);
+    setGuaranteeState('idle');
+    setGuaranteeMessage('');
+
+    try {
+      const response = await fetchWithSession('/api/admin/guarantees', {
+        body: JSON.stringify({
+          action,
+          guaranteeId: guarantee.id,
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'PATCH',
+      });
+      const result = await readJsonResponse<{
+        guarantees?: TrackGuaranteeRow[];
+        message?: string;
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          result.message ?? `Không thể cập nhật GM (${response.status}).`,
+        );
+      }
+
+      setGuarantees(result.guarantees ?? []);
+      setGuaranteeMessage(result.message ?? 'Đã cập nhật GM.');
+      setGuaranteeState('saved');
+      await refreshAdminSnapshot(selectedPeriod);
+    } catch (error) {
+      setGuaranteeMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể cập nhật GM ở thời điểm này.',
+      );
+      setGuaranteeState('failed');
+    } finally {
+      setActiveGuaranteeActionId('');
     }
   }
 
@@ -1274,6 +1497,13 @@ export function AdminConsole({
                   >
                     <FileSpreadsheet className="size-4" />
                     Statement
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
+                    value="guarantees"
+                  >
+                    <WalletCards className="size-4" />
+                    GM
                   </TabsTrigger>
                   {isSuperAdmin ? (
                     <TabsTrigger
@@ -2357,6 +2587,7 @@ export function AdminConsole({
                           <TableHead>Rows</TableHead>
                           <TableHead>Units</TableHead>
                           <TableHead>Revenue</TableHead>
+                          <TableHead>GM</TableHead>
                           <TableHead>Carry</TableHead>
                           <TableHead>Đối soát</TableHead>
                           <TableHead>Status</TableHead>
@@ -2384,6 +2615,11 @@ export function AdminConsole({
                               </TableCell>
                               <TableCell>
                                 {formatMoney(statement.revenue)}
+                              </TableCell>
+                              <TableCell>
+                                {statement.costs > 0
+                                  ? formatMoney(statement.costs)
+                                  : '-'}
                               </TableCell>
                               <TableCell>
                                 {formatMoney(statement.carryForward)}
@@ -2507,7 +2743,7 @@ export function AdminConsole({
                           <TableRow>
                             <TableCell
                               className="h-24 text-center text-sm text-muted-foreground"
-                              colSpan={9}
+                              colSpan={10}
                             >
                               {statementRows.length > 0
                                 ? 'Không có statement khớp bộ lọc.'
@@ -2519,6 +2755,339 @@ export function AdminConsole({
                     </Table>
                   </section>
                 </section>
+                <ActivityLogPanel activityRows={activityRows} />
+              </TabsContent>
+
+              <TabsContent className="space-y-5" value="guarantees">
+                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                  <section className="music-card p-4 md:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Guaranteed Minimum
+                        </p>
+                        <h2 className="mt-1 text-lg font-semibold">
+                          Tạo GM theo bài hát
+                        </h2>
+                      </div>
+                      <Music2 className="size-6 text-primary" />
+                    </div>
+
+                    <form className="mt-5 space-y-3" onSubmit={createTrackGuarantee}>
+                      <div className="space-y-2">
+                        <span className="block text-sm font-medium">
+                          Khách hàng
+                        </span>
+                        <Select
+                          onValueChange={(value) => {
+                            if (value) setGuaranteeClientId(value);
+                          }}
+                          value={guaranteeClientId}
+                        >
+                          <SelectTrigger
+                            aria-label="Khách hàng nhận GM"
+                            className="music-control h-10 w-full"
+                          >
+                            <span className="flex-1 truncate text-left">
+                              {activeGuaranteeClient?.name ??
+                                'Chọn khách hàng'}
+                            </span>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {customers.map((client) => (
+                              <SelectItem key={client.id} value={client.id}>
+                                {client.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <span
+                          className="block text-sm font-medium"
+                          id="guarantee-track-label"
+                        >
+                          Bài hát
+                        </span>
+                        <Input
+                          aria-labelledby="guarantee-track-label"
+                          onChange={(event) =>
+                            setGuaranteeTrackTitle(event.target.value)
+                          }
+                          placeholder="Tên bài hát"
+                          value={guaranteeTrackTitle}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <span
+                          className="block text-sm font-medium"
+                          id="guarantee-amount-label"
+                        >
+                          Số tiền GM
+                        </span>
+                        <Input
+                          aria-labelledby="guarantee-amount-label"
+                          inputMode="numeric"
+                          onChange={(event) =>
+                            setGuaranteeAmount(event.target.value)
+                          }
+                          placeholder="100000000"
+                          value={guaranteeAmount}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <span
+                          className="block text-sm font-medium"
+                          id="guarantee-notes-label"
+                        >
+                          Ghi chú
+                        </span>
+                        <Input
+                          aria-labelledby="guarantee-notes-label"
+                          onChange={(event) =>
+                            setGuaranteeNotes(event.target.value)
+                          }
+                          placeholder="GM advance"
+                          value={guaranteeNotes}
+                        />
+                      </div>
+
+                      <Button
+                        className="h-10 w-full bg-[#071118] text-white hover:bg-[#111827]"
+                        disabled={guaranteeState === 'saving'}
+                        type="submit"
+                      >
+                        <WalletCards className="size-4" />
+                        {guaranteeState === 'saving'
+                          ? 'Đang lưu...'
+                          : 'Tạo GM'}
+                      </Button>
+                    </form>
+
+                    {guaranteeMessage ? (
+                      <p
+                        className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+                          guaranteeState === 'failed'
+                            ? 'border-[#f0b7b2] bg-[#fff2f0] text-[#a53a30]'
+                            : 'border-[#bce9e4] bg-[#f0fffc] text-[#047a70]'
+                        }`}
+                      >
+                        {guaranteeMessage}
+                      </p>
+                    ) : null}
+                  </section>
+
+                  <section className="music-card p-4 md:p-5">
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          GM ledger
+                        </p>
+                        <h2 className="mt-1 text-lg font-semibold">
+                          Theo dõi recoup
+                        </h2>
+                      </div>
+                      <Badge className="rounded-lg bg-[#e7fbf7] text-[#00796f]">
+                        {formatNumber(activeGuaranteeCount)} active
+                      </Badge>
+                    </div>
+
+                    <div className="mb-4 grid gap-3 md:grid-cols-3">
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Balance
+                        </p>
+                        <p className="font-display mt-2 truncate text-xl font-semibold">
+                          {formatMoney(totalGuaranteeBalance)}
+                        </p>
+                      </div>
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Recouped
+                        </p>
+                        <p className="font-display mt-2 truncate text-xl font-semibold">
+                          {formatMoney(totalGuaranteeRecouped)}
+                        </p>
+                      </div>
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          GM Count
+                        </p>
+                        <p className="font-display mt-2 text-xl font-semibold">
+                          {formatNumber(guarantees.length)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="relative block">
+                        <span className="sr-only">Tìm GM</span>
+                        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          aria-label="Tìm GM"
+                          className="pl-9"
+                          onChange={(event) =>
+                            setGuaranteeSearch(event.target.value)
+                          }
+                          placeholder="Tìm client, bài hát..."
+                          value={guaranteeSearch}
+                        />
+                      </div>
+                      <Select
+                        onValueChange={(value) => {
+                          if (
+                            value === 'all' ||
+                            value === 'active' ||
+                            value === 'recouped' ||
+                            value === 'archived'
+                          ) {
+                            setGuaranteeStatusFilter(value);
+                          }
+                        }}
+                        value={guaranteeStatusFilter}
+                      >
+                        <SelectTrigger
+                          aria-label="Lọc trạng thái GM"
+                          className="music-control h-10 w-full bg-white"
+                        >
+                          <span className="flex-1 truncate text-left">
+                            {guaranteeStatusFilterLabel(
+                              guaranteeStatusFilter,
+                            )}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Tất cả GM</SelectItem>
+                          <SelectItem value="active">Đang trừ GM</SelectItem>
+                          <SelectItem value="recouped">Đã recoup</SelectItem>
+                          <SelectItem value="archived">Archived</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="overflow-hidden rounded-lg border border-border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Client</TableHead>
+                            <TableHead>Track</TableHead>
+                            <TableHead>GM</TableHead>
+                            <TableHead>Đã trừ</TableHead>
+                            <TableHead>Còn lại</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {visibleGuarantees.length > 0 ? (
+                            visibleGuarantees.map((guarantee) => (
+                              <TableRow key={guarantee.id}>
+                                <TableCell className="font-medium">
+                                  <span className="block">
+                                    {guarantee.clientName}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {guarantee.clientCode}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="block font-medium">
+                                    {guarantee.trackTitle}
+                                  </span>
+                                  {guarantee.notes ? (
+                                    <span className="text-xs text-muted-foreground">
+                                      {guarantee.notes}
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell>
+                                  {formatMoney(guarantee.initialAmount)}
+                                </TableCell>
+                                <TableCell>
+                                  {formatMoney(guarantee.recoupedAmount)}
+                                </TableCell>
+                                <TableCell>
+                                  {formatMoney(guarantee.balanceAmount)}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={guaranteeBadgeClass(
+                                      guarantee.status,
+                                    )}
+                                    variant="secondary"
+                                  >
+                                    {guaranteeStatusLabel(guarantee.status)}
+                                  </Badge>
+                                  {guarantee.lastRecoupedPeriod ? (
+                                    <span className="mt-1 block text-xs text-muted-foreground">
+                                      {guarantee.lastRecoupedPeriod}
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell>
+                                  {guarantee.status === 'archived' ? (
+                                    <Button
+                                      className="h-9"
+                                      disabled={
+                                        activeGuaranteeActionId ===
+                                        guarantee.id
+                                      }
+                                      onClick={() => {
+                                        void updateTrackGuarantee(
+                                          guarantee,
+                                          'reactivate',
+                                        );
+                                      }}
+                                      type="button"
+                                      variant="outline"
+                                    >
+                                      <RefreshCw className="size-4" />
+                                      Reactivate
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      className="h-9"
+                                      disabled={
+                                        activeGuaranteeActionId ===
+                                        guarantee.id
+                                      }
+                                      onClick={() => {
+                                        void updateTrackGuarantee(
+                                          guarantee,
+                                          'archive',
+                                        );
+                                      }}
+                                      type="button"
+                                      variant="outline"
+                                    >
+                                      <Archive className="size-4" />
+                                      Archive
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell
+                                className="h-24 text-center text-sm text-muted-foreground"
+                                colSpan={7}
+                              >
+                                {guarantees.length > 0
+                                  ? 'Không có GM khớp bộ lọc.'
+                                  : 'Chưa có GM.'}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </section>
+                </section>
+
                 <ActivityLogPanel activityRows={activityRows} />
               </TabsContent>
             </Tabs>
