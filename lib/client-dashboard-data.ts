@@ -10,7 +10,7 @@ import {
   type RevenueTrendPoint,
   type StatementPeriod,
 } from '@/lib/dashboard-data';
-import { periodDisplayLabel } from '@/lib/calendar-months';
+import { periodDisplayLabel } from '@/lib/reporting-periods';
 import {
   createEmptyCurrencyBreakdowns,
   dimensionToBreakdownKey,
@@ -83,8 +83,8 @@ export async function getClientDashboardData({
        ON c.id = rp.client_id
      WHERE rp.client_id = ?
        AND rp.status IN ('published', 'locked')
-       AND rp.currency IN ('USD', 'VND')
-     ORDER BY rp.period DESC, rp.currency ASC
+       AND rp.currency = 'VND'
+     ORDER BY rp.period DESC
      LIMIT 120`,
   )
     .bind(clientId)
@@ -130,8 +130,8 @@ export async function getClientDashboardData({
      WHERE rb.client_id = ?
        AND rp.client_id = ?
        AND rp.status IN ('published', 'locked')
-       AND rp.currency IN ('USD', 'VND')
-     ORDER BY rp.period DESC, rp.currency ASC, rb.dimension ASC, abs(rb.value) DESC
+       AND rp.currency = 'VND'
+     ORDER BY rp.period DESC, rb.dimension ASC, abs(rb.value) DESC
      LIMIT 2000`,
   )
     .bind(clientId, clientId)
@@ -154,7 +154,6 @@ function staticDashboardData(clientId: string): ClientDashboardData {
       statementPeriods.length > 0
         ? {
             [statementPeriods[0].period]: {
-              USD: breakdownsByCurrency.USD,
               VND: breakdownsByCurrency.VND,
             },
           }
@@ -173,15 +172,10 @@ function mapTrend(statementPeriods: StatementPeriod[]) {
       period: statement.period,
       rowCount: 0,
       units: 0,
-      usd: 0,
       vnd: 0,
     };
 
-    if (statement.currency === 'USD') {
-      existing.usd += statement.revenue;
-    } else {
-      existing.vnd += statement.revenue;
-    }
+    existing.vnd += statement.revenue;
     existing.units += statement.units;
     existing.rowCount += statement.rowCount;
     trendMap.set(statement.period, existing);

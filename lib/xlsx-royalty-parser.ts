@@ -138,7 +138,7 @@ export function parseRoyaltyWorkbook(
       );
       if (!currency) {
         throw new Error(
-          'Không tìm thấy hoặc chưa hỗ trợ giá trị Currency trong một số dòng dữ liệu. Hiện dashboard chỉ hỗ trợ USD và VND.',
+          'File chỉ hỗ trợ VNĐ. Vui lòng xoá hoặc quy đổi các dòng ngoại tệ trước khi import.',
         );
       }
 
@@ -172,7 +172,7 @@ export function parseRoyaltyWorkbook(
 
   if (!sawUsableSheet) {
     throw new Error(
-      'Không tìm thấy sheet dữ liệu có đủ cột Currency, Net Payable và thông tin track/source.',
+      'Không tìm thấy sheet dữ liệu có đủ cột Net Payable và thông tin track/source.',
     );
   }
 
@@ -229,14 +229,13 @@ function parseSheetRows(rows: SheetRow[]) {
 
 function hasRequiredHeaders(headers: HeaderMap) {
   const hasRevenue = headers.netRevenue !== undefined;
-  const hasCurrency = headers.currency !== undefined;
   const hasContext =
     headers.source !== undefined ||
     headers.territory !== undefined ||
     headers.track !== undefined ||
     headers.configuration !== undefined;
 
-  return hasRevenue && hasCurrency && hasContext;
+  return hasRevenue && hasContext;
 }
 
 function mapHeaderRow(cells: string[]) {
@@ -527,16 +526,13 @@ function normalizeHeader(value: string) {
 
 function parseCurrency(value: string): CurrencyCode | null {
   const normalized = value.trim().toUpperCase();
-  if (!normalized) return null;
-  if (normalized.includes('VND') || normalized.includes('VIETNAM DONG')) {
-    return 'VND';
-  }
+  if (!normalized) return 'VND';
   if (
-    normalized.includes('USD') ||
-    normalized.includes('US DOLLAR') ||
-    normalized === '$'
+    normalized.includes('VND') ||
+    normalized.includes('VNĐ') ||
+    normalized.includes('VIETNAM DONG')
   ) {
-    return 'USD';
+    return 'VND';
   }
 
   return null;

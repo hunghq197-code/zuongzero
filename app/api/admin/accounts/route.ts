@@ -262,7 +262,7 @@ async function createAccountResponse(request: Request) {
            created_at,
            updated_at
          )
-         VALUES (?, ?, ?, ?, 'USD', 'active', ?, ?)`,
+         VALUES (?, ?, ?, ?, 'VND', 'active', ?, ?)`,
       ).bind(client.id, client.code, client.legalName, client.name, now, now),
       env.DB.prepare(
         `INSERT INTO client_users (

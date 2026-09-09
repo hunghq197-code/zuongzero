@@ -7,7 +7,7 @@ import {
   listManagedCustomers,
 } from '@/lib/admin-customers';
 import { getAdminOverviewData } from '@/lib/admin-dashboard';
-import { currentCalendarMonth } from '@/lib/calendar-months';
+import { currentCalendarQuarter } from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
 import { ensureUserRecord } from '@/lib/user-records';
 
@@ -149,7 +149,7 @@ async function updateCustomerResponse(request: Request) {
 
   return Response.json({
     customers: await listManagedCustomers(env.DB),
-    overview: await getAdminOverviewData(env.DB, currentCalendarMonth()),
+    overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
     message: 'Đã cập nhật thông tin khách hàng.',
   });
 }
@@ -211,7 +211,7 @@ async function deleteCustomerResponse(request: Request) {
 
     return Response.json({
       customers: await listManagedCustomers(env.DB),
-      overview: await getAdminOverviewData(env.DB, currentCalendarMonth()),
+      overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
       message: 'Đã lưu trữ khách hàng.',
     });
   }
@@ -294,7 +294,7 @@ async function deleteCustomerResponse(request: Request) {
 
   return Response.json({
     customers: await listManagedCustomers(env.DB),
-    overview: await getAdminOverviewData(env.DB, currentCalendarMonth()),
+    overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
     message: 'Đã xoá khách hàng và dữ liệu liên quan.',
   });
 }

@@ -4,7 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Zuong Zero Artist Portal',
   description:
-    'Security-first artist portal for client statements, Excel uploads, and monthly media metrics.',
+    'Security-first artist portal for client statements, Excel uploads, and quarterly VND settlements.',
 };
 
 export default function RootLayout({

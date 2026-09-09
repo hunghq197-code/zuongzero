@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   CheckCircle2,
-  Coins,
   Disc3,
   FileSpreadsheet,
   Filter,
@@ -48,15 +47,14 @@ import {
   type BreakdownItem,
   type BreakdownKey,
   type BreakdownSection,
-  type CurrencyCode,
   type RevenueTrendPoint,
   type StatementMetric,
   type StatementPeriod,
 } from '@/lib/dashboard-data';
 import {
-  currentCalendarMonth,
+  currentCalendarQuarter,
   periodDisplayLabel,
-} from '@/lib/calendar-months';
+} from '@/lib/reporting-periods';
 import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
 
@@ -95,8 +93,6 @@ const palette = [
   '#64748b',
 ];
 
-const currencies: CurrencyCode[] = ['USD', 'VND'];
-
 const toneClass: Record<StatementMetric['tone'], string> = {
   ink: 'border-l-[#071118]',
   blue: 'border-l-[#2563eb]',
@@ -117,16 +113,16 @@ const toneDotClass: Record<StatementMetric['tone'], string> = {
 
 type DashboardAccessLevel = 'admin' | 'owner' | 'viewer' | 'finance';
 
-function formatMoney(value: number, currency: CurrencyCode) {
-  return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('vi-VN', {
     style: 'currency',
-    currency,
-    maximumFractionDigits: currency === 'VND' ? 0 : 2,
+    currency: 'VND',
+    maximumFractionDigits: 0,
   }).format(value);
 }
 
 function formatNumber(value: number) {
-  return new Intl.NumberFormat('en-US').format(value);
+  return new Intl.NumberFormat('vi-VN').format(value);
 }
 
 function statusLabel(status: string) {
@@ -140,14 +136,14 @@ function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
   return [
     {
       label: 'Opening Balance',
-      value: formatMoney(activePeriod.opening, activePeriod.currency),
+      value: formatMoney(activePeriod.opening),
       helper: 'Beginning balance',
       tone: 'ink',
     },
     {
       label: 'Net Payable',
-      value: formatMoney(activePeriod.revenue, activePeriod.currency),
-      helper: 'Current period',
+      value: formatMoney(activePeriod.revenue),
+      helper: 'Current quarter',
       tone: 'blue',
     },
     {
@@ -164,13 +160,13 @@ function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
     },
     {
       label: 'Net Costs',
-      value: formatMoney(activePeriod.costs, activePeriod.currency),
+      value: formatMoney(activePeriod.costs),
       helper: 'Deducted costs',
       tone: 'rose',
     },
     {
       label: 'Closing Balance',
-      value: formatMoney(activePeriod.closing, activePeriod.currency),
+      value: formatMoney(activePeriod.closing),
       helper: 'Ending balance',
       tone: 'teal',
     },
@@ -180,12 +176,10 @@ function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
 function makeEmptyPeriod({
   clientId,
   clientName,
-  currency,
   period,
 }: {
   clientId: string;
   clientName: string;
-  currency: CurrencyCode;
   period: string;
 }): StatementPeriod {
   return {
@@ -193,8 +187,8 @@ function makeEmptyPeriod({
     clientName,
     closing: 0,
     costs: 0,
-    currency,
-    id: `${clientId}:${period}:${currency}:empty`,
+    currency: 'VND',
+    id: `${clientId}:${period}:VND:empty`,
     label: periodDisplayLabel(period),
     opening: 0,
     period,
@@ -239,65 +233,44 @@ export function RoyaltyDashboard({
     [assignedClient.id, dashboardPeriods],
   );
   const hasStatements = clientPeriods.length > 0;
-  const defaultMonth = useMemo(() => currentCalendarMonth(), []);
-  const months = useMemo(
+  const defaultPeriod = useMemo(() => currentCalendarQuarter(), []);
+  const availablePeriods = useMemo(
     () =>
       hasStatements
         ? Array.from(new Set(clientPeriods.map((period) => period.period)))
-        : [defaultMonth],
-    [clientPeriods, defaultMonth, hasStatements],
+        : [defaultPeriod],
+    [clientPeriods, defaultPeriod, hasStatements],
   );
-  const [selectedMonth, setSelectedMonth] = useState(
-    clientPeriods[0]?.period ?? defaultMonth,
+  const [selectedPeriod, setSelectedPeriod] = useState(
+    clientPeriods[0]?.period ?? defaultPeriod,
   );
-  const resolvedSelectedMonth = months.includes(selectedMonth)
-    ? selectedMonth
-    : (months[0] ?? defaultMonth);
-  const selectedMonthPeriods = useMemo(
+  const resolvedSelectedPeriod = availablePeriods.includes(selectedPeriod)
+    ? selectedPeriod
+    : (availablePeriods[0] ?? defaultPeriod);
+  const selectedPeriodRows = useMemo(
     () =>
-      clientPeriods.filter((period) => period.period === resolvedSelectedMonth),
-    [clientPeriods, resolvedSelectedMonth],
+      clientPeriods.filter(
+        (period) => period.period === resolvedSelectedPeriod,
+      ),
+    [clientPeriods, resolvedSelectedPeriod],
   );
-  const currencyOptions = useMemo<CurrencyCode[]>(
-    () =>
-      selectedMonthPeriods.length > 0
-        ? Array.from(
-            new Set(selectedMonthPeriods.map((period) => period.currency)),
-          )
-        : currencies,
-    [selectedMonthPeriods],
-  );
-  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(
-    clientPeriods[0]?.currency ?? 'USD',
-  );
-  const resolvedSelectedCurrency = currencyOptions.includes(selectedCurrency)
-    ? selectedCurrency
-    : (currencyOptions[0] ?? 'USD');
   const [activeTab, setActiveTab] = useState<BreakdownKey>('sources');
 
   const activePeriod =
-    clientPeriods.find(
-      (period) =>
-        period.period === resolvedSelectedMonth &&
-        period.currency === resolvedSelectedCurrency,
-    ) ??
-    clientPeriods.find((period) => period.period === resolvedSelectedMonth) ??
+    selectedPeriodRows.find((period) => period.currency === 'VND') ??
     clientPeriods[0] ??
     makeEmptyPeriod({
       clientId: assignedClient.id,
       clientName: assignedClient.name,
-      currency: resolvedSelectedCurrency,
-      period: resolvedSelectedMonth || defaultMonth,
+      period: resolvedSelectedPeriod || defaultPeriod,
     });
   const metrics = makeMetrics(activePeriod);
   const activeSection =
     breakdownSections.find((section) => section.id === activeTab) ??
     breakdownSections[0];
   const activeBreakdownData =
-    breakdownsByPeriod?.[activePeriod.period]?.[activePeriod.currency] ??
-    (usesProvidedData
-      ? emptyBreakdowns
-      : breakdownsByCurrency[activePeriod.currency]);
+    breakdownsByPeriod?.[activePeriod.period]?.VND ??
+    (usesProvidedData ? emptyBreakdowns : breakdownsByCurrency.VND);
   const activeBreakdown = hasStatements ? activeBreakdownData[activeTab] : [];
   const trendData = hasStatements ? dashboardTrend : [];
 
@@ -314,20 +287,16 @@ export function RoyaltyDashboard({
           name: 'select_statement_scope',
           title: 'Select statement scope',
           description:
-            'Select the visible read-only reporting month and currency in the client royalty dashboard.',
+            'Select the visible read-only reporting quarter in the client royalty dashboard.',
           inputSchema: {
             type: 'object',
             properties: {
-              month: {
+              period: {
                 type: 'string',
-                enum: months,
-              },
-              currency: {
-                type: 'string',
-                enum: currencyOptions,
+                enum: availablePeriods,
               },
             },
-            required: ['month', 'currency'],
+            required: ['period'],
             additionalProperties: false,
           },
           annotations: {
@@ -335,12 +304,10 @@ export function RoyaltyDashboard({
             untrustedContentHint: false,
           },
           execute(input: unknown) {
-            const parsed = parseScopeInput(input, months, currencyOptions);
-            setSelectedMonth(parsed.month);
-            setSelectedCurrency(parsed.currency);
+            const parsed = parseScopeInput(input, availablePeriods);
+            setSelectedPeriod(parsed.period);
             return {
-              month: parsed.month,
-              currency: parsed.currency,
+              period: parsed.period,
               status: 'selected',
             };
           },
@@ -350,7 +317,7 @@ export function RoyaltyDashboard({
     ).catch(() => undefined);
 
     return () => lifecycle.abort();
-  }, [currencyOptions, months]);
+  }, [availablePeriods]);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -435,8 +402,7 @@ export function RoyaltyDashboard({
                         {assignedClient.name}
                       </h2>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        {activePeriod.label} / {activePeriod.currency}
-                        {' statement'}
+                        {activePeriod.label} statement
                       </p>
                     </div>
                     <div className="flex min-w-[170px] items-center justify-between gap-3 rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-2 text-sm font-medium text-[#047a70]">
@@ -445,61 +411,32 @@ export function RoyaltyDashboard({
                     </div>
                   </div>
 
-                  <div className="mt-5 grid gap-3 md:grid-cols-[190px_150px]">
+                  <div className="mt-5 grid gap-3 md:grid-cols-[190px]">
                     <div className="space-y-2">
                       <span className="flex items-center gap-2 text-sm font-medium">
                         <Filter className="size-4 text-primary" />
-                        Tháng
+                        Quý
                       </span>
                       <Select
                         onValueChange={(value) => {
-                          if (value) setSelectedMonth(value);
+                          if (value) setSelectedPeriod(value);
                         }}
-                        value={resolvedSelectedMonth}
+                        value={resolvedSelectedPeriod}
                       >
                         <SelectTrigger
-                          aria-label="Tháng báo cáo"
+                          aria-label="Quý báo cáo"
                           className="music-control h-10 w-full"
                         >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {months.map((month) => {
+                          {availablePeriods.map((period) => {
                             return (
-                              <SelectItem key={month} value={month}>
-                                {periodDisplayLabel(month)}
+                              <SelectItem key={period} value={period}>
+                                {periodDisplayLabel(period)}
                               </SelectItem>
                             );
                           })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <span className="flex items-center gap-2 text-sm font-medium">
-                        <Coins className="size-4 text-primary" />
-                        Currency
-                      </span>
-                      <Select
-                        onValueChange={(value) => {
-                          if (value === 'USD' || value === 'VND') {
-                            setSelectedCurrency(value);
-                          }
-                        }}
-                        value={resolvedSelectedCurrency}
-                      >
-                        <SelectTrigger
-                          aria-label="Loại tiền"
-                          className="music-control h-10 w-full"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {currencyOptions.map((currency) => (
-                            <SelectItem key={currency} value={currency}>
-                              {currency}
-                            </SelectItem>
-                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -567,15 +504,12 @@ export function RoyaltyDashboard({
                       Revenue
                     </p>
                     <h2 className="mt-1 text-lg font-semibold">
-                      Monthly trend
+                      Quarterly trend
                     </h2>
                   </div>
                   <TrendingUp className="size-5 text-primary" />
                 </div>
-                <RevenueTrendChart
-                  currency={resolvedSelectedCurrency}
-                  data={trendData}
-                />
+                <RevenueTrendChart data={trendData} />
               </section>
 
               <section className="music-card p-4 md:p-5">
@@ -595,15 +529,13 @@ export function RoyaltyDashboard({
                     clientPeriods.slice(0, 6).map((period) => (
                       <div className="bg-white px-3 py-3" key={period.id}>
                         <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-medium">
-                            {period.label} - {period.currency}
-                          </p>
+                          <p className="text-sm font-medium">{period.label}</p>
                           <Badge className="rounded-lg" variant="outline">
                             {statusLabel(period.status)}
                           </Badge>
                         </div>
                         <p className="font-display mt-2 text-xl font-semibold">
-                          {formatMoney(period.closing, period.currency)}
+                          {formatMoney(period.closing)}
                         </p>
                       </div>
                     ))
@@ -647,7 +579,6 @@ export function RoyaltyDashboard({
               <TabsContent className="mt-5" value={activeTab}>
                 <BreakdownChart
                   chartType={activeSection.chartType}
-                  currency={resolvedSelectedCurrency}
                   data={activeBreakdown}
                   section={activeSection}
                 />
@@ -672,7 +603,6 @@ export function RoyaltyDashboard({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Period</TableHead>
-                      <TableHead>Currency</TableHead>
                       <TableHead>Rows</TableHead>
                       <TableHead>Units</TableHead>
                       <TableHead>Net Payable</TableHead>
@@ -686,12 +616,9 @@ export function RoyaltyDashboard({
                           <TableCell className="font-medium">
                             {period.label}: {period.clientName}
                           </TableCell>
-                          <TableCell>{period.currency}</TableCell>
                           <TableCell>{formatNumber(period.rowCount)}</TableCell>
                           <TableCell>{formatNumber(period.units)}</TableCell>
-                          <TableCell>
-                            {formatMoney(period.revenue, period.currency)}
-                          </TableCell>
+                          <TableCell>{formatMoney(period.revenue)}</TableCell>
                           <TableCell>
                             <Badge className="rounded-lg" variant="outline">
                               {statusLabel(period.status)}
@@ -720,47 +647,33 @@ export function RoyaltyDashboard({
   );
 }
 
-function parseScopeInput(
-  input: unknown,
-  months: string[],
-  currencyOptions: CurrencyCode[],
-) {
+function parseScopeInput(input: unknown, periods: string[]) {
   if (!input || typeof input !== 'object') {
     throw new Error('Input must be an object.');
   }
 
   const candidate = input as {
-    month?: unknown;
-    currency?: unknown;
+    period?: unknown;
   };
   if (
-    typeof candidate.month !== 'string' ||
-    !months.includes(candidate.month)
+    typeof candidate.period !== 'string' ||
+    !periods.includes(candidate.period)
   ) {
-    throw new Error('Invalid month.');
-  }
-  if (
-    typeof candidate.currency !== 'string' ||
-    !currencyOptions.includes(candidate.currency as CurrencyCode)
-  ) {
-    throw new Error('Invalid currency.');
+    throw new Error('Invalid period.');
   }
 
   return {
-    month: candidate.month,
-    currency: candidate.currency as CurrencyCode,
+    period: candidate.period,
   };
 }
 
 function BreakdownChart({
   data,
   chartType,
-  currency,
   section,
 }: {
   data: BreakdownItem[];
   chartType: BreakdownSection['chartType'];
-  currency: CurrencyCode;
   section: BreakdownSection;
 }) {
   return (
@@ -769,9 +682,9 @@ function BreakdownChart({
         {chartType === 'donut' ? (
           <DonutChart data={data} />
         ) : chartType === 'ranked' ? (
-          <RankedBreakdown currency={currency} data={data} />
+          <RankedBreakdown data={data} />
         ) : (
-          <BarBreakdown currency={currency} data={data} />
+          <BarBreakdown data={data} />
         )}
       </div>
 
@@ -792,7 +705,7 @@ function BreakdownChart({
             {data.map((item) => (
               <TableRow key={item.name}>
                 <TableCell className="font-medium">{item.name}</TableCell>
-                <TableCell>{formatMoney(item.value, currency)}</TableCell>
+                <TableCell>{formatMoney(item.value)}</TableCell>
                 <TableCell>{formatNumber(item.units)}</TableCell>
                 <TableCell>{item.percentage.toFixed(2)}%</TableCell>
               </TableRow>
@@ -804,14 +717,8 @@ function BreakdownChart({
   );
 }
 
-function RevenueTrendChart({
-  data,
-  currency,
-}: {
-  data: typeof revenueTrend;
-  currency: CurrencyCode;
-}) {
-  const values = data.map((item) => (currency === 'USD' ? item.usd : item.vnd));
+function RevenueTrendChart({ data }: { data: typeof revenueTrend }) {
+  const values = data.map((item) => item.vnd);
   const maxValue = Math.max(...values, 1);
 
   return (
@@ -823,7 +730,7 @@ function RevenueTrendChart({
       </div>
       <div className="flex min-w-0 items-end gap-3 overflow-hidden pb-3">
         {data.map((item, index) => {
-          const value = currency === 'USD' ? item.usd : item.vnd;
+          const value = item.vnd;
           return (
             <div
               className="flex min-w-0 flex-1 flex-col items-center gap-2"
@@ -831,7 +738,7 @@ function RevenueTrendChart({
             >
               <div className="flex h-[250px] w-full items-end border-b border-border">
                 <div
-                  aria-label={`${item.label}: ${formatMoney(value, currency)}`}
+                  aria-label={`${item.label}: ${formatMoney(value)}`}
                   className="w-full rounded-t-md"
                   style={{
                     backgroundColor: palette[index % palette.length],
@@ -850,13 +757,7 @@ function RevenueTrendChart({
   );
 }
 
-function BarBreakdown({
-  data,
-  currency,
-}: {
-  data: BreakdownItem[];
-  currency: CurrencyCode;
-}) {
+function BarBreakdown({ data }: { data: BreakdownItem[] }) {
   const maxValue = Math.max(...data.map((item) => item.value), 1);
 
   return (
@@ -874,7 +775,7 @@ function BarBreakdown({
           >
             <div className="flex h-[250px] w-full items-end border-b border-border">
               <div
-                aria-label={`${item.name}: ${formatMoney(item.value, currency)}`}
+                aria-label={`${item.name}: ${formatMoney(item.value)}`}
                 className="w-full rounded-t-md"
                 style={{
                   backgroundColor: palette[index % palette.length],
@@ -892,13 +793,7 @@ function BarBreakdown({
   );
 }
 
-function RankedBreakdown({
-  data,
-  currency,
-}: {
-  data: BreakdownItem[];
-  currency: CurrencyCode;
-}) {
+function RankedBreakdown({ data }: { data: BreakdownItem[] }) {
   const maxValue = Math.max(...data.map((item) => item.value), 1);
 
   return (
@@ -910,7 +805,7 @@ function RankedBreakdown({
               {item.name}
             </span>
             <span className="shrink-0 text-sm text-muted-foreground">
-              {formatMoney(item.value, currency)}
+              {formatMoney(item.value)}
             </span>
           </div>
           <div className="h-3 overflow-hidden rounded-full bg-muted">

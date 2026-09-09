@@ -2,7 +2,10 @@ import { env } from 'cloudflare:workers';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
-import { periodDisplayLabel } from '@/lib/calendar-months';
+import {
+  periodDisplayLabel,
+  REPORT_PERIOD_PATTERN,
+} from '@/lib/reporting-periods';
 import { clients, type CurrencyCode } from '@/lib/dashboard-data';
 import {
   breakdownKeyToDimension,
@@ -19,7 +22,6 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const ALLOWED_MIME_TYPES = new Set([XLSX_MIME, 'application/octet-stream']);
-const PERIOD_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 const IMPORT_BATCH_SIZE = 40;
 
 type UploadClient = {
@@ -32,8 +34,7 @@ type UploadClient = {
 type CustomerUploadSummary = {
   latestPeriod: string | null;
   totalRevenue: number;
-  totalRevenueVnd: number;
-  uploadedMonths: number;
+  uploadedQuarters: number;
 };
 
 export const dynamic = 'force-dynamic';
@@ -71,8 +72,8 @@ async function uploadResponse(request: Request) {
     return jsonError('Client không hợp lệ hoặc chưa được admin quản lý.', 400);
   }
 
-  if (!PERIOD_PATTERN.test(period)) {
-    return jsonError('Kỳ báo cáo phải có dạng YYYY-MM.', 400);
+  if (!REPORT_PERIOD_PATTERN.test(period)) {
+    return jsonError('Kỳ báo cáo phải có dạng YYYY-Q1 đến YYYY-Q4.', 400);
   }
 
   if (!(file instanceof File)) {
@@ -116,7 +117,7 @@ async function uploadResponse(request: Request) {
 
   const importSummary = {
     currencies: parsedWorkbook.currencies,
-    currencyPolicy: 'split-by-currency-before-publish',
+    currencyPolicy: 'VND-only-before-publish',
     expectedColumns: [
       'Source',
       'Sub Source',
@@ -130,12 +131,11 @@ async function uploadResponse(request: Request) {
       'Units',
       'Net Payable',
       'Sale Date',
-      'Currency',
     ],
     fileType: 'xlsx',
     importStatus: 'imported',
     malwareScan: 'pending',
-    monthPolicy: 'Gregorian YYYY-MM, Asia/Bangkok UTC+7',
+    periodPolicy: 'Gregorian quarter YYYY-Qn, Asia/Bangkok UTC+7',
     rowCount: parsedWorkbook.rowCount,
     signature: 'zip',
     warnings: parsedWorkbook.warnings,
@@ -159,8 +159,6 @@ async function uploadResponse(request: Request) {
   await runBatchInChunks(env.DB, statements);
 
   const customer = await readCustomerUploadSummary(env.DB, selectedClient.id);
-  const currencies = parsedWorkbook.currencies.join(', ');
-
   return Response.json({
     currencies: parsedWorkbook.currencies,
     customer,
@@ -168,7 +166,7 @@ async function uploadResponse(request: Request) {
     status: 'imported',
     uploadId,
     warnings: parsedWorkbook.warnings,
-    message: `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${selectedClient.name}, ${periodDisplayLabel(period)} (${currencies}).`,
+    message: `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${selectedClient.name}, ${periodDisplayLabel(period)} (VNĐ).`,
   });
 }
 
@@ -218,7 +216,7 @@ async function buildImportStatements({
     db
       .prepare(
         `INSERT INTO clients (id, code, legal_name, display_name, default_currency, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'USD', 'active', ?, ?)
+         VALUES (?, ?, ?, ?, 'VND', 'active', ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            legal_name = excluded.legal_name,
            display_name = excluded.display_name,
@@ -245,7 +243,7 @@ async function buildImportStatements({
            created_at,
            updated_at
          )
-         VALUES (?, ?, ?, 'MULTI', 'validating', NULL, NULL, ?, ?)
+         VALUES (?, ?, ?, 'IMPORT', 'validating', NULL, NULL, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            status = 'validating',
            updated_at = excluded.updated_at`,
@@ -294,7 +292,6 @@ async function buildImportStatements({
       db,
       selectedClient.id,
       period,
-      parsedStatement.currency,
     );
     const costs = 0;
     const reservesWithheld = 0;
@@ -471,7 +468,6 @@ async function readPreviousClosingBalance(
   db: D1Database,
   clientId: string,
   period: string,
-  currency: CurrencyCode,
 ) {
   const previous = await db
     .prepare(
@@ -481,13 +477,13 @@ async function readPreviousClosingBalance(
          ON rp.id = s.report_period_id
        WHERE s.client_id = ?
          AND rp.client_id = ?
-         AND rp.currency = ?
+         AND rp.currency = 'VND'
          AND rp.status IN ('published', 'locked')
          AND rp.period < ?
        ORDER BY rp.period DESC
        LIMIT 1`,
     )
-    .bind(clientId, clientId, currency, period)
+    .bind(clientId, clientId, period)
     .first<{ closing: number }>();
 
   return Number(previous?.closing) || 0;
@@ -502,23 +498,15 @@ async function readCustomerUploadSummary(db: D1Database, clientId: string) {
            FROM report_periods rp
            WHERE rp.client_id = ?
              AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
+             AND rp.currency = 'VND'
          ) AS latestPeriod,
          (
            SELECT count(DISTINCT rp.period)
            FROM report_periods rp
            WHERE rp.client_id = ?
              AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
-         ) AS uploadedMonths,
-         (
-           SELECT COALESCE(sum(s.net_revenue), 0)
-           FROM statements s
-           JOIN report_periods rp
-             ON rp.id = s.report_period_id
-           WHERE s.client_id = ?
-             AND rp.currency = 'USD'
-         ) AS totalRevenue,
+             AND rp.currency = 'VND'
+         ) AS uploadedQuarters,
          (
            SELECT COALESCE(sum(s.net_revenue), 0)
            FROM statements s
@@ -526,16 +514,15 @@ async function readCustomerUploadSummary(db: D1Database, clientId: string) {
              ON rp.id = s.report_period_id
            WHERE s.client_id = ?
              AND rp.currency = 'VND'
-         ) AS totalRevenueVnd`,
+         ) AS totalRevenue`,
     )
-    .bind(clientId, clientId, clientId, clientId)
+    .bind(clientId, clientId, clientId)
     .first<CustomerUploadSummary>();
 
   return {
     latestPeriod: summary?.latestPeriod ?? null,
     totalRevenue: Number(summary?.totalRevenue) || 0,
-    totalRevenueVnd: Number(summary?.totalRevenueVnd) || 0,
-    uploadedMonths: Number(summary?.uploadedMonths) || 0,
+    uploadedQuarters: Number(summary?.uploadedQuarters) || 0,
   };
 }
 

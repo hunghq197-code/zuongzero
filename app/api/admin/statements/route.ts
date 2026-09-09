@@ -8,11 +8,12 @@ import {
   listAdminStatements,
 } from '@/lib/admin-dashboard';
 import { getAdminAccess } from '@/lib/admin-auth';
-import { currentCalendarMonth } from '@/lib/calendar-months';
+import {
+  currentCalendarQuarter,
+  REPORT_PERIOD_PATTERN,
+} from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
 import { ensureUserRecord } from '@/lib/user-records';
-
-const PERIOD_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 
 type StatementBody = {
   action?: unknown;
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const clientId = cleanId(url.searchParams.get('clientId'));
     const requestedPeriod = url.searchParams.get('period') ?? '';
-    const period = PERIOD_PATTERN.test(requestedPeriod)
+    const period = REPORT_PERIOD_PATTERN.test(requestedPeriod)
       ? requestedPeriod
       : null;
 
@@ -58,7 +59,9 @@ export async function GET(request: Request) {
       ) {
         return Response.json({
           statements: fallbackAdminStatements(),
-          overview: fallbackAdminOverviewData(period ?? currentCalendarMonth()),
+          overview: fallbackAdminOverviewData(
+            period ?? currentCalendarQuarter(),
+          ),
           message: 'Loaded',
         });
       }
@@ -73,7 +76,7 @@ export async function GET(request: Request) {
       }),
       overview: await getAdminOverviewData(
         env.DB,
-        period ?? currentCalendarMonth(),
+        period ?? currentCalendarQuarter(),
       ),
       message: 'Loaded',
     });
@@ -150,7 +153,7 @@ async function updateStatementResponse(request: Request) {
            locked_at = CASE WHEN ? = 'locked' THEN ? ELSE NULL END,
            updated_at = ?
        WHERE id = ?
-         AND currency IN ('USD', 'VND')`,
+         AND currency = 'VND'`,
     ).bind(
       nextStatus,
       nextStatus,
@@ -275,7 +278,7 @@ async function deleteStatementResponse(request: Request) {
         env.DB.prepare(
           `DELETE FROM report_periods
            WHERE id = ?
-             AND currency = 'MULTI'
+             AND currency IN ('IMPORT', 'MULTI')
              AND NOT EXISTS (
                SELECT 1
                FROM uploads
@@ -337,7 +340,7 @@ async function findStatementTarget(db: D1Database, reportPeriodId: string) {
        JOIN statements s
          ON s.report_period_id = rp.id
        WHERE rp.id = ?
-         AND rp.currency IN ('USD', 'VND')
+         AND rp.currency = 'VND'
        LIMIT 1`,
     )
     .bind(reportPeriodId)
@@ -370,7 +373,7 @@ async function findStatementDeleteTarget(
        LEFT JOIN uploads u
          ON u.id = s.source_upload_id
        WHERE rp.id = ?
-         AND rp.currency IN ('USD', 'VND')
+         AND rp.currency = 'VND'
        LIMIT 1`,
     )
     .bind(reportPeriodId)

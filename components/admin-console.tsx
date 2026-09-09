@@ -72,8 +72,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { clients, type CurrencyCode } from '@/lib/dashboard-data';
-import { buildCalendarMonthOptions } from '@/lib/calendar-months';
+import { clients } from '@/lib/dashboard-data';
+import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
 import { type AdminActivityRow } from '@/lib/admin-activity';
 import {
   fallbackAdminOverviewData,
@@ -106,9 +106,8 @@ type ManagedCustomerRow = {
   name: string;
   viewerEmail: string | null;
   latestPeriod: string | null;
-  uploadedMonths: number;
+  uploadedQuarters: number;
   totalRevenue: number;
-  totalRevenueVnd: number;
   status: CustomerStatus;
 };
 
@@ -134,21 +133,20 @@ const fallbackCustomers: ManagedCustomerRow[] = clients.map((client) => ({
   name: client.name,
   status: client.status as CustomerStatus,
   totalRevenue: client.totalRevenue,
-  totalRevenueVnd: client.secondaryRevenue,
-  uploadedMonths: client.uploadedMonths,
+  uploadedQuarters: client.uploadedQuarters,
   viewerEmail: client.viewerEmail,
 }));
 
-function formatMoney(value: number, currency: CurrencyCode = 'USD') {
-  return new Intl.NumberFormat(currency === 'VND' ? 'vi-VN' : 'en-US', {
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('vi-VN', {
     style: 'currency',
-    currency,
-    maximumFractionDigits: currency === 'VND' ? 0 : 2,
+    currency: 'VND',
+    maximumFractionDigits: 0,
   }).format(value);
 }
 
 function formatNumber(value: number) {
-  return new Intl.NumberFormat('en-US').format(value);
+  return new Intl.NumberFormat('vi-VN').format(value);
 }
 
 function accountRoleLabel(role: ManagedAccountRow['role']) {
@@ -329,16 +327,16 @@ export function AdminConsole({
   userEmail: string;
 }) {
   const isSuperAdmin = adminRole === 'super_admin';
-  const adminMonthOptions = useMemo(() => buildCalendarMonthOptions(), []);
-  const initialMonth = adminMonthOptions[0]?.value ?? '';
+  const adminQuarterOptions = useMemo(() => buildCalendarQuarterOptions(), []);
+  const initialPeriod = adminQuarterOptions[0]?.value ?? '';
   const [customers, setCustomers] =
     useState<ManagedCustomerRow[]>(fallbackCustomers);
   const [selectedClient, setSelectedClient] = useState(
     fallbackCustomers[0]?.id ?? '',
   );
-  const [selectedMonth, setSelectedMonth] = useState(initialMonth);
+  const [selectedPeriod, setSelectedPeriod] = useState(initialPeriod);
   const [overview, setOverview] = useState<AdminOverviewData>(() =>
-    fallbackAdminOverviewData(initialMonth),
+    fallbackAdminOverviewData(initialPeriod),
   );
   const [statementRows, setStatementRows] = useState<AdminStatementRow[]>(
     fallbackAdminStatements(),
@@ -406,9 +404,9 @@ export function AdminConsole({
     customers.find((client) => client.id === selectedClient) ??
     customers[0] ??
     null;
-  const selectedMonthLabel =
-    adminMonthOptions.find((month) => month.value === selectedMonth)?.label ??
-    selectedMonth;
+  const selectedPeriodLabel =
+    adminQuarterOptions.find((period) => period.value === selectedPeriod)
+      ?.label ?? selectedPeriod;
   const visibleCustomers = useMemo(() => {
     const query = customerSearch.trim().toLowerCase();
 
@@ -441,7 +439,6 @@ export function AdminConsole({
         rowMatchesSearch(query, [
           statement.clientCode,
           statement.clientName,
-          statement.currency,
           statement.filename,
           statement.period,
           statement.status,
@@ -454,8 +451,8 @@ export function AdminConsole({
     [selectedFile],
   );
   const activeCustomerCount = overview.summary.activeCustomers;
-  const uploadedMonthCount = overview.summary.statementCount;
-  const totalUsdRevenue = overview.summary.revenueUsd;
+  const uploadedQuarterCount = overview.summary.statementCount;
+  const totalRevenue = overview.summary.revenueVnd;
 
   useEffect(() => {
     let cancelled = false;
@@ -473,10 +470,10 @@ export function AdminConsole({
             isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers',
           ),
           fetchWithSession(
-            `/api/admin/overview?period=${encodeURIComponent(selectedMonth)}`,
+            `/api/admin/overview?period=${encodeURIComponent(selectedPeriod)}`,
           ),
           fetchWithSession(
-            `/api/admin/statements?period=${encodeURIComponent(selectedMonth)}`,
+            `/api/admin/statements?period=${encodeURIComponent(selectedPeriod)}`,
           ),
           fetchWithSession('/api/admin/activity?limit=12'),
         ]);
@@ -531,7 +528,8 @@ export function AdminConsole({
               : (nextCustomers[0]?.id ?? ''),
           );
           setOverview(
-            overviewResult.overview ?? fallbackAdminOverviewData(selectedMonth),
+            overviewResult.overview ??
+              fallbackAdminOverviewData(selectedPeriod),
           );
           setStatementRows(statementsResult.statements ?? []);
           setActivityRows(activityResult.activity ?? []);
@@ -563,9 +561,9 @@ export function AdminConsole({
     return () => {
       cancelled = true;
     };
-  }, [isSuperAdmin, selectedMonth]);
+  }, [isSuperAdmin, selectedPeriod]);
 
-  async function refreshAdminSnapshot(period = selectedMonth) {
+  async function refreshAdminSnapshot(period = selectedPeriod) {
     const [
       customersResponse,
       overviewResponse,
@@ -684,7 +682,7 @@ export function AdminConsole({
       setAccountInviteUrl(result.account?.inviteUrl ?? '');
       setAccountMessage(result.message ?? 'Đã tạo tài khoản.');
       setAccountState('saved');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
       if (result.account?.clientId) {
         setSelectedClient(result.account.clientId);
       }
@@ -819,7 +817,7 @@ export function AdminConsole({
       setCustomers(result.customers ?? []);
       setResetMessage(result.message ?? 'Đã cập nhật tài khoản.');
       setResetState('saved');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setResetMessage(
         error instanceof Error
@@ -847,7 +845,7 @@ export function AdminConsole({
     const body = new FormData();
     body.append('file', selectedFile);
     body.append('clientId', activeClient.id);
-    body.append('period', selectedMonth);
+    body.append('period', selectedPeriod);
 
     try {
       const response = await fetchWithSession('/api/admin/uploads', {
@@ -858,8 +856,7 @@ export function AdminConsole({
         customer?: {
           latestPeriod: string | null;
           totalRevenue: number;
-          totalRevenueVnd: number;
-          uploadedMonths: number;
+          uploadedQuarters: number;
         };
         message?: string;
       }>(response);
@@ -881,18 +878,16 @@ export function AdminConsole({
                     result.customer?.latestPeriod ?? customer.latestPeriod,
                   totalRevenue:
                     result.customer?.totalRevenue ?? customer.totalRevenue,
-                  totalRevenueVnd:
-                    result.customer?.totalRevenueVnd ??
-                    customer.totalRevenueVnd,
-                  uploadedMonths:
-                    result.customer?.uploadedMonths ?? customer.uploadedMonths,
+                  uploadedQuarters:
+                    result.customer?.uploadedQuarters ??
+                    customer.uploadedQuarters,
                 }
               : customer,
           ),
         );
       }
       setUploadMessage(result.message ?? 'Đã lưu file.');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setUploadState('failed');
       setUploadMessage(
@@ -947,7 +942,7 @@ export function AdminConsole({
       setCustomerActionMessage(result.message ?? 'Đã lưu khách hàng.');
       setCustomerActionState('saved');
       setEditingCustomerId('');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setCustomerActionMessage(
         error instanceof Error
@@ -991,7 +986,7 @@ export function AdminConsole({
       setCustomers(result.customers ?? []);
       setCustomerActionMessage(result.message ?? 'Đã lưu trữ khách hàng.');
       setCustomerActionState('saved');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setCustomerActionMessage(
         error instanceof Error
@@ -1036,7 +1031,7 @@ export function AdminConsole({
       setCustomers(result.customers ?? []);
       setCustomerActionMessage(result.message ?? 'Đã xoá khách hàng.');
       setCustomerActionState('saved');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setCustomerActionMessage(
         error instanceof Error
@@ -1088,7 +1083,7 @@ export function AdminConsole({
       setStatementRows(result.statements ?? []);
       setStatementActionMessage(result.message ?? 'Đã cập nhật statement.');
       setStatementActionState('saved');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setStatementActionMessage(
         error instanceof Error
@@ -1134,7 +1129,7 @@ export function AdminConsole({
       setStatementRows(result.statements ?? []);
       setStatementActionMessage(result.message ?? 'Đã xoá statement.');
       setStatementActionState('saved');
-      await refreshAdminSnapshot(selectedMonth);
+      await refreshAdminSnapshot(selectedPeriod);
     } catch (error) {
       setStatementActionMessage(
         error instanceof Error
@@ -1150,7 +1145,7 @@ export function AdminConsole({
 
   function prepareStatementReplace(statement: AdminStatementRow) {
     setSelectedClient(statement.clientId);
-    setSelectedMonth(statement.period);
+    setSelectedPeriod(statement.period);
     setUploadState('idle');
     setUploadMessage('');
     document.getElementById('admin-upload-panel')?.scrollIntoView({
@@ -1264,22 +1259,22 @@ export function AdminConsole({
                 <div className="w-full sm:w-[240px]">
                   <Select
                     onValueChange={(value) => {
-                      if (value) setSelectedMonth(value);
+                      if (value) setSelectedPeriod(value);
                     }}
-                    value={selectedMonth}
+                    value={selectedPeriod}
                   >
                     <SelectTrigger
-                      aria-label="Tháng dashboard admin"
+                      aria-label="Quý dashboard admin"
                       className="music-control h-10 w-full bg-white"
                     >
                       <span className="flex-1 truncate text-left">
-                        {selectedMonthLabel}
+                        {selectedPeriodLabel}
                       </span>
                     </SelectTrigger>
                     <SelectContent>
-                      {adminMonthOptions.map((month) => (
-                        <SelectItem key={month.value} value={month.value}>
-                          {month.label}
+                      {adminQuarterOptions.map((period) => (
+                        <SelectItem key={period.value} value={period.value}>
+                          {period.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1300,7 +1295,7 @@ export function AdminConsole({
                           Music catalog ops
                         </Badge>
                         <Badge className="rounded-lg" variant="outline">
-                          {overview.monthLabel}
+                          {overview.periodLabel}
                         </Badge>
                       </div>
                       <h2 className="font-display mt-4 text-2xl font-semibold md:text-3xl">
@@ -1337,7 +1332,7 @@ export function AdminConsole({
                             <FileSpreadsheet className="size-4 text-[#7c3aed]" />
                           </div>
                           <p className="font-display mt-3 text-2xl font-semibold">
-                            {formatNumber(uploadedMonthCount)}
+                            {formatNumber(uploadedQuarterCount)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {formatNumber(overview.summary.trackCount)} tracks /{' '}
@@ -1352,10 +1347,7 @@ export function AdminConsole({
                             <WalletCards className="size-4 text-[#ff4d6d]" />
                           </div>
                           <p className="font-display mt-3 truncate text-2xl font-semibold">
-                            {formatMoney(totalUsdRevenue)}
-                          </p>
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            {formatMoney(overview.summary.revenueVnd, 'VND')}
+                            {formatMoney(totalRevenue)}
                           </p>
                         </div>
                       </div>
@@ -1373,9 +1365,9 @@ export function AdminConsole({
                       <EqualizerBars className="mt-7" />
                       <div className="mt-7 grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <p className="text-white/55">Month</p>
+                          <p className="text-white/55">Quarter</p>
                           <p className="mt-1 truncate text-lg font-semibold">
-                            {overview.monthLabel}
+                            {overview.periodLabel}
                           </p>
                         </div>
                         <div>
@@ -1402,7 +1394,7 @@ export function AdminConsole({
                       </div>
                       <BarChart3 className="size-5 text-primary" />
                     </div>
-                    <AdminRevenueTrendChart data={overview.monthlyTrend} />
+                    <AdminRevenueTrendChart data={overview.quarterlyTrend} />
                   </section>
 
                   <section className="music-card p-4 md:p-5">
@@ -1412,7 +1404,7 @@ export function AdminConsole({
                           Customer ranking
                         </p>
                         <h2 className="mt-1 text-lg font-semibold">
-                          Top khách hàng tháng này
+                          Top khách hàng quý này
                         </h2>
                       </div>
                       <WalletCards className="size-5 text-[#ff4d6d]" />
@@ -1517,7 +1509,7 @@ export function AdminConsole({
                           <TableHead>Client</TableHead>
                           <TableHead>Viewer email</TableHead>
                           <TableHead>Latest</TableHead>
-                          <TableHead>Months</TableHead>
+                          <TableHead>Quarters</TableHead>
                           <TableHead>Revenue</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Action</TableHead>
@@ -1538,17 +1530,12 @@ export function AdminConsole({
                                 {client.latestPeriod ?? '-'}
                               </TableCell>
                               <TableCell>
-                                {formatNumber(client.uploadedMonths)}
+                                {formatNumber(client.uploadedQuarters)}
                               </TableCell>
                               <TableCell>
                                 <span className="block">
-                                  {formatMoney(client.totalRevenue, 'USD')}
+                                  {formatMoney(client.totalRevenue)}
                                 </span>
-                                {client.totalRevenueVnd > 0 ? (
-                                  <span className="block text-xs text-muted-foreground">
-                                    {formatMoney(client.totalRevenueVnd, 'VND')}
-                                  </span>
-                                ) : null}
                               </TableCell>
                               <TableCell>
                                 <Badge className="rounded-lg" variant="outline">
@@ -2085,7 +2072,7 @@ export function AdminConsole({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-lg font-semibold">
-                        Upload dữ liệu tháng
+                        Upload dữ liệu quý
                       </h2>
                       <FileSpreadsheet className="size-6 text-primary" />
                     </div>
@@ -2121,26 +2108,29 @@ export function AdminConsole({
 
                       <div className="space-y-2">
                         <span className="block text-sm font-medium">
-                          Tháng dữ liệu
+                          Quý dữ liệu
                         </span>
                         <Select
                           onValueChange={(value) => {
-                            if (value) setSelectedMonth(value);
+                            if (value) setSelectedPeriod(value);
                           }}
-                          value={selectedMonth}
+                          value={selectedPeriod}
                         >
                           <SelectTrigger
-                            aria-label="Tháng dữ liệu"
+                            aria-label="Quý dữ liệu"
                             className="music-control h-10 w-full"
                           >
                             <span className="flex-1 truncate text-left">
-                              {selectedMonthLabel}
+                              {selectedPeriodLabel}
                             </span>
                           </SelectTrigger>
                           <SelectContent>
-                            {adminMonthOptions.map((month) => (
-                              <SelectItem key={month.value} value={month.value}>
-                                {month.label}
+                            {adminQuarterOptions.map((period) => (
+                              <SelectItem
+                                key={period.value}
+                                value={period.value}
+                              >
+                                {period.label}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -2316,14 +2306,7 @@ export function AdminConsole({
                                   {statement.clientCode}
                                 </span>
                               </TableCell>
-                              <TableCell>
-                                <span className="block">
-                                  {statement.periodLabel}
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {statement.currency}
-                                </span>
-                              </TableCell>
+                              <TableCell>{statement.periodLabel}</TableCell>
                               <TableCell>
                                 {formatNumber(statement.rowCount)}
                               </TableCell>
@@ -2331,16 +2314,10 @@ export function AdminConsole({
                                 {formatNumber(statement.units)}
                               </TableCell>
                               <TableCell>
-                                {formatMoney(
-                                  statement.revenue,
-                                  statement.currency,
-                                )}
+                                {formatMoney(statement.revenue)}
                               </TableCell>
                               <TableCell>
-                                {formatMoney(
-                                  statement.closing,
-                                  statement.currency,
-                                )}
+                                {formatMoney(statement.closing)}
                               </TableCell>
                               <TableCell>
                                 <Badge className="rounded-lg" variant="outline">
@@ -2450,7 +2427,7 @@ export function AdminConsole({
                             >
                               {statementRows.length > 0
                                 ? 'Không có statement khớp bộ lọc.'
-                                : 'Chưa có statement trong tháng đang chọn.'}
+                                : 'Chưa có statement trong quý đang chọn.'}
                             </TableCell>
                           </TableRow>
                         )}
@@ -2613,7 +2590,7 @@ function ActivityLogPanel({
 function AdminRevenueTrendChart({
   data,
 }: {
-  data: AdminOverviewData['monthlyTrend'];
+  data: AdminOverviewData['quarterlyTrend'];
 }) {
   if (data.length === 0) {
     return (
@@ -2626,7 +2603,7 @@ function AdminRevenueTrendChart({
     );
   }
 
-  const maxUsd = Math.max(...data.map((point) => point.usd), 1);
+  const maxRevenue = Math.max(...data.map((point) => point.vnd), 1);
 
   return (
     <div className="grid min-h-[310px] grid-cols-[48px_minmax(0,1fr)] gap-3">
@@ -2643,11 +2620,11 @@ function AdminRevenueTrendChart({
           >
             <div className="flex h-[230px] w-full items-end border-b border-border">
               <div
-                aria-label={`${point.label}: ${formatMoney(point.usd)}`}
+                aria-label={`${point.label}: ${formatMoney(point.vnd)}`}
                 className="w-full rounded-t-md"
                 style={{
                   backgroundColor: adminPalette[index % adminPalette.length],
-                  height: `${Math.max(4, (point.usd / maxUsd) * 100)}%`,
+                  height: `${Math.max(4, (point.vnd / maxRevenue) * 100)}%`,
                 }}
               />
             </div>
@@ -2677,7 +2654,7 @@ function TopCustomerList({
     );
   }
 
-  const maxRevenue = Math.max(...customers.map((customer) => customer.usd), 1);
+  const maxRevenue = Math.max(...customers.map((customer) => customer.vnd), 1);
 
   return (
     <div className="grid gap-3">
@@ -2703,12 +2680,12 @@ function TopCustomerList({
             <div
               className="h-full rounded-full bg-[#00b8a9]"
               style={{
-                width: `${Math.max(5, (customer.usd / maxRevenue) * 100)}%`,
+                width: `${Math.max(5, (customer.vnd / maxRevenue) * 100)}%`,
               }}
             />
           </div>
           <div className="mt-3 flex items-center justify-between gap-3 text-sm">
-            <span className="font-semibold">{formatMoney(customer.usd)}</span>
+            <span className="font-semibold">{formatMoney(customer.vnd)}</span>
             <span className="text-muted-foreground">
               {formatNumber(customer.units)} units
             </span>
@@ -2753,7 +2730,7 @@ function TrendList({
                 </Badge>
               </div>
               <p className="font-display mt-3 truncate text-xl font-semibold">
-                {formatMoney(item.usd)}
+                {formatMoney(item.vnd)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {formatNumber(item.units)} units /{' '}

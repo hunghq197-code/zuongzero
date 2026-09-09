@@ -6,10 +6,11 @@ import {
   getAdminOverviewData,
 } from '@/lib/admin-dashboard';
 import { getAdminAccess } from '@/lib/admin-auth';
-import { currentCalendarMonth } from '@/lib/calendar-months';
+import {
+  currentCalendarQuarter,
+  REPORT_PERIOD_PATTERN,
+} from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
-
-const PERIOD_PATTERN = /^20\d{2}-(0[1-9]|1[0-2])$/;
 
 export const dynamic = 'force-dynamic';
 
@@ -26,15 +27,15 @@ export async function GET(request: Request) {
     }
 
     const url = new URL(request.url);
-    const requestedMonth = url.searchParams.get('period') ?? '';
-    const month = PERIOD_PATTERN.test(requestedMonth)
-      ? requestedMonth
-      : currentCalendarMonth();
+    const requestedPeriod = url.searchParams.get('period') ?? '';
+    const period = REPORT_PERIOD_PATTERN.test(requestedPeriod)
+      ? requestedPeriod
+      : currentCalendarQuarter();
 
     if (!env.DB) {
       if (normalizeEmail(user.email).endsWith(LOCAL_PREVIEW_DOMAIN)) {
         return Response.json({
-          overview: fallbackAdminOverviewData(month),
+          overview: fallbackAdminOverviewData(period),
           message: 'Loaded',
         });
       }
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
     }
 
     return Response.json({
-      overview: await getAdminOverviewData(env.DB, month),
+      overview: await getAdminOverviewData(env.DB, period),
       message: 'Loaded',
     });
   } catch (error) {

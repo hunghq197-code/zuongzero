@@ -6,16 +6,17 @@ import {
   type CurrencyCode,
 } from '@/lib/dashboard-data';
 import {
-  currentCalendarMonth,
+  currentCalendarQuarter,
   periodDisplayLabel,
-} from '@/lib/calendar-months';
+  previousCalendarQuarter,
+} from '@/lib/reporting-periods';
 
 export type AdminOverviewData = {
-  month: string;
-  monthLabel: string;
-  previousMonth: string;
+  period: string;
+  periodLabel: string;
+  previousPeriod: string;
   summary: AdminSummary;
-  monthlyTrend: AdminMonthlyTrendPoint[];
+  quarterlyTrend: AdminQuarterlyTrendPoint[];
   topCustomers: AdminCustomerRank[];
   trendingTracks: AdminTrendItem[];
   trendingArtists: AdminTrendItem[];
@@ -29,7 +30,6 @@ export type AdminSummary = {
   reportingCustomers: number;
   missingCustomers: number;
   statementCount: number;
-  revenueUsd: number;
   revenueVnd: number;
   trackCount: number;
   artistCount: number;
@@ -37,12 +37,11 @@ export type AdminSummary = {
   sourceRows: number;
 };
 
-export type AdminMonthlyTrendPoint = {
+export type AdminQuarterlyTrendPoint = {
   label: string;
   period: string;
   rowCount: number;
   units: number;
-  usd: number;
   vnd: number;
 };
 
@@ -54,19 +53,16 @@ export type AdminCustomerRank = {
   rowCount: number;
   statementCount: number;
   units: number;
-  usd: number;
   vnd: number;
 };
 
 export type AdminTrendItem = {
-  changeUsd: number;
   changeVnd: number;
   clientCount: number;
   label: string;
   rowCount: number;
   trend: 'up' | 'down' | 'flat' | 'new';
   units: number;
-  usd: number;
   vnd: number;
 };
 
@@ -94,7 +90,6 @@ type SummaryRow = {
   activeCustomers: number;
   artistCount: number;
   reportingCustomers: number;
-  revenueUsd: number;
   revenueVnd: number;
   sourceRows: number;
   statementCount: number;
@@ -103,11 +98,10 @@ type SummaryRow = {
   units: number;
 };
 
-type MonthlyTrendRow = {
+type QuarterlyTrendRow = {
   period: string;
   rowCount: number;
   units: number;
-  usd: number;
   vnd: number;
 };
 
@@ -119,13 +113,11 @@ type CustomerRankRow = {
   rowCount: number;
   statementCount: number;
   units: number;
-  usd: number;
   vnd: number;
 };
 
 type DimensionRankRow = {
   clientCount: number;
-  currency: CurrencyCode;
   label: string;
   rowCount: number;
   units: number;
@@ -134,27 +126,32 @@ type DimensionRankRow = {
 
 export async function getAdminOverviewData(
   db: D1Database,
-  month = currentCalendarMonth(),
+  period = currentCalendarQuarter(),
 ): Promise<AdminOverviewData> {
-  const previousMonth = addMonths(month, -1);
-  const [summary, monthlyTrend, topCustomers, trendingTracks, trendingArtists] =
-    await Promise.all([
-      readSummary(db, month),
-      readMonthlyTrend(db),
-      readTopCustomers(db, month),
-      readDimensionTrend(db, 'track', month, previousMonth),
-      readDimensionTrend(db, 'artist', month, previousMonth),
-    ]);
+  const previousPeriod = previousCalendarQuarter(period);
+  const [
+    summary,
+    quarterlyTrend,
+    topCustomers,
+    trendingTracks,
+    trendingArtists,
+  ] = await Promise.all([
+    readSummary(db, period),
+    readQuarterlyTrend(db),
+    readTopCustomers(db, period),
+    readDimensionTrend(db, 'track', period, previousPeriod),
+    readDimensionTrend(db, 'artist', period, previousPeriod),
+  ]);
   const [topSources, topTerritories] = await Promise.all([
-    readDimensionTrend(db, 'source', month, previousMonth, 'value'),
-    readDimensionTrend(db, 'territory', month, previousMonth, 'value'),
+    readDimensionTrend(db, 'source', period, previousPeriod, 'value'),
+    readDimensionTrend(db, 'territory', period, previousPeriod, 'value'),
   ]);
 
   return {
-    month,
-    monthLabel: periodDisplayLabel(month),
-    monthlyTrend,
-    previousMonth,
+    period,
+    periodLabel: periodDisplayLabel(period),
+    previousPeriod,
+    quarterlyTrend,
     summary,
     topCustomers,
     topSources,
@@ -171,7 +168,7 @@ export async function listAdminStatements(
     period?: string | null;
   } = {},
 ): Promise<AdminStatementRow[]> {
-  const clauses = [`rp.currency IN ('USD', 'VND')`];
+  const clauses = [`rp.currency = 'VND'`];
   const bindings: string[] = [];
 
   if (filters.clientId) {
@@ -211,7 +208,7 @@ export async function listAdminStatements(
        LEFT JOIN uploads u
          ON u.id = s.source_upload_id
        WHERE ${clauses.join(' AND ')}
-       ORDER BY rp.period DESC, c.display_name ASC, rp.currency ASC
+       ORDER BY rp.period DESC, c.display_name ASC
        LIMIT 150`,
     )
     .bind(...bindings)
@@ -220,6 +217,7 @@ export async function listAdminStatements(
   return rows.results.map((row) => ({
     ...row,
     closing: Number(row.closing) || 0,
+    currency: 'VND',
     periodLabel: periodDisplayLabel(row.period),
     revenue: Number(row.revenue) || 0,
     rowCount: Number(row.rowCount) || 0,
@@ -228,45 +226,45 @@ export async function listAdminStatements(
 }
 
 export function fallbackAdminOverviewData(
-  month = currentCalendarMonth(),
+  period = currentCalendarQuarter(),
 ): AdminOverviewData {
-  const previousMonth = addMonths(month, -1);
+  const previousPeriod = previousCalendarQuarter(period);
   const activeCustomers = fallbackClients.filter(
     (client) => client.status !== 'archived',
   ).length;
-  const monthPeriods = fallbackPeriods.filter(
-    (period) => period.period === month,
+  const periodStatements = fallbackPeriods.filter(
+    (statement) => statement.period === period && statement.currency === 'VND',
   );
   const reportingCustomers = new Set(
-    monthPeriods.map((period) => period.clientId),
+    periodStatements.map((statement) => statement.clientId),
   ).size;
-  const usd = monthPeriods
-    .filter((period) => period.currency === 'USD')
-    .reduce((total, period) => total + period.revenue, 0);
-  const vnd = monthPeriods
-    .filter((period) => period.currency === 'VND')
-    .reduce((total, period) => total + period.revenue, 0);
+  const vnd = periodStatements.reduce(
+    (total, statement) => total + statement.revenue,
+    0,
+  );
 
   return {
-    month,
-    monthLabel: periodDisplayLabel(month),
-    monthlyTrend: fallbackRevenueTrend,
-    previousMonth,
+    period,
+    periodLabel: periodDisplayLabel(period),
+    previousPeriod,
+    quarterlyTrend: fallbackRevenueTrend,
     summary: {
       activeCustomers,
-      artistCount: breakdownsByCurrency.USD.artists.length,
+      artistCount: breakdownsByCurrency.VND.artists.length,
       missingCustomers: Math.max(activeCustomers - reportingCustomers, 0),
       reportingCustomers,
-      revenueUsd: usd,
       revenueVnd: vnd,
-      sourceRows: monthPeriods.reduce(
-        (total, period) => total + period.rowCount,
+      sourceRows: periodStatements.reduce(
+        (total, statement) => total + statement.rowCount,
         0,
       ),
-      statementCount: monthPeriods.length,
+      statementCount: periodStatements.length,
       totalCustomers: fallbackClients.length,
-      trackCount: breakdownsByCurrency.USD.tracks.length,
-      units: monthPeriods.reduce((total, period) => total + period.units, 0),
+      trackCount: breakdownsByCurrency.VND.tracks.length,
+      units: periodStatements.reduce(
+        (total, statement) => total + statement.units,
+        0,
+      ),
     },
     topCustomers: fallbackClients.slice(0, 8).map((client) => ({
       clientCode: client.code,
@@ -274,10 +272,9 @@ export function fallbackAdminOverviewData(
       clientName: client.name,
       latestPeriod: client.latestPeriod,
       rowCount: 0,
-      statementCount: client.uploadedMonths,
+      statementCount: client.uploadedQuarters,
       units: 0,
-      usd: client.totalRevenue,
-      vnd: client.secondaryRevenue,
+      vnd: client.totalRevenue,
     })),
     topSources: fallbackBreakdownTrend('sources'),
     topTerritories: fallbackBreakdownTrend('territories'),
@@ -292,7 +289,7 @@ export function fallbackAdminStatements(): AdminStatementRow[] {
     clientId: period.clientId,
     clientName: period.clientName,
     closing: period.closing,
-    currency: period.currency,
+    currency: 'VND',
     filename: null,
     lockedAt: null,
     period: period.period,
@@ -310,7 +307,7 @@ export function fallbackAdminStatements(): AdminStatementRow[] {
 
 async function readSummary(
   db: D1Database,
-  month: string,
+  period: string,
 ): Promise<AdminSummary> {
   const row = await db
     .prepare(
@@ -322,24 +319,15 @@ async function readSummary(
            FROM report_periods rp
            WHERE rp.period = ?
              AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
+             AND rp.currency = 'VND'
          ) AS reportingCustomers,
          (
            SELECT COUNT(*)
            FROM report_periods rp
            WHERE rp.period = ?
              AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
+             AND rp.currency = 'VND'
          ) AS statementCount,
-         (
-           SELECT COALESCE(SUM(s.net_revenue), 0)
-           FROM statements s
-           JOIN report_periods rp
-             ON rp.id = s.report_period_id
-           WHERE rp.period = ?
-             AND rp.status IN ('published', 'locked')
-             AND rp.currency = 'USD'
-         ) AS revenueUsd,
          (
            SELECT COALESCE(SUM(s.net_revenue), 0)
            FROM statements s
@@ -356,7 +344,7 @@ async function readSummary(
              ON rp.id = s.report_period_id
            WHERE rp.period = ?
              AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
+             AND rp.currency = 'VND'
          ) AS units,
          (
            SELECT COALESCE(SUM(s.row_count), 0)
@@ -365,7 +353,7 @@ async function readSummary(
              ON rp.id = s.report_period_id
            WHERE rp.period = ?
              AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
+             AND rp.currency = 'VND'
          ) AS sourceRows,
          (
            SELECT COUNT(DISTINCT rb.label)
@@ -386,7 +374,7 @@ async function readSummary(
              AND rb.dimension = 'artist'
          ) AS artistCount`,
     )
-    .bind(month, month, month, month, month, month, month, month)
+    .bind(period, period, period, period, period, period, period)
     .first<SummaryRow>();
 
   const totalCustomers = Number(row?.totalCustomers) || 0;
@@ -398,7 +386,6 @@ async function readSummary(
     artistCount: Number(row?.artistCount) || 0,
     missingCustomers: Math.max(activeCustomers - reportingCustomers, 0),
     reportingCustomers,
-    revenueUsd: Number(row?.revenueUsd) || 0,
     revenueVnd: Number(row?.revenueVnd) || 0,
     sourceRows: Number(row?.sourceRows) || 0,
     statementCount: Number(row?.statementCount) || 0,
@@ -408,25 +395,24 @@ async function readSummary(
   };
 }
 
-async function readMonthlyTrend(db: D1Database) {
+async function readQuarterlyTrend(db: D1Database) {
   const rows = await db
     .prepare(
       `SELECT
          rp.period,
-         COALESCE(SUM(CASE WHEN rp.currency = 'USD' THEN s.net_revenue ELSE 0 END), 0) AS usd,
-         COALESCE(SUM(CASE WHEN rp.currency = 'VND' THEN s.net_revenue ELSE 0 END), 0) AS vnd,
+         COALESCE(SUM(s.net_revenue), 0) AS vnd,
          COALESCE(SUM(s.units), 0) AS units,
          COALESCE(SUM(s.row_count), 0) AS rowCount
        FROM report_periods rp
        JOIN statements s
          ON s.report_period_id = rp.id
        WHERE rp.status IN ('published', 'locked')
-         AND rp.currency IN ('USD', 'VND')
+         AND rp.currency = 'VND'
        GROUP BY rp.period
        ORDER BY rp.period DESC
        LIMIT 12`,
     )
-    .all<MonthlyTrendRow>();
+    .all<QuarterlyTrendRow>();
 
   return rows.results
     .map((row) => ({
@@ -434,13 +420,12 @@ async function readMonthlyTrend(db: D1Database) {
       period: row.period,
       rowCount: Number(row.rowCount) || 0,
       units: Number(row.units) || 0,
-      usd: Number(row.usd) || 0,
       vnd: Number(row.vnd) || 0,
     }))
     .reverse();
 }
 
-async function readTopCustomers(db: D1Database, month: string) {
+async function readTopCustomers(db: D1Database, period: string) {
   const rows = await db
     .prepare(
       `SELECT
@@ -449,8 +434,7 @@ async function readTopCustomers(db: D1Database, month: string) {
          c.display_name AS clientName,
          MAX(rp.period) AS latestPeriod,
          COUNT(DISTINCT rp.id) AS statementCount,
-         COALESCE(SUM(CASE WHEN rp.currency = 'USD' THEN s.net_revenue ELSE 0 END), 0) AS usd,
-         COALESCE(SUM(CASE WHEN rp.currency = 'VND' THEN s.net_revenue ELSE 0 END), 0) AS vnd,
+         COALESCE(SUM(s.net_revenue), 0) AS vnd,
          COALESCE(SUM(s.units), 0) AS units,
          COALESCE(SUM(s.row_count), 0) AS rowCount
        FROM clients c
@@ -458,15 +442,15 @@ async function readTopCustomers(db: D1Database, month: string) {
          ON rp.client_id = c.id
         AND rp.period = ?
         AND rp.status IN ('published', 'locked')
-        AND rp.currency IN ('USD', 'VND')
+        AND rp.currency = 'VND'
        LEFT JOIN statements s
          ON s.report_period_id = rp.id
        WHERE c.status != 'archived'
        GROUP BY c.id, c.code, c.display_name
-       ORDER BY usd DESC, vnd DESC, units DESC, c.display_name ASC
+       ORDER BY vnd DESC, units DESC, c.display_name ASC
        LIMIT 8`,
     )
-    .bind(month)
+    .bind(period)
     .all<CustomerRankRow>();
 
   return rows.results.map((row) => ({
@@ -477,7 +461,6 @@ async function readTopCustomers(db: D1Database, month: string) {
     rowCount: Number(row.rowCount) || 0,
     statementCount: Number(row.statementCount) || 0,
     units: Number(row.units) || 0,
-    usd: Number(row.usd) || 0,
     vnd: Number(row.vnd) || 0,
   }));
 }
@@ -485,13 +468,13 @@ async function readTopCustomers(db: D1Database, month: string) {
 async function readDimensionTrend(
   db: D1Database,
   dimension: string,
-  month: string,
-  previousMonth: string,
+  period: string,
+  previousPeriod: string,
   mode: 'growth' | 'value' = 'growth',
 ) {
   const [currentRows, previousRows] = await Promise.all([
-    readDimensionRows(db, dimension, month),
-    readDimensionRows(db, dimension, previousMonth),
+    readDimensionRows(db, dimension, period),
+    readDimensionRows(db, dimension, previousPeriod),
   ]);
   const current = combineDimensionRows(currentRows);
   const previous = combineDimensionRows(previousRows);
@@ -499,18 +482,13 @@ async function readDimensionTrend(
   return Array.from(current.entries())
     .map(([label, item]) => {
       const previousItem = previous.get(label);
-      const changeUsd = item.usd - (previousItem?.usd ?? 0);
       const changeVnd = item.vnd - (previousItem?.vnd ?? 0);
       return {
         ...item,
-        changeUsd,
         changeVnd,
         trend: trendDirection({
-          changeUsd,
           changeVnd,
-          previousUsd: previousItem?.usd ?? 0,
           previousVnd: previousItem?.vnd ?? 0,
-          usd: item.usd,
           vnd: item.vnd,
         }),
       };
@@ -526,13 +504,12 @@ async function readDimensionTrend(
 async function readDimensionRows(
   db: D1Database,
   dimension: string,
-  month: string,
+  period: string,
 ) {
   const rows = await db
     .prepare(
       `SELECT
          rb.label,
-         rp.currency,
          COALESCE(SUM(rb.value), 0) AS value,
          COALESCE(SUM(rb.units), 0) AS units,
          COALESCE(SUM(rb.row_count), 0) AS rowCount,
@@ -542,13 +519,13 @@ async function readDimensionRows(
          ON rp.id = rb.report_period_id
        WHERE rp.period = ?
          AND rp.status IN ('published', 'locked')
-         AND rp.currency IN ('USD', 'VND')
+         AND rp.currency = 'VND'
          AND rb.dimension = ?
-       GROUP BY rb.label, rp.currency
+       GROUP BY rb.label
        ORDER BY ABS(value) DESC
        LIMIT 120`,
     )
-    .bind(month, dimension)
+    .bind(period, dimension)
     .all<DimensionRankRow>();
 
   return rows.results;
@@ -557,7 +534,7 @@ async function readDimensionRows(
 function combineDimensionRows(rows: DimensionRankRow[]) {
   const byLabel = new Map<
     string,
-    Omit<AdminTrendItem, 'changeUsd' | 'changeVnd' | 'trend'>
+    Omit<AdminTrendItem, 'changeVnd' | 'trend'>
   >();
 
   for (const row of rows) {
@@ -566,16 +543,10 @@ function combineDimensionRows(rows: DimensionRankRow[]) {
       label: row.label,
       rowCount: 0,
       units: 0,
-      usd: 0,
       vnd: 0,
     };
 
-    if (row.currency === 'USD') {
-      item.usd += Number(row.value) || 0;
-    } else {
-      item.vnd += Number(row.value) || 0;
-    }
-
+    item.vnd += Number(row.value) || 0;
     item.clientCount = Math.max(item.clientCount, Number(row.clientCount) || 0);
     item.rowCount += Number(row.rowCount) || 0;
     item.units += Number(row.units) || 0;
@@ -586,57 +557,33 @@ function combineDimensionRows(rows: DimensionRankRow[]) {
 }
 
 function trendDirection(input: {
-  changeUsd: number;
   changeVnd: number;
-  previousUsd: number;
   previousVnd: number;
-  usd: number;
   vnd: number;
 }): AdminTrendItem['trend'] {
-  if (
-    input.previousUsd === 0 &&
-    input.previousVnd === 0 &&
-    (input.usd > 0 || input.vnd > 0)
-  ) {
-    return 'new';
-  }
-
-  if (input.changeUsd > 0 || input.changeVnd > 0) return 'up';
-  if (input.changeUsd < 0 || input.changeVnd < 0) return 'down';
+  if (input.previousVnd === 0 && input.vnd > 0) return 'new';
+  if (input.changeVnd > 0) return 'up';
+  if (input.changeVnd < 0) return 'down';
   return 'flat';
 }
 
 function trendScore(item: AdminTrendItem, mode: 'growth' | 'value') {
-  if (mode === 'value') return Math.max(item.usd, item.vnd / 25_000);
+  if (mode === 'value') return item.vnd;
 
-  const usdGrowth = item.changeUsd > 0 ? item.changeUsd : 0;
-  const vndGrowth = item.changeVnd > 0 ? item.changeVnd / 25_000 : 0;
-  return usdGrowth + vndGrowth + Math.max(item.usd, item.vnd / 25_000) * 0.08;
+  const growth = item.changeVnd > 0 ? item.changeVnd : 0;
+  return growth + item.vnd * 0.08;
 }
 
 function fallbackBreakdownTrend(
   key: 'artists' | 'sources' | 'territories' | 'tracks',
 ) {
-  return breakdownsByCurrency.USD[key].slice(0, 8).map((item, index) => ({
-    changeUsd: index < 3 ? item.value * 0.12 : 0,
-    changeVnd: 0,
+  return breakdownsByCurrency.VND[key].slice(0, 8).map((item, index) => ({
+    changeVnd: index < 3 ? item.value * 0.12 : 0,
     clientCount: 1,
     label: item.name,
     rowCount: item.rows,
     trend: index < 3 ? ('up' as const) : ('flat' as const),
     units: item.units,
-    usd: item.value,
-    vnd: 0,
+    vnd: item.value,
   }));
-}
-
-function addMonths(period: string, offset: number) {
-  const [yearText, monthText] = period.split('-');
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const zeroBasedMonth = year * 12 + month - 1 + offset;
-  const nextYear = Math.floor(zeroBasedMonth / 12);
-  const nextMonth = zeroBasedMonth - nextYear * 12 + 1;
-
-  return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
 }

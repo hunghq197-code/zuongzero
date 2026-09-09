@@ -7,8 +7,7 @@ export type ManagedCustomerRow = {
   name: string;
   status: string;
   totalRevenue: number;
-  totalRevenueVnd: number;
-  uploadedMonths: number;
+  uploadedQuarters: number;
   viewerEmail: string | null;
 };
 
@@ -30,35 +29,27 @@ export async function listManagedCustomers(db: D1Database) {
          ) AS viewerEmail,
          (
            SELECT max(period)
-           FROM report_periods rp
-           WHERE rp.client_id = c.id
-             AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
-         ) AS latestPeriod,
-         (
-           SELECT count(DISTINCT rp.period)
-           FROM report_periods rp
-           WHERE rp.client_id = c.id
-             AND rp.status IN ('published', 'locked')
-             AND rp.currency IN ('USD', 'VND')
-         ) AS uploadedMonths,
-         (
-           SELECT COALESCE(sum(s.net_revenue), 0)
-           FROM statements s
-           JOIN report_periods rp
-             ON rp.id = s.report_period_id
-           WHERE s.client_id = c.id
-             AND rp.currency = 'USD'
-         ) AS totalRevenue,
-         (
-           SELECT COALESCE(sum(s.net_revenue), 0)
-           FROM statements s
-           JOIN report_periods rp
-             ON rp.id = s.report_period_id
-           WHERE s.client_id = c.id
-             AND rp.currency = 'VND'
-         ) AS totalRevenueVnd,
-         c.status
+         FROM report_periods rp
+         WHERE rp.client_id = c.id
+           AND rp.status IN ('published', 'locked')
+           AND rp.currency = 'VND'
+       ) AS latestPeriod,
+       (
+         SELECT count(DISTINCT rp.period)
+         FROM report_periods rp
+         WHERE rp.client_id = c.id
+           AND rp.status IN ('published', 'locked')
+           AND rp.currency = 'VND'
+       ) AS uploadedQuarters,
+       (
+         SELECT COALESCE(sum(s.net_revenue), 0)
+         FROM statements s
+         JOIN report_periods rp
+           ON rp.id = s.report_period_id
+         WHERE s.client_id = c.id
+           AND rp.currency = 'VND'
+       ) AS totalRevenue,
+       c.status
        FROM clients c
        ORDER BY c.created_at DESC
        LIMIT 100`,
@@ -76,8 +67,7 @@ export function fallbackCustomerRows(): ManagedCustomerRow[] {
     name: client.name,
     status: client.status,
     totalRevenue: client.totalRevenue,
-    totalRevenueVnd: client.secondaryRevenue,
-    uploadedMonths: client.uploadedMonths,
+    uploadedQuarters: client.uploadedQuarters,
     viewerEmail: client.viewerEmail,
   }));
 }

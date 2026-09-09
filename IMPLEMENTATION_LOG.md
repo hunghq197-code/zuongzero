@@ -4,7 +4,7 @@ Cap nhat ngay 2026-09-09, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
 ## Muc tieu san pham
 
-Xay dung dashboard quan ly royalty cho khach hang trong linh vuc media/music. Data khong do khach hang upload. Admin/super admin tai file Excel theo tung khach hang va tung thang; khach hang chi dang nhap de xem dashboard/statement da publish.
+Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh vuc media/music. Data khong do khach hang upload. Admin/super admin tai file Excel theo tung khach hang va tung quy; khach hang chi dang nhap de xem dashboard/statement da publish.
 
 ## Kien truc da trien khai
 
@@ -40,10 +40,10 @@ Xay dung dashboard quan ly royalty cho khach hang trong linh vuc media/music. Da
 ## Admin console
 
 - Co cac tab chinh: Tong quan, Khach hang, Statement, Tai khoan.
-- Tong quan admin tong hop du lieu tat ca khach hang theo thang: doanh thu, so statement, so track, so artist, trend track, trend artist, top customers.
-- Thang du lieu dung lich duong, timezone UTC+7, ap dung dong bo cho admin va client.
+- Tong quan admin tong hop du lieu tat ca khach hang theo quy: doanh thu, so statement, so track, so artist, trend track, trend artist, top customers.
+- Ky doi soat dung quy lich duong, timezone UTC+7, ap dung dong bo cho admin va client.
 - Trang khach hang ho tro tim kiem, loc trang thai, sua thong tin, archive, xoa.
-- Trang statement ho tro upload .xlsx theo tung khach hang/thang, replace neu upload nham, publish/unpublish/lock/delete.
+- Trang statement ho tro upload .xlsx theo tung khach hang/quy, replace neu upload nham, publish/unpublish/lock/delete.
 - Them audit trail cho cac hanh dong quan tri quan trong.
 - Cap nhat UX/UI theo huong giai tri media/music, co sidebar, visual identity, controls gon hon.
 - Da sua loi tab admin bi lech va tranh tran ngang layout.
@@ -52,8 +52,9 @@ Xay dung dashboard quan ly royalty cho khach hang trong linh vuc media/music. Da
 
 - Chi chap nhan file `.xlsx`.
 - Gioi han upload hien tai: 15MB.
-- Parser doc workbook Excel, map cac cot chinh nhu Currency, Net Payable/Revenue, Units, Source, Sub Source, Configuration, Territory, Track, Artist, Release, Label.
-- Du lieu duoc tong hop theo currency USD/VND va cac breakdown phuc vu dashboard.
+- Parser doc workbook Excel, map cac cot chinh nhu Net Payable/Revenue, Units, Source, Sub Source, Configuration, Territory, Track, Artist, Release, Label.
+- Du lieu chi su dung VND/VNĐ va cac breakdown phuc vu dashboard.
+- Phase 1 da chuyen period sang dinh dang quy `YYYY-Q1` den `YYYY-Q4`.
 - Backend validate lai file truoc khi luu/import.
 
 ## Bao mat
@@ -70,13 +71,15 @@ Xay dung dashboard quan ly royalty cho khach hang trong linh vuc media/music. Da
 ## Cloudflare / deploy
 
 - Worker production: `royalty-dashboard`.
-- URL production: https://royalty-dashboard.hung-hq197.workers.dev
+- URL production chinh: https://artistportal.zuongzeroent.com
+- URL Sites fallback: https://zuong-zero-royalty-dashboard.hung-hq197.chatgpt.site
 - D1 database: `royalty-dashboard-db`.
 - R2 bucket: `royalty-dashboard-files`.
 - Cau hinh deploy nam trong `wrangler.cloudflare.jsonc`.
 - Lenh build: `npm run build`.
 - Lenh deploy: `npx wrangler deploy --config wrangler.cloudflare.jsonc`.
-- Ban moi nhat da deploy sau khi sua tab admin: version `6aaa3450-af1d-4005-bee6-ad7bb8608228`.
+- Custom domain `artistportal.zuongzeroent.com` da duoc gan vao Sites/Cloudflare; DNS can co CNAME/TXT validation theo cau hinh custom domain.
+- Ban moi nhat da deploy tren Sites: version 3.
 
 ## Kiem thu da chay
 
@@ -90,6 +93,6 @@ Xay dung dashboard quan ly royalty cho khach hang trong linh vuc media/music. Da
 
 - Cau hinh domain gui email that trong Resend va cap nhat `EMAIL_FROM` bang domain da verify.
 - Test flow tao tai khoan client bang email that: tao tai khoan, nhan mail, kich hoat, doi mat khau, vao dashboard.
-- Upload lai data mau cho tung client/thang va doi chieu chart voi file Excel.
+- Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
 - Bo sung test tu dong cho API auth, upload, statement publish/delete neu dua vao van hanh that.
-- Can nhac custom domain rieng thay cho subdomain `workers.dev` khi san pham san sang cho khach hang.
+- Theo doi validation SSL/custom domain neu Sites van bao trang thai pending.
