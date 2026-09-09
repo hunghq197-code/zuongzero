@@ -29,6 +29,20 @@
       "when": 1788856231514,
       "tag": "0003_jazzy_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788919012925,
+      "tag": "0004_orange_impossible_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788927843778,
+      "tag": "0005_graceful_nehzno",
+      "breakpoints": true
     }
   ]
 }

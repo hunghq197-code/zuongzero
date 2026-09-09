@@ -109,25 +109,17 @@
       "indexes": {
         "idx_access_requests_requester": {
           "name": "idx_access_requests_requester",
-          "columns": [
-            "requester_user_id"
-          ],
+          "columns": ["requester_user_id"],
           "isUnique": false
         },
         "idx_access_requests_status_created": {
           "name": "idx_access_requests_status_created",
-          "columns": [
-            "status",
-            "created_at"
-          ],
+          "columns": ["status", "created_at"],
           "isUnique": false
         },
         "idx_access_requests_type_status": {
           "name": "idx_access_requests_type_status",
-          "columns": [
-            "request_type",
-            "status"
-          ],
+          "columns": ["request_type", "status"],
           "isUnique": false
         }
       },
@@ -136,12 +128,8 @@
           "name": "access_requests_requester_user_id_users_id_fk",
           "tableFrom": "access_requests",
           "tableTo": "users",
-          "columnsFrom": [
-            "requester_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["requester_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -149,12 +137,8 @@
           "name": "access_requests_reviewed_by_user_id_users_id_fk",
           "tableFrom": "access_requests",
           "tableTo": "users",
-          "columnsFrom": [
-            "reviewed_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["reviewed_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -233,26 +217,17 @@
       "indexes": {
         "idx_audit_logs_client_created": {
           "name": "idx_audit_logs_client_created",
-          "columns": [
-            "client_id",
-            "created_at"
-          ],
+          "columns": ["client_id", "created_at"],
           "isUnique": false
         },
         "idx_audit_logs_actor_created": {
           "name": "idx_audit_logs_actor_created",
-          "columns": [
-            "actor_user_id",
-            "created_at"
-          ],
+          "columns": ["actor_user_id", "created_at"],
           "isUnique": false
         },
         "idx_audit_logs_target": {
           "name": "idx_audit_logs_target",
-          "columns": [
-            "target_type",
-            "target_id"
-          ],
+          "columns": ["target_type", "target_id"],
           "isUnique": false
         }
       },
@@ -261,12 +236,8 @@
           "name": "audit_logs_actor_user_id_users_id_fk",
           "tableFrom": "audit_logs",
           "tableTo": "users",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["actor_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -274,12 +245,8 @@
           "name": "audit_logs_client_id_clients_id_fk",
           "tableFrom": "audit_logs",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -337,32 +304,22 @@
       "indexes": {
         "idx_client_users_unique_client_user": {
           "name": "idx_client_users_unique_client_user",
-          "columns": [
-            "client_id",
-            "user_id"
-          ],
+          "columns": ["client_id", "user_id"],
           "isUnique": true
         },
         "idx_client_users_client": {
           "name": "idx_client_users_client",
-          "columns": [
-            "client_id"
-          ],
+          "columns": ["client_id"],
           "isUnique": false
         },
         "idx_client_users_user": {
           "name": "idx_client_users_user",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         },
         "idx_client_users_user_status": {
           "name": "idx_client_users_user_status",
-          "columns": [
-            "user_id",
-            "status"
-          ],
+          "columns": ["user_id", "status"],
           "isUnique": false
         }
       },
@@ -371,12 +328,8 @@
           "name": "client_users_client_id_clients_id_fk",
           "tableFrom": "client_users",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -384,12 +337,8 @@
           "name": "client_users_user_id_users_id_fk",
           "tableFrom": "client_users",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -461,23 +410,17 @@
       "indexes": {
         "clients_code_unique": {
           "name": "clients_code_unique",
-          "columns": [
-            "code"
-          ],
+          "columns": ["code"],
           "isUnique": true
         },
         "idx_clients_status": {
           "name": "idx_clients_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_clients_code": {
           "name": "idx_clients_code",
-          "columns": [
-            "code"
-          ],
+          "columns": ["code"],
           "isUnique": false
         }
       },
@@ -556,26 +499,17 @@
       "indexes": {
         "idx_report_periods_unique_client_period_currency": {
           "name": "idx_report_periods_unique_client_period_currency",
-          "columns": [
-            "client_id",
-            "period",
-            "currency"
-          ],
+          "columns": ["client_id", "period", "currency"],
           "isUnique": true
         },
         "idx_report_periods_client_period": {
           "name": "idx_report_periods_client_period",
-          "columns": [
-            "client_id",
-            "period"
-          ],
+          "columns": ["client_id", "period"],
           "isUnique": false
         },
         "idx_report_periods_status": {
           "name": "idx_report_periods_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
@@ -584,12 +518,8 @@
           "name": "report_periods_client_id_clients_id_fk",
           "tableFrom": "report_periods",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -677,11 +607,7 @@
       "indexes": {
         "idx_breakdowns_client_period_dimension": {
           "name": "idx_breakdowns_client_period_dimension",
-          "columns": [
-            "client_id",
-            "report_period_id",
-            "dimension"
-          ],
+          "columns": ["client_id", "report_period_id", "dimension"],
           "isUnique": false
         }
       },
@@ -690,12 +616,8 @@
           "name": "revenue_breakdowns_client_id_clients_id_fk",
           "tableFrom": "revenue_breakdowns",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -703,12 +625,8 @@
           "name": "revenue_breakdowns_report_period_id_report_periods_id_fk",
           "tableFrom": "revenue_breakdowns",
           "tableTo": "report_periods",
-          "columnsFrom": [
-            "report_period_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["report_period_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -831,17 +749,12 @@
       "indexes": {
         "idx_statements_client_period": {
           "name": "idx_statements_client_period",
-          "columns": [
-            "client_id",
-            "report_period_id"
-          ],
+          "columns": ["client_id", "report_period_id"],
           "isUnique": false
         },
         "idx_statements_source_upload": {
           "name": "idx_statements_source_upload",
-          "columns": [
-            "source_upload_id"
-          ],
+          "columns": ["source_upload_id"],
           "isUnique": false
         }
       },
@@ -850,12 +763,8 @@
           "name": "statements_client_id_clients_id_fk",
           "tableFrom": "statements",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -863,12 +772,8 @@
           "name": "statements_report_period_id_report_periods_id_fk",
           "tableFrom": "statements",
           "tableTo": "report_periods",
-          "columnsFrom": [
-            "report_period_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["report_period_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -876,12 +781,8 @@
           "name": "statements_source_upload_id_uploads_id_fk",
           "tableFrom": "statements",
           "tableTo": "uploads",
-          "columnsFrom": [
-            "source_upload_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_upload_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -988,31 +889,22 @@
       "indexes": {
         "uploads_object_key_unique": {
           "name": "uploads_object_key_unique",
-          "columns": [
-            "object_key"
-          ],
+          "columns": ["object_key"],
           "isUnique": true
         },
         "idx_uploads_client_period": {
           "name": "idx_uploads_client_period",
-          "columns": [
-            "client_id",
-            "report_period_id"
-          ],
+          "columns": ["client_id", "report_period_id"],
           "isUnique": false
         },
         "idx_uploads_status": {
           "name": "idx_uploads_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_uploads_uploaded_by": {
           "name": "idx_uploads_uploaded_by",
-          "columns": [
-            "uploaded_by_user_id"
-          ],
+          "columns": ["uploaded_by_user_id"],
           "isUnique": false
         }
       },
@@ -1021,12 +913,8 @@
           "name": "uploads_client_id_clients_id_fk",
           "tableFrom": "uploads",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1034,12 +922,8 @@
           "name": "uploads_report_period_id_report_periods_id_fk",
           "tableFrom": "uploads",
           "tableTo": "report_periods",
-          "columnsFrom": [
-            "report_period_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["report_period_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1047,12 +931,8 @@
           "name": "uploads_uploaded_by_user_id_users_id_fk",
           "tableFrom": "uploads",
           "tableTo": "users",
-          "columnsFrom": [
-            "uploaded_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["uploaded_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1117,24 +997,17 @@
       "indexes": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         },
         "idx_users_role_status": {
           "name": "idx_users_role_status",
-          "columns": [
-            "role",
-            "status"
-          ],
+          "columns": ["role", "status"],
           "isUnique": false
         },
         "idx_users_email": {
           "name": "idx_users_email",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": false
         }
       },

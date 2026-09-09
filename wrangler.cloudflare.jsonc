@@ -13,7 +13,7 @@
     "enabled": true,
   },
   "vars": {
-    "AUTH_PROVIDER": "cloudflare-access",
+    "AUTH_PROVIDER": "app-session",
   },
   "d1_databases": [
     {

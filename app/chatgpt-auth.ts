@@ -2,6 +2,14 @@ import { env } from 'cloudflare:workers';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+import {
+  buildExpiredSessionCookie,
+  hashSessionToken,
+  readCookie,
+  safeRelativeReturnPath,
+  SESSION_COOKIE_NAME,
+} from '@/lib/app-auth';
+
 export type ChatGPTUser = {
   userId: string;
   displayName: string;
@@ -16,12 +24,25 @@ const USER_FULL_NAME_ENCODING_HEADER =
   'oai-authenticated-user-full-name-encoding';
 const CLOUDFLARE_ACCESS_EMAIL_HEADER = 'cf-access-authenticated-user-email';
 const PERCENT_ENCODED_UTF8 = 'percent-encoded-utf-8';
-const SIGN_IN_PATH = '/signin-with-chatgpt';
-const SIGN_OUT_PATH = '/signout-with-chatgpt';
-const CALLBACK_PATH = '/callback';
+
+type SessionUserRow = {
+  userId: string;
+  email: string;
+  displayName: string | null;
+};
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
+  const sessionToken = readCookie(
+    requestHeaders.get('cookie'),
+    SESSION_COOKIE_NAME,
+  );
+
+  if (sessionToken && env.DB) {
+    const sessionUser = await readSessionUser(sessionToken);
+    if (sessionUser) return sessionUser;
+  }
+
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   const accessEmail = requestHeaders.get(CLOUDFLARE_ACCESS_EMAIL_HEADER);
@@ -68,49 +89,20 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  if (isCloudflareAccessAuth()) {
-    return `/login?return_to=${encodeURIComponent(safeReturnTo)}`;
-  }
-
-  return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
+  return `/login?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function chatGPTSignOutPath(returnTo = '/'): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  if (isCloudflareAccessAuth()) return '/cdn-cgi/access/logout';
-
-  return `${SIGN_OUT_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
+  return `/api/auth/logout?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function authProviderName() {
-  return isCloudflareAccessAuth() ? 'Cloudflare Access' : 'ChatGPT';
+  return 'Dashboard account';
 }
 
 function isCloudflareAccessAuth() {
   return env.AUTH_PROVIDER === 'cloudflare-access';
-}
-
-function safeRelativeReturnPath(value: string): string {
-  if (!value.startsWith('/') || value.startsWith('//')) return '/';
-
-  let url: URL;
-  try {
-    url = new URL(value, 'https://app.local');
-  } catch {
-    return '/';
-  }
-  if (url.origin !== 'https://app.local') return '/';
-  if (isReservedAuthPath(url.pathname)) return '/';
-
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
-function isReservedAuthPath(pathname: string): boolean {
-  return (
-    pathname === SIGN_IN_PATH ||
-    pathname === SIGN_OUT_PATH ||
-    pathname === CALLBACK_PATH
-  );
 }
 
 function safeDecodeURIComponent(value: string): string | null {
@@ -120,3 +112,38 @@ function safeDecodeURIComponent(value: string): string | null {
     return null;
   }
 }
+
+async function readSessionUser(token: string): Promise<ChatGPTUser | null> {
+  const tokenHash = await hashSessionToken(token);
+  const now = new Date().toISOString();
+
+  try {
+    const row = await env.DB.prepare(
+      `SELECT
+         u.id AS userId,
+         u.email,
+         u.display_name AS displayName
+       FROM auth_sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = ?
+         AND s.expires_at > ?
+         AND u.status = 'active'
+       LIMIT 1`,
+    )
+      .bind(tokenHash, now)
+      .first<SessionUserRow>();
+
+    if (!row) return null;
+
+    return {
+      userId: row.userId,
+      displayName: row.displayName ?? row.email,
+      email: row.email,
+      fullName: row.displayName,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export { buildExpiredSessionCookie };

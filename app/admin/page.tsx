@@ -16,7 +16,7 @@ export default async function AdminPage() {
         email={user.email}
         primaryHref="/login"
         primaryLabel="Về trang đăng nhập"
-        reason={`${access.reason} Đây là lớp deny-by-default để khách hàng không thể upload hoặc sửa dữ liệu báo cáo.`}
+        reason="Tài khoản chưa được cấp quyền quản trị."
         secondaryHref="/login"
         secondaryLabel="Kiểm tra lại"
         title="Khu quản trị đang được bảo vệ"
@@ -24,11 +24,5 @@ export default async function AdminPage() {
     );
   }
 
-  return (
-    <AdminConsole
-      accessMode={access.mode}
-      adminRole={access.role}
-      userEmail={user.email}
-    />
-  );
+  return <AdminConsole adminRole={access.role} userEmail={user.email} />;
 }

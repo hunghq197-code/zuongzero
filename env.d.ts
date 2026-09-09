@@ -3,7 +3,10 @@ declare namespace Cloudflare {
     ADMIN_EMAILS?: string;
     AUTH_PROVIDER?: string;
     DB: D1Database;
+    EMAIL_FROM?: string;
     FILES: R2Bucket;
+    RESEND_API_KEY?: string;
     SUPER_ADMIN_EMAILS?: string;
+    SUPER_ADMIN_PASSWORD?: string;
   }
 }

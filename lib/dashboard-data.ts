@@ -22,7 +22,7 @@ export type StatementPeriod = {
   label: string;
   clientName: string;
   currency: CurrencyCode;
-  status: 'published' | 'validating' | 'locked';
+  status: 'published' | 'validating' | 'locked' | 'empty';
   opening: number;
   revenue: number;
   costs: number;
@@ -42,6 +42,7 @@ export type RevenueTrendPoint = {
 
 export type BreakdownKey =
   | 'sources'
+  | 'subSources'
   | 'configurations'
   | 'territories'
   | 'tracks'
@@ -327,6 +328,12 @@ export const breakdownSections: BreakdownSection[] = [
     chartType: 'bar',
   },
   {
+    id: 'subSources',
+    label: 'Sub Sources',
+    sourceColumn: 'Sub Source',
+    chartType: 'bar',
+  },
+  {
     id: 'configurations',
     label: 'Configurations',
     sourceColumn: 'Configuration',
@@ -410,6 +417,7 @@ export const breakdownsByCurrency: Record<CurrencyCode, CurrencyBreakdowns> = {
         rows: 149,
       },
     ],
+    subSources: [],
     configurations: [
       {
         name: 'Stream',
@@ -641,6 +649,7 @@ export const breakdownsByCurrency: Record<CurrencyCode, CurrencyBreakdowns> = {
         rows: 54,
       },
     ],
+    subSources: [],
     configurations: [
       {
         name: 'Stream',

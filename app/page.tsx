@@ -1,6 +1,7 @@
 import { AccessRequired } from '@/components/access-required';
 import { RoyaltyDashboard } from '@/components/royalty-dashboard';
 import { getClientPortalAccess } from '@/lib/access-control';
+import { getClientDashboardData } from '@/lib/client-dashboard-data';
 import { requireChatGPTUser } from './chatgpt-auth';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,7 @@ export default async function Home() {
         email={user.email}
         primaryHref="/login"
         primaryLabel="Về trang đăng nhập"
-        reason={`${access.reason} Tài khoản khách hàng phải được super admin tạo và gán vào đúng client trước khi xem dashboard.`}
+        reason="Tài khoản chưa được cấp quyền dashboard."
         secondaryHref="/login"
         secondaryLabel="Kiểm tra lại"
         title="Dashboard khách hàng đang được bảo vệ"
@@ -24,11 +25,19 @@ export default async function Home() {
     );
   }
 
+  const dashboardData = await getClientDashboardData({
+    clientId: access.clientId,
+    clientName: access.clientName,
+  });
+
   return (
     <RoyaltyDashboard
       accessLevel={access.accessLevel}
+      breakdownsByPeriod={dashboardData.breakdownsByPeriod}
       clientId={access.clientId}
       clientName={access.clientName}
+      statementPeriods={dashboardData.statementPeriods}
+      trend={dashboardData.trend}
       userEmail={user.email}
     />
   );

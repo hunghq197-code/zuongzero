@@ -12,7 +12,9 @@ export const users = sqliteTable(
   {
     id: text('id').primaryKey(),
     email: text('email').notNull().unique(),
+    companyName: text('company_name'),
     displayName: text('display_name'),
+    phone: text('phone'),
     role: text('role', {
       enum: ['super_admin', 'admin', 'client', 'auditor', 'pending'],
     }).notNull(),
@@ -70,6 +72,75 @@ export const clientUsers = sqliteTable(
     index('idx_client_users_client').on(table.clientId),
     index('idx_client_users_user').on(table.userId),
     index('idx_client_users_user_status').on(table.userId, table.status),
+  ],
+);
+
+export const passwordCredentials = sqliteTable(
+  'password_credentials',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    passwordHash: text('password_hash').notNull(),
+    passwordUpdatedAt: text('password_updated_at').notNull(),
+    mustChangePassword: integer('must_change_password', {
+      mode: 'boolean',
+    })
+      .notNull()
+      .default(false),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [uniqueIndex('idx_password_credentials_user').on(table.userId)],
+);
+
+export const authSessions = sqliteTable(
+  'auth_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    tokenHash: text('token_hash').notNull(),
+    userAgentHash: text('user_agent_hash'),
+    ipHash: text('ip_hash'),
+    createdAt: text('created_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_auth_sessions_token_hash').on(table.tokenHash),
+    index('idx_auth_sessions_user').on(table.userId),
+    index('idx_auth_sessions_expires').on(table.expiresAt),
+  ],
+);
+
+export const accountInvites = sqliteTable(
+  'account_invites',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    email: text('email').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    purpose: text('purpose', {
+      enum: ['account_activation', 'password_reset'],
+    }).notNull(),
+    status: text('status', {
+      enum: ['pending', 'used', 'revoked'],
+    }).notNull(),
+    createdByUserId: text('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    expiresAt: text('expires_at').notNull(),
+    usedAt: text('used_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_account_invites_token_hash').on(table.tokenHash),
+    index('idx_account_invites_user_status').on(table.userId, table.status),
+    index('idx_account_invites_email_status').on(table.email, table.status),
   ],
 );
 

@@ -1,0 +1,214 @@
+import { env } from 'cloudflare:workers';
+
+import {
+  breakdownsByCurrency,
+  periods,
+  revenueTrend,
+  type BreakdownItem,
+  type CurrencyBreakdowns,
+  type CurrencyCode,
+  type RevenueTrendPoint,
+  type StatementPeriod,
+} from '@/lib/dashboard-data';
+import { periodDisplayLabel } from '@/lib/calendar-months';
+import {
+  createEmptyCurrencyBreakdowns,
+  dimensionToBreakdownKey,
+} from '@/lib/royalty-breakdowns';
+
+export type DashboardBreakdownsByPeriod = Record<
+  string,
+  Partial<Record<CurrencyCode, CurrencyBreakdowns>>
+>;
+
+export type ClientDashboardData = {
+  breakdownsByPeriod: DashboardBreakdownsByPeriod;
+  statementPeriods: StatementPeriod[];
+  trend: RevenueTrendPoint[];
+};
+
+type StatementRow = {
+  clientName: string;
+  closing: number;
+  costs: number;
+  currency: CurrencyCode;
+  id: string;
+  opening: number;
+  period: string;
+  revenue: number;
+  rowCount: number;
+  status: 'published' | 'locked';
+  units: number;
+};
+
+type BreakdownRow = {
+  currency: CurrencyCode;
+  dimension: string;
+  label: string;
+  percentage: number;
+  period: string;
+  rowCount: number;
+  units: number;
+  value: number;
+};
+
+export async function getClientDashboardData({
+  clientId,
+  clientName,
+}: {
+  clientId: string;
+  clientName: string;
+}): Promise<ClientDashboardData> {
+  if (!env.DB) {
+    return staticDashboardData(clientId);
+  }
+
+  const statementRows = await env.DB.prepare(
+    `SELECT
+       rp.id,
+       rp.period,
+       rp.currency,
+       rp.status,
+       c.display_name AS clientName,
+       s.opening_balance AS opening,
+       s.net_revenue AS revenue,
+       s.net_costs AS costs,
+       s.closing_balance AS closing,
+       s.units,
+       s.row_count AS rowCount
+     FROM report_periods rp
+     JOIN statements s
+       ON s.report_period_id = rp.id
+     JOIN clients c
+       ON c.id = rp.client_id
+     WHERE rp.client_id = ?
+       AND rp.status IN ('published', 'locked')
+       AND rp.currency IN ('USD', 'VND')
+     ORDER BY rp.period DESC, rp.currency ASC
+     LIMIT 120`,
+  )
+    .bind(clientId)
+    .all<StatementRow>();
+
+  const statementPeriods = statementRows.results.map((row) => ({
+    clientId,
+    clientName: row.clientName || clientName,
+    closing: Number(row.closing) || 0,
+    costs: Number(row.costs) || 0,
+    currency: row.currency,
+    id: row.id,
+    label: periodDisplayLabel(row.period),
+    opening: Number(row.opening) || 0,
+    period: row.period,
+    revenue: Number(row.revenue) || 0,
+    rowCount: Number(row.rowCount) || 0,
+    status: row.status,
+    units: Number(row.units) || 0,
+  }));
+
+  if (statementPeriods.length === 0) {
+    return {
+      breakdownsByPeriod: {},
+      statementPeriods: [],
+      trend: [],
+    };
+  }
+
+  const breakdownRows = await env.DB.prepare(
+    `SELECT
+       rp.period,
+       rp.currency,
+       rb.dimension,
+       rb.label,
+       rb.value,
+       rb.percentage,
+       rb.units,
+       rb.row_count AS rowCount
+     FROM revenue_breakdowns rb
+     JOIN report_periods rp
+       ON rp.id = rb.report_period_id
+     WHERE rb.client_id = ?
+       AND rp.client_id = ?
+       AND rp.status IN ('published', 'locked')
+       AND rp.currency IN ('USD', 'VND')
+     ORDER BY rp.period DESC, rp.currency ASC, rb.dimension ASC, abs(rb.value) DESC
+     LIMIT 2000`,
+  )
+    .bind(clientId, clientId)
+    .all<BreakdownRow>();
+
+  return {
+    breakdownsByPeriod: mapBreakdownsByPeriod(breakdownRows.results),
+    statementPeriods,
+    trend: mapTrend(statementPeriods),
+  };
+}
+
+function staticDashboardData(clientId: string): ClientDashboardData {
+  const statementPeriods = periods.filter(
+    (period) => period.clientId === clientId,
+  );
+
+  return {
+    breakdownsByPeriod:
+      statementPeriods.length > 0
+        ? {
+            [statementPeriods[0].period]: {
+              USD: breakdownsByCurrency.USD,
+              VND: breakdownsByCurrency.VND,
+            },
+          }
+        : {},
+    statementPeriods,
+    trend: statementPeriods.length > 0 ? revenueTrend : [],
+  };
+}
+
+function mapTrend(statementPeriods: StatementPeriod[]) {
+  const trendMap = new Map<string, RevenueTrendPoint>();
+
+  for (const statement of [...statementPeriods].reverse()) {
+    const existing = trendMap.get(statement.period) ?? {
+      label: statement.label,
+      period: statement.period,
+      rowCount: 0,
+      units: 0,
+      usd: 0,
+      vnd: 0,
+    };
+
+    if (statement.currency === 'USD') {
+      existing.usd += statement.revenue;
+    } else {
+      existing.vnd += statement.revenue;
+    }
+    existing.units += statement.units;
+    existing.rowCount += statement.rowCount;
+    trendMap.set(statement.period, existing);
+  }
+
+  return Array.from(trendMap.values());
+}
+
+function mapBreakdownsByPeriod(rows: BreakdownRow[]) {
+  const result: DashboardBreakdownsByPeriod = {};
+
+  for (const row of rows) {
+    const key = dimensionToBreakdownKey(row.dimension);
+    if (!key) continue;
+
+    const currencyBreakdowns =
+      (result[row.period] ??= {})[row.currency] ??
+      createEmptyCurrencyBreakdowns();
+    currencyBreakdowns[key].push({
+      name: row.label,
+      percentage: Number(row.percentage) || 0,
+      rows: Number(row.rowCount) || 0,
+      units: Number(row.units) || 0,
+      value: Number(row.value) || 0,
+    } satisfies BreakdownItem);
+    result[row.period][row.currency] = currencyBreakdowns;
+  }
+
+  return result;
+}

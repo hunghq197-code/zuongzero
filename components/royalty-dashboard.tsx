@@ -5,19 +5,24 @@ import {
   BarChart3,
   CheckCircle2,
   Coins,
-  Database,
-  Eye,
+  Disc3,
+  FileSpreadsheet,
   Filter,
-  Fingerprint,
   KeyRound,
-  LockKeyhole,
-  ShieldCheck,
+  LogOut,
+  RadioTower,
+  Settings,
   TrendingUp,
   Users,
+  WalletCards,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import {
+  ConsoleRail,
+  EqualizerBars,
+  BrandMark,
+} from '@/components/music-brand';
 import {
   Select,
   SelectContent,
@@ -44,8 +49,16 @@ import {
   type BreakdownKey,
   type BreakdownSection,
   type CurrencyCode,
+  type RevenueTrendPoint,
   type StatementMetric,
+  type StatementPeriod,
 } from '@/lib/dashboard-data';
+import {
+  currentCalendarMonth,
+  periodDisplayLabel,
+} from '@/lib/calendar-months';
+import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
+import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
 
 declare global {
   interface Document {
@@ -71,26 +84,35 @@ declare global {
 }
 
 const palette = [
-  '#4b9db0',
-  '#f0b33f',
-  '#4f6a8b',
-  '#d95d52',
-  '#24a37d',
-  '#7f6ab5',
-  '#a5b665',
-  '#d67ba8',
-  '#35424a',
+  '#00b8a9',
+  '#ff4d6d',
+  '#7c3aed',
+  '#f59e0b',
+  '#2563eb',
+  '#111827',
+  '#34d399',
+  '#ec4899',
+  '#64748b',
 ];
 
 const currencies: CurrencyCode[] = ['USD', 'VND'];
 
 const toneClass: Record<StatementMetric['tone'], string> = {
-  ink: 'bg-[#27313a] text-white',
-  blue: 'bg-[#2f8fcc] text-white',
-  teal: 'bg-[#12a990] text-white',
-  amber: 'bg-[#c9851f] text-white',
-  rose: 'bg-[#b95763] text-white',
-  violet: 'bg-[#7a67ad] text-white',
+  ink: 'border-l-[#071118]',
+  blue: 'border-l-[#2563eb]',
+  teal: 'border-l-[#00b8a9]',
+  amber: 'border-l-[#f59e0b]',
+  rose: 'border-l-[#ff4d6d]',
+  violet: 'border-l-[#7c3aed]',
+};
+
+const toneDotClass: Record<StatementMetric['tone'], string> = {
+  ink: 'bg-[#071118]',
+  blue: 'bg-[#2563eb]',
+  teal: 'bg-[#00b8a9]',
+  amber: 'bg-[#f59e0b]',
+  rose: 'bg-[#ff4d6d]',
+  violet: 'bg-[#7c3aed]',
 };
 
 type DashboardAccessLevel = 'admin' | 'owner' | 'viewer' | 'finance';
@@ -110,94 +132,174 @@ function formatNumber(value: number) {
 function statusLabel(status: string) {
   if (status === 'published') return 'Published';
   if (status === 'locked') return 'Locked';
+  if (status === 'empty') return 'Chưa có dữ liệu';
   return 'Validating';
 }
 
-function makeMetrics(
-  activePeriod: (typeof periods)[number],
-): StatementMetric[] {
+function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
   return [
     {
       label: 'Opening Balance',
       value: formatMoney(activePeriod.opening, activePeriod.currency),
-      helper: 'Số dư đầu kỳ đã khóa',
+      helper: 'Beginning balance',
       tone: 'ink',
     },
     {
       label: 'Net Payable',
       value: formatMoney(activePeriod.revenue, activePeriod.currency),
-      helper: 'Từ cột Net Payable',
+      helper: 'Current period',
       tone: 'blue',
     },
     {
       label: 'Units',
       value: formatNumber(activePeriod.units),
-      helper: 'Tổng Units của kỳ',
+      helper: 'Reported usage',
       tone: 'violet',
     },
     {
       label: 'Source Rows',
       value: formatNumber(activePeriod.rowCount),
-      helper: 'Dòng dữ liệu đã import',
+      helper: 'Imported records',
       tone: 'amber',
     },
     {
       label: 'Net Costs',
       value: formatMoney(activePeriod.costs, activePeriod.currency),
-      helper: 'Chưa có cột cost trong file mẫu',
+      helper: 'Deducted costs',
       tone: 'rose',
     },
     {
       label: 'Closing Balance',
       value: formatMoney(activePeriod.closing, activePeriod.currency),
-      helper: 'Opening + payable - costs',
+      helper: 'Ending balance',
       tone: 'teal',
     },
   ];
 }
 
-export function RoyaltyDashboard({
-  accessLevel,
+function makeEmptyPeriod({
   clientId,
   clientName,
+  currency,
+  period,
+}: {
+  clientId: string;
+  clientName: string;
+  currency: CurrencyCode;
+  period: string;
+}): StatementPeriod {
+  return {
+    clientId,
+    clientName,
+    closing: 0,
+    costs: 0,
+    currency,
+    id: `${clientId}:${period}:${currency}:empty`,
+    label: periodDisplayLabel(period),
+    opening: 0,
+    period,
+    revenue: 0,
+    rowCount: 0,
+    status: 'empty',
+    units: 0,
+  };
+}
+
+export function RoyaltyDashboard({
+  accessLevel,
+  breakdownsByPeriod,
+  clientId,
+  clientName,
+  statementPeriods: statementPeriodsProp,
+  trend: trendProp,
   userEmail,
 }: {
   accessLevel: DashboardAccessLevel;
+  breakdownsByPeriod?: DashboardBreakdownsByPeriod;
   clientId: string;
   clientName: string;
+  statementPeriods?: StatementPeriod[];
+  trend?: RevenueTrendPoint[];
   userEmail: string;
 }) {
+  const usesProvidedData = statementPeriodsProp !== undefined;
+  const dashboardPeriods = statementPeriodsProp ?? periods;
+  const dashboardTrend = trendProp ?? revenueTrend;
+  const emptyBreakdowns = useMemo(() => createEmptyCurrencyBreakdowns(), []);
   const assignedClient = clients.find((client) => client.id === clientId) ?? {
     code: clientId,
     id: clientId,
     name: clientName,
   };
   const clientPeriods = useMemo(
-    () => periods.filter((period) => period.clientId === assignedClient.id),
-    [assignedClient.id],
+    () =>
+      dashboardPeriods.filter(
+        (period) => period.clientId === assignedClient.id,
+      ),
+    [assignedClient.id, dashboardPeriods],
   );
+  const hasStatements = clientPeriods.length > 0;
+  const defaultMonth = useMemo(() => currentCalendarMonth(), []);
   const months = useMemo(
-    () => Array.from(new Set(clientPeriods.map((period) => period.period))),
-    [clientPeriods],
+    () =>
+      hasStatements
+        ? Array.from(new Set(clientPeriods.map((period) => period.period)))
+        : [defaultMonth],
+    [clientPeriods, defaultMonth, hasStatements],
   );
   const [selectedMonth, setSelectedMonth] = useState(
-    clientPeriods[0]?.period ?? '',
+    clientPeriods[0]?.period ?? defaultMonth,
   );
-  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>('USD');
+  const resolvedSelectedMonth = months.includes(selectedMonth)
+    ? selectedMonth
+    : (months[0] ?? defaultMonth);
+  const selectedMonthPeriods = useMemo(
+    () =>
+      clientPeriods.filter((period) => period.period === resolvedSelectedMonth),
+    [clientPeriods, resolvedSelectedMonth],
+  );
+  const currencyOptions = useMemo<CurrencyCode[]>(
+    () =>
+      selectedMonthPeriods.length > 0
+        ? Array.from(
+            new Set(selectedMonthPeriods.map((period) => period.currency)),
+          )
+        : currencies,
+    [selectedMonthPeriods],
+  );
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(
+    clientPeriods[0]?.currency ?? 'USD',
+  );
+  const resolvedSelectedCurrency = currencyOptions.includes(selectedCurrency)
+    ? selectedCurrency
+    : (currencyOptions[0] ?? 'USD');
   const [activeTab, setActiveTab] = useState<BreakdownKey>('sources');
 
   const activePeriod =
     clientPeriods.find(
       (period) =>
-        period.period === selectedMonth && period.currency === selectedCurrency,
+        period.period === resolvedSelectedMonth &&
+        period.currency === resolvedSelectedCurrency,
     ) ??
-    clientPeriods.find((period) => period.period === selectedMonth) ??
-    clientPeriods[0];
-  const metrics = activePeriod ? makeMetrics(activePeriod) : [];
+    clientPeriods.find((period) => period.period === resolvedSelectedMonth) ??
+    clientPeriods[0] ??
+    makeEmptyPeriod({
+      clientId: assignedClient.id,
+      clientName: assignedClient.name,
+      currency: resolvedSelectedCurrency,
+      period: resolvedSelectedMonth || defaultMonth,
+    });
+  const metrics = makeMetrics(activePeriod);
   const activeSection =
     breakdownSections.find((section) => section.id === activeTab) ??
     breakdownSections[0];
-  const activeBreakdown = breakdownsByCurrency[selectedCurrency][activeTab];
+  const activeBreakdownData =
+    breakdownsByPeriod?.[activePeriod.period]?.[activePeriod.currency] ??
+    (usesProvidedData
+      ? emptyBreakdowns
+      : breakdownsByCurrency[activePeriod.currency]);
+  const activeBreakdown = hasStatements ? activeBreakdownData[activeTab] : [];
+  const trendData = hasStatements ? dashboardTrend : [];
 
   useEffect(() => {
     const context =
@@ -222,7 +324,7 @@ export function RoyaltyDashboard({
               },
               currency: {
                 type: 'string',
-                enum: currencies,
+                enum: currencyOptions,
               },
             },
             required: ['month', 'currency'],
@@ -233,7 +335,7 @@ export function RoyaltyDashboard({
             untrustedContentHint: false,
           },
           execute(input: unknown) {
-            const parsed = parseScopeInput(input, months);
+            const parsed = parseScopeInput(input, months, currencyOptions);
             setSelectedMonth(parsed.month);
             setSelectedCurrency(parsed.currency);
             return {
@@ -248,197 +350,187 @@ export function RoyaltyDashboard({
     ).catch(() => undefined);
 
     return () => lifecycle.abort();
-  }, [months]);
-
-  if (!activePeriod) {
-    return (
-      <NoStatements
-        accessLevel={accessLevel}
-        clientCode={assignedClient.code}
-        clientName={assignedClient.name}
-        userEmail={userEmail}
-      />
-    );
-  }
+  }, [currencyOptions, months]);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-cols-[76px_minmax(0,1fr)] max-lg:grid-cols-1">
-        <aside className="flex flex-col items-center gap-3 border-r border-border bg-sidebar px-3 py-5 max-lg:hidden">
-          <div className="mb-5 flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ShieldCheck className="size-5" />
-          </div>
-          {[
-            ['Dashboard', Eye],
-            ['Statements', BarChart3],
-            ['Access', LockKeyhole],
-            ['Audit', Fingerprint],
-          ].map(([label, Icon], index) => {
-            const ItemIcon = Icon as typeof BarChart3;
-            return (
-              <Button
-                aria-label={String(label)}
-                className={
-                  index === 0
-                    ? 'bg-primary/10 text-primary hover:bg-primary/15'
-                    : ''
-                }
-                key={String(label)}
-                size="icon"
-                variant="ghost"
-              >
-                <ItemIcon className="size-5" />
-              </Button>
-            );
-          })}
-        </aside>
+      <div className="grid min-h-screen grid-cols-[88px_minmax(0,1fr)] max-lg:block">
+        <ConsoleRail variant="client" />
 
         <section className="min-w-0">
-          <header className="sticky top-0 z-20 border-b border-border bg-background/95 px-5 py-4 backdrop-blur md:px-8">
+          <header className="sticky top-0 z-20 border-b border-border/80 bg-background/90 px-5 py-4 backdrop-blur md:px-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Client Portal
-                </p>
-                <h1 className="text-2xl font-semibold tracking-normal md:text-3xl">
-                  Royalty dashboard
-                </h1>
+              <div className="flex min-w-0 items-center gap-3">
+                <BrandMark className="lg:hidden" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Client Portal
+                  </p>
+                  <h1 className="font-display truncate text-2xl font-semibold md:text-3xl">
+                    Royalty Console
+                  </h1>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge
-                  className="h-7 rounded-lg bg-[#e9f7f2] px-3 text-[#22735f]"
+                  className="h-8 rounded-lg bg-[#e7fbf7] px-3 text-[#00796f]"
                   variant="secondary"
                 >
-                  <Eye className="size-3.5" />
+                  <Disc3 className="size-3.5" />
                   Read-only
                 </Badge>
                 <Badge
-                  className="h-7 rounded-lg bg-primary/10 px-3 text-primary"
-                  variant="secondary"
+                  className="h-8 max-w-[280px] truncate rounded-lg bg-white px-3 text-[#1f2937]"
+                  variant="outline"
                 >
                   <KeyRound className="size-3.5" />
                   {userEmail}
                 </Badge>
+                <Badge className="h-8 rounded-lg" variant="outline">
+                  {accessLevel}
+                </Badge>
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-medium hover:bg-muted"
+                  onClick={() => {
+                    window.location.assign('/account');
+                  }}
+                  type="button"
+                >
+                  <Settings className="size-4" />
+                  Tài khoản
+                </button>
+                <button
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-medium hover:bg-muted"
+                  onClick={() => {
+                    window.location.assign('/api/auth/logout?return_to=/login');
+                  }}
+                  type="button"
+                >
+                  <LogOut className="size-4" />
+                  Đăng xuất
+                </button>
               </div>
             </div>
           </header>
 
-          <div className="space-y-6 px-5 py-5 md:px-8 md:py-7">
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-              <div className="space-y-4 rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">
-                      {assignedClient.name}
-                    </h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {activePeriod.label}: {activePeriod.currency} statement
-                    </p>
-                  </div>
-                  <Badge className="rounded-lg" variant="outline">
-                    {assignedClient.code}
-                  </Badge>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-[180px_150px_160px_minmax(0,1fr)]">
-                  <div className="space-y-2">
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      <Filter className="size-4 text-primary" />
-                      Tháng
-                    </span>
-                    <Select
-                      onValueChange={(value) => {
-                        if (value) setSelectedMonth(value);
-                      }}
-                      value={selectedMonth}
-                    >
-                      <SelectTrigger
-                        aria-label="Tháng báo cáo"
-                        className="h-10 w-full"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {months.map((month) => {
-                          const label =
-                            periods.find((period) => period.period === month)
-                              ?.label ?? month;
-                          return (
-                            <SelectItem key={month} value={month}>
-                              {label}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      <Coins className="size-4 text-primary" />
-                      Currency
-                    </span>
-                    <Select
-                      onValueChange={(value) => {
-                        if (value === 'USD' || value === 'VND') {
-                          setSelectedCurrency(value);
-                        }
-                      }}
-                      value={selectedCurrency}
-                    >
-                      <SelectTrigger
-                        aria-label="Loại tiền"
-                        className="h-10 w-full"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {currencies.map((currency) => (
-                          <SelectItem key={currency} value={currency}>
-                            {currency}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <span className="block text-sm font-medium">
-                      Trạng thái
-                    </span>
-                    <div className="flex h-10 items-center rounded-lg border border-[#b7d8c2] bg-[#f1faf3] px-3 text-sm font-medium text-[#2f6f45]">
-                      <CheckCircle2 className="mr-2 size-4" />
+          <div className="space-y-5 px-5 py-5 md:px-8 md:py-7">
+            <section className="music-card overflow-hidden">
+              <div className="grid lg:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="p-4 md:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          className="rounded-lg bg-[#e7fbf7] text-[#00796f]"
+                          variant="secondary"
+                        >
+                          <WalletCards className="size-3.5" />
+                          Catalog
+                        </Badge>
+                        <Badge className="rounded-lg" variant="outline">
+                          {assignedClient.code}
+                        </Badge>
+                      </div>
+                      <h2 className="font-display mt-4 truncate text-2xl font-semibold md:text-3xl">
+                        {assignedClient.name}
+                      </h2>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {activePeriod.label} / {activePeriod.currency}
+                        {' statement'}
+                      </p>
+                    </div>
+                    <div className="flex min-w-[170px] items-center justify-between gap-3 rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-2 text-sm font-medium text-[#047a70]">
+                      <CheckCircle2 className="size-4" />
                       {statusLabel(activePeriod.status)}
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <span className="block text-sm font-medium">
-                      Quyền truy cập
-                    </span>
-                    <div className="flex min-h-10 items-center rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground">
-                      {accessLevel === 'admin'
-                        ? 'Admin preview read-only cho client này.'
-                        : `${accessLevel}: chỉ xem statement đã publish cho client được gán.`}
+                  <div className="mt-5 grid gap-3 md:grid-cols-[190px_150px]">
+                    <div className="space-y-2">
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        <Filter className="size-4 text-primary" />
+                        Tháng
+                      </span>
+                      <Select
+                        onValueChange={(value) => {
+                          if (value) setSelectedMonth(value);
+                        }}
+                        value={resolvedSelectedMonth}
+                      >
+                        <SelectTrigger
+                          aria-label="Tháng báo cáo"
+                          className="music-control h-10 w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {months.map((month) => {
+                            return (
+                              <SelectItem key={month} value={month}>
+                                {periodDisplayLabel(month)}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        <Coins className="size-4 text-primary" />
+                        Currency
+                      </span>
+                      <Select
+                        onValueChange={(value) => {
+                          if (value === 'USD' || value === 'VND') {
+                            setSelectedCurrency(value);
+                          }
+                        }}
+                        value={resolvedSelectedCurrency}
+                      >
+                        <SelectTrigger
+                          aria-label="Loại tiền"
+                          className="music-control h-10 w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {currencyOptions.map((currency) => (
+                            <SelectItem key={currency} value={currency}>
+                              {currency}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="rounded-lg border border-[#b7d8c2] bg-[#f1faf3] p-4 shadow-sm md:p-5">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#2f6f45] text-white">
-                    <LockKeyhole className="size-5" />
+                <div className="border-t border-white/10 bg-[#071118] p-5 text-white lg:border-l lg:border-t-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <RadioTower className="size-4 text-[#00b8a9]" />
+                      Statement mix
+                    </div>
+                    <Badge className="rounded-lg border-white/15 bg-white/10 text-white">
+                      {hasStatements ? 'Published' : 'Empty'}
+                    </Badge>
                   </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-[#183d27]">
-                      Không có quyền upload
-                    </h2>
-                    <p className="mt-1 text-sm leading-6 text-[#326247]">
-                      File Excel và dữ liệu raw chỉ nằm trong khu admin. Portal
-                      này chỉ render số đã tổng hợp theo tháng và currency.
-                    </p>
-                  </div>
+                  <EqualizerBars className="mt-7" />
+                  <dl className="mt-7 grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <dt className="text-white/55">Rows</dt>
+                      <dd className="mt-1 text-xl font-semibold">
+                        {formatNumber(activePeriod.rowCount)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-white/55">Units</dt>
+                      <dd className="mt-1 text-xl font-semibold">
+                        {formatNumber(activePeriod.units)}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
             </section>
@@ -446,83 +538,102 @@ export function RoyaltyDashboard({
             <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               {metrics.map((metric) => (
                 <article
-                  className={`min-h-[132px] rounded-lg p-4 shadow-sm ${toneClass[metric.tone]}`}
+                  className={`music-card min-h-[134px] border-l-4 p-4 ${toneClass[metric.tone]}`}
                   key={metric.label}
                 >
-                  <p className="text-sm font-semibold uppercase">
-                    {metric.label}
-                  </p>
-                  <p className="mt-5 text-3xl font-semibold tracking-normal">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      {metric.label}
+                    </p>
+                    <span
+                      className={`size-2.5 rounded-full ${toneDotClass[metric.tone]}`}
+                    />
+                  </div>
+                  <p className="font-display mt-5 truncate text-3xl font-semibold">
                     {metric.value}
                   </p>
-                  <p className="mt-2 text-sm opacity-80">{metric.helper}</p>
+                  <p className="mt-3 truncate text-xs font-medium text-muted-foreground">
+                    {metric.helper}
+                  </p>
                 </article>
               ))}
             </section>
 
             <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-              <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+              <section className="music-card p-4 md:p-5">
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold">Monthly trend</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Tách USD và VND, không cộng lẫn khi chưa có FX mapping.
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Revenue
                     </p>
+                    <h2 className="mt-1 text-lg font-semibold">
+                      Monthly trend
+                    </h2>
                   </div>
                   <TrendingUp className="size-5 text-primary" />
                 </div>
                 <RevenueTrendChart
-                  currency={selectedCurrency}
-                  data={revenueTrend}
+                  currency={resolvedSelectedCurrency}
+                  data={trendData}
                 />
               </section>
 
-              <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+              <section className="music-card p-4 md:p-5">
                 <div className="flex items-start gap-3">
-                  <Database className="mt-0.5 size-5 text-primary" />
+                  <BarChart3 className="mt-0.5 size-5 text-primary" />
                   <div>
-                    <h2 className="text-lg font-semibold">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Statements
+                    </p>
+                    <h2 className="mt-1 text-lg font-semibold">
                       Statement mới nhất
                     </h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Mỗi tháng có statement riêng theo từng currency.
-                    </p>
                   </div>
                 </div>
-                <div className="mt-4 space-y-3">
-                  {clientPeriods.slice(0, 6).map((period) => (
-                    <div
-                      className="rounded-lg border border-border bg-background px-3 py-3"
-                      key={period.id}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">
-                          {period.label} - {period.currency}
+                <div className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border">
+                  {clientPeriods.length > 0 ? (
+                    clientPeriods.slice(0, 6).map((period) => (
+                      <div className="bg-white px-3 py-3" key={period.id}>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-medium">
+                            {period.label} - {period.currency}
+                          </p>
+                          <Badge className="rounded-lg" variant="outline">
+                            {statusLabel(period.status)}
+                          </Badge>
+                        </div>
+                        <p className="font-display mt-2 text-xl font-semibold">
+                          {formatMoney(period.closing, period.currency)}
                         </p>
-                        <Badge className="rounded-lg" variant="outline">
-                          {statusLabel(period.status)}
-                        </Badge>
                       </div>
-                      <p className="mt-2 text-xl font-semibold">
-                        {formatMoney(period.closing, period.currency)}
-                      </p>
+                    ))
+                  ) : (
+                    <div className="flex min-h-[210px] items-center justify-center bg-white px-4 text-center">
+                      <div>
+                        <FileSpreadsheet className="mx-auto size-8 text-primary" />
+                        <p className="mt-3 text-sm font-medium">
+                          Chưa có statement
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                  )}
                 </div>
               </section>
             </section>
 
             <Tabs
-              className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5"
+              className="music-card p-4 md:p-5"
               onValueChange={(value) => setActiveTab(value as BreakdownKey)}
               value={activeTab}
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold">Phân tích doanh thu</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Biểu đồ được bố trí theo các cột có trong file mẫu.
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Breakdown
                   </p>
+                  <h2 className="mt-1 text-lg font-semibold">
+                    Phân tích doanh thu
+                  </h2>
                 </div>
                 <TabsList className="h-auto flex-wrap justify-start">
                   {breakdownSections.map((section) => (
@@ -536,57 +647,71 @@ export function RoyaltyDashboard({
               <TabsContent className="mt-5" value={activeTab}>
                 <BreakdownChart
                   chartType={activeSection.chartType}
-                  currency={selectedCurrency}
+                  currency={resolvedSelectedCurrency}
                   data={activeBreakdown}
                   section={activeSection}
                 />
               </TabsContent>
             </Tabs>
 
-            <section className="rounded-lg border border-border bg-card p-4 shadow-sm md:p-5">
+            <section className="music-card p-4 md:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold">Latest statements</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Portal khách hàng không có thao tác upload, sửa, replace
-                    hoặc publish.
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Ledger
                   </p>
+                  <h2 className="mt-1 text-lg font-semibold">
+                    Latest statements
+                  </h2>
                 </div>
                 <Users className="size-5 text-primary" />
               </div>
 
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Period</TableHead>
-                    <TableHead>Currency</TableHead>
-                    <TableHead>Rows</TableHead>
-                    <TableHead>Units</TableHead>
-                    <TableHead>Net Payable</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {clientPeriods.map((period) => (
-                    <TableRow key={period.id}>
-                      <TableCell className="font-medium">
-                        {period.label}: {period.clientName}
-                      </TableCell>
-                      <TableCell>{period.currency}</TableCell>
-                      <TableCell>{formatNumber(period.rowCount)}</TableCell>
-                      <TableCell>{formatNumber(period.units)}</TableCell>
-                      <TableCell>
-                        {formatMoney(period.revenue, period.currency)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge className="rounded-lg" variant="outline">
-                          {statusLabel(period.status)}
-                        </Badge>
-                      </TableCell>
+              <div className="overflow-hidden rounded-lg border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Period</TableHead>
+                      <TableHead>Currency</TableHead>
+                      <TableHead>Rows</TableHead>
+                      <TableHead>Units</TableHead>
+                      <TableHead>Net Payable</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {clientPeriods.length > 0 ? (
+                      clientPeriods.map((period) => (
+                        <TableRow key={period.id}>
+                          <TableCell className="font-medium">
+                            {period.label}: {period.clientName}
+                          </TableCell>
+                          <TableCell>{period.currency}</TableCell>
+                          <TableCell>{formatNumber(period.rowCount)}</TableCell>
+                          <TableCell>{formatNumber(period.units)}</TableCell>
+                          <TableCell>
+                            {formatMoney(period.revenue, period.currency)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="rounded-lg" variant="outline">
+                              {statusLabel(period.status)}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell
+                          className="h-24 text-center text-sm text-muted-foreground"
+                          colSpan={6}
+                        >
+                          Chưa có statement cho khách hàng này.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </section>
           </div>
         </section>
@@ -595,53 +720,11 @@ export function RoyaltyDashboard({
   );
 }
 
-function NoStatements({
-  accessLevel,
-  clientCode,
-  clientName,
-  userEmail,
-}: {
-  accessLevel: DashboardAccessLevel;
-  clientCode: string;
-  clientName: string;
-  userEmail: string;
-}) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-5 text-foreground">
-      <section className="w-full max-w-3xl rounded-lg border border-border bg-card p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">
-              Client Portal
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-normal">
-              Chưa có statement đã publish
-            </h1>
-          </div>
-          <Badge className="rounded-lg" variant="outline">
-            {clientCode}
-          </Badge>
-        </div>
-        <div className="mt-5 rounded-lg border border-[#b7d8c2] bg-[#f1faf3] p-4">
-          <div className="flex items-start gap-3">
-            <LockKeyhole className="mt-0.5 size-5 text-[#2f6f45]" />
-            <div>
-              <h2 className="font-semibold text-[#183d27]">{clientName}</h2>
-              <p className="mt-2 text-sm leading-6 text-[#326247]">
-                Tài khoản {userEmail} đã được xác thực với quyền {accessLevel},
-                nhưng chưa có kỳ báo cáo nào được admin publish cho client này.
-                Dashboard không hiển thị dữ liệu mẫu hoặc dữ liệu của client
-                khác.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function parseScopeInput(input: unknown, months: string[]) {
+function parseScopeInput(
+  input: unknown,
+  months: string[],
+  currencyOptions: CurrencyCode[],
+) {
   if (!input || typeof input !== 'object') {
     throw new Error('Input must be an object.');
   }
@@ -656,7 +739,10 @@ function parseScopeInput(input: unknown, months: string[]) {
   ) {
     throw new Error('Invalid month.');
   }
-  if (candidate.currency !== 'USD' && candidate.currency !== 'VND') {
+  if (
+    typeof candidate.currency !== 'string' ||
+    !currencyOptions.includes(candidate.currency as CurrencyCode)
+  ) {
     throw new Error('Invalid currency.');
   }
 
@@ -679,7 +765,7 @@ function BreakdownChart({
 }) {
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_430px]">
-      <div className="min-h-[360px] min-w-0 rounded-lg border border-border bg-background p-3">
+      <div className="min-h-[360px] min-w-0 rounded-lg border border-border bg-white p-3">
         {chartType === 'donut' ? (
           <DonutChart data={data} />
         ) : chartType === 'ranked' ? (
@@ -692,9 +778,6 @@ function BreakdownChart({
       <div className="overflow-hidden rounded-lg border border-border">
         <div className="border-b border-border bg-muted/35 px-4 py-3">
           <p className="text-sm font-semibold">{section.label}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Source column: {section.sourceColumn}
-          </p>
         </div>
         <Table>
           <TableHeader>
@@ -847,6 +930,19 @@ function RankedBreakdown({
 }
 
 function DonutChart({ data }: { data: BreakdownItem[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="flex h-full min-h-[330px] items-center justify-center">
+        <div
+          aria-label="Revenue share: empty"
+          className="relative size-[230px] rounded-full border border-border bg-muted"
+        >
+          <div className="absolute inset-[64px] rounded-full border border-border bg-white" />
+        </div>
+      </div>
+    );
+  }
+
   const stops = data
     .map((item, index) => {
       const start = data
@@ -865,7 +961,7 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
         className="relative size-[230px] rounded-full"
         style={{ background: `conic-gradient(${stops})` }}
       >
-        <div className="absolute inset-[64px] rounded-full border border-border bg-background" />
+        <div className="absolute inset-[64px] rounded-full border border-border bg-white" />
       </div>
       <div className="grid w-full gap-2 sm:grid-cols-2">
         {data.map((item, index) => (
