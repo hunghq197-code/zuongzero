@@ -15,8 +15,13 @@ import { ensureUserRecord } from '@/lib/user-records';
 import {
   parseRoyaltyWorkbook,
   stableBreakdownId,
+  type ParsedClientStatementGroup,
   type ParsedCurrencyStatement,
 } from '@/lib/xlsx-royalty-parser';
+import {
+  SETTLEMENT_THRESHOLD_VND,
+  summarizeSettlement,
+} from '@/lib/settlements';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
@@ -35,6 +40,16 @@ type CustomerUploadSummary = {
   latestPeriod: string | null;
   totalRevenue: number;
   uploadedQuarters: number;
+};
+
+type UploadMode = 'single' | 'bulk';
+
+type UploadTarget = {
+  client: UploadClient;
+  clientCodeFromFile: string | null;
+  parsedStatements: ParsedCurrencyStatement[];
+  rowCount: number;
+  uploadId: string;
 };
 
 export const dynamic = 'force-dynamic';
@@ -66,9 +81,11 @@ async function uploadResponse(request: Request) {
   const file = formData.get('file');
   const clientId = readRequiredText(formData, 'clientId');
   const period = readRequiredText(formData, 'period');
-  const selectedClient = await findUploadClient(clientId);
+  const uploadMode = readUploadMode(formData);
+  const selectedClient =
+    uploadMode === 'single' ? await findUploadClient(clientId) : null;
 
-  if (!selectedClient) {
+  if (uploadMode === 'single' && !selectedClient) {
     return jsonError('Client không hợp lệ hoặc chưa được admin quản lý.', 400);
   }
 
@@ -86,11 +103,20 @@ async function uploadResponse(request: Request) {
   }
 
   const buffer = await file.arrayBuffer();
-  const parsedWorkbook = parseUploadedWorkbook(buffer);
+  const parsedWorkbook = parseUploadedWorkbook(buffer, uploadMode);
   if (parsedWorkbook instanceof Response) return parsedWorkbook;
 
-  const uploadId = crypto.randomUUID();
-  const stagingReportPeriodId = `${selectedClient.id}:${period}:staging`;
+  const uploadTargets = await resolveUploadTargets({
+    db: env.DB,
+    parsedGroups: parsedWorkbook.clientStatements,
+    parsedStatements: parsedWorkbook.statements,
+    rowCount: parsedWorkbook.rowCount,
+    selectedClient,
+    uploadMode,
+  });
+  if (uploadTargets instanceof Response) return uploadTargets;
+
+  const bulkUploadId = crypto.randomUUID();
   const now = new Date().toISOString();
   const uploader = await ensureUserRecord(env.DB, {
     displayName: user.displayName,
@@ -100,79 +126,87 @@ async function uploadResponse(request: Request) {
     userId: user.userId,
   });
   const sha256 = await hashBuffer(buffer);
-  const objectKey = `clients/${selectedClient.id}/periods/${period}/uploads/${uploadId}.xlsx`;
 
-  await env.FILES.put(objectKey, buffer, {
-    httpMetadata: {
-      contentType: XLSX_MIME,
-    },
-    customMetadata: {
-      clientId: selectedClient.id,
-      originalFilename: file.name,
-      period,
-      sha256,
-      uploadedBy: uploader.id,
-    },
-  });
+  const statements: D1PreparedStatement[] = [];
+  for (const target of uploadTargets) {
+    const objectKey = `clients/${target.client.id}/periods/${period}/uploads/${target.uploadId}.xlsx`;
+    await env.FILES.put(objectKey, buffer, {
+      httpMetadata: {
+        contentType: XLSX_MIME,
+      },
+      customMetadata: {
+        bulkUploadId,
+        clientCodeFromFile: target.clientCodeFromFile ?? '',
+        clientId: target.client.id,
+        originalFilename: file.name,
+        period,
+        sha256,
+        uploadMode,
+        uploadedBy: uploader.id,
+      },
+    });
 
-  const importSummary = {
-    currencies: parsedWorkbook.currencies,
-    currencyPolicy: 'VND-only-before-publish',
-    expectedColumns: [
-      'Source',
-      'Sub Source',
-      'Territory',
-      'Track Title',
-      'ISRC',
-      'Release Title',
-      'Track Artist',
-      'Release Label',
-      'Configuration',
-      'Units',
-      'Net Payable',
-      'Sale Date',
-    ],
-    fileType: 'xlsx',
-    importStatus: 'imported',
-    malwareScan: 'pending',
-    periodPolicy: 'Gregorian quarter YYYY-Qn, Asia/Bangkok UTC+7',
-    rowCount: parsedWorkbook.rowCount,
-    signature: 'zip',
-    warnings: parsedWorkbook.warnings,
-  };
-
-  const statements = await buildImportStatements({
-    byteSize: file.size,
-    db: env.DB,
-    filename: file.name,
-    importSummary,
-    objectKey,
-    parsedStatements: parsedWorkbook.statements,
-    period,
-    selectedClient,
-    sha256,
-    stagingReportPeriodId,
-    uploadId,
-    uploaderId: uploader.id,
-    now,
-  });
+    statements.push(
+      ...(await buildImportStatements({
+        byteSize: file.size,
+        bulkUploadId,
+        db: env.DB,
+        filename: file.name,
+        importSummary: buildImportSummary({
+          clientCount: uploadTargets.length,
+          currencies: parsedWorkbook.currencies,
+          rowCount: target.rowCount,
+          totalRowCount: parsedWorkbook.rowCount,
+          uploadMode,
+          warnings: parsedWorkbook.warnings,
+        }),
+        objectKey,
+        parsedStatements: target.parsedStatements,
+        period,
+        selectedClient: target.client,
+        sha256,
+        stagingReportPeriodId: `${target.client.id}:${period}:staging`,
+        uploadId: target.uploadId,
+        uploadMode,
+        uploaderId: uploader.id,
+        now,
+      })),
+    );
+  }
   await runBatchInChunks(env.DB, statements);
 
-  const customer = await readCustomerUploadSummary(env.DB, selectedClient.id);
+  const customerSummaries = await Promise.all(
+    uploadTargets.map(async (target) => ({
+      ...(await readCustomerUploadSummary(env.DB, target.client.id)),
+      clientCode: target.client.code,
+      clientId: target.client.id,
+      clientName: target.client.name,
+    })),
+  );
+  const firstCustomer = customerSummaries[0] ?? null;
+
   return Response.json({
     currencies: parsedWorkbook.currencies,
-    customer,
+    customer: uploadMode === 'single' ? firstCustomer : null,
+    customers: customerSummaries,
+    importedClients: uploadTargets.length,
     importedRows: parsedWorkbook.rowCount,
     status: 'imported',
-    uploadId,
+    uploadId:
+      uploadMode === 'single' ? uploadTargets[0]?.uploadId : bulkUploadId,
     warnings: parsedWorkbook.warnings,
-    message: `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${selectedClient.name}, ${periodDisplayLabel(period)} (VNĐ).`,
+    message:
+      uploadMode === 'bulk'
+        ? `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${uploadTargets.length} khách hàng, ${periodDisplayLabel(period)} (VNĐ).`
+        : `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${uploadTargets[0]?.client.name ?? 'khách hàng'}, ${periodDisplayLabel(period)} (VNĐ).`,
   });
 }
 
-function parseUploadedWorkbook(buffer: ArrayBuffer) {
+function parseUploadedWorkbook(buffer: ArrayBuffer, uploadMode: UploadMode) {
   try {
-    return parseRoyaltyWorkbook(buffer);
+    return parseRoyaltyWorkbook(buffer, {
+      groupByClientCode: uploadMode === 'bulk',
+    });
   } catch (error) {
     return jsonError(
       error instanceof Error
@@ -183,8 +217,132 @@ function parseUploadedWorkbook(buffer: ArrayBuffer) {
   }
 }
 
+function buildImportSummary({
+  clientCount,
+  currencies,
+  rowCount,
+  totalRowCount,
+  uploadMode,
+  warnings,
+}: {
+  clientCount: number;
+  currencies: CurrencyCode[];
+  rowCount: number;
+  totalRowCount: number;
+  uploadMode: UploadMode;
+  warnings: string[];
+}) {
+  const expectedColumns = [
+    'Source',
+    'Sub Source',
+    'Territory',
+    'Track Title',
+    'ISRC',
+    'Release Title',
+    'Track Artist',
+    'Release Label',
+    'Configuration',
+    'Units',
+    'Net Payable',
+    'Sale Date',
+  ];
+
+  if (uploadMode === 'bulk') {
+    expectedColumns.unshift('Mã khách hàng / Client ID');
+  }
+
+  return {
+    clientCount,
+    currencies,
+    currencyPolicy: 'VND-only-before-publish',
+    expectedColumns,
+    fileType: 'xlsx',
+    importStatus: 'imported',
+    malwareScan: 'pending',
+    periodPolicy: 'Gregorian quarter YYYY-Qn, Asia/Bangkok UTC+7',
+    rowCount,
+    settlementPolicy: `payable >= ${SETTLEMENT_THRESHOLD_VND} VND is paid; lower balances carry forward`,
+    signature: 'zip',
+    totalRowCount,
+    uploadMode,
+    warnings,
+  };
+}
+
+async function resolveUploadTargets({
+  db,
+  parsedGroups,
+  parsedStatements,
+  rowCount,
+  selectedClient,
+  uploadMode,
+}: {
+  db: D1Database;
+  parsedGroups: ParsedClientStatementGroup[];
+  parsedStatements: ParsedCurrencyStatement[];
+  rowCount: number;
+  selectedClient: UploadClient | null;
+  uploadMode: UploadMode;
+}): Promise<UploadTarget[] | Response> {
+  if (uploadMode === 'single') {
+    if (!selectedClient) {
+      return jsonError(
+        'Client không hợp lệ hoặc chưa được admin quản lý.',
+        400,
+      );
+    }
+
+    return [
+      {
+        client: selectedClient,
+        clientCodeFromFile: null,
+        parsedStatements,
+        rowCount,
+        uploadId: crypto.randomUUID(),
+      },
+    ];
+  }
+
+  const groups = parsedGroups.filter((group) => group.rowCount > 0);
+  if (groups.length === 0) {
+    return jsonError('File tổng không có dòng dữ liệu hợp lệ.', 400);
+  }
+
+  const clientsByCode = await readActiveClientLookup(db);
+  const missingCodes: string[] = [];
+  const targets: UploadTarget[] = [];
+
+  for (const group of groups) {
+    const client = clientsByCode.get(
+      normalizeClientLookupKey(group.clientCode),
+    );
+    if (!client) {
+      missingCodes.push(group.clientCode);
+      continue;
+    }
+
+    targets.push({
+      client,
+      clientCodeFromFile: group.clientCode,
+      parsedStatements: group.statements,
+      rowCount: group.rowCount,
+      uploadId: crypto.randomUUID(),
+    });
+  }
+
+  if (missingCodes.length > 0) {
+    return jsonError(
+      `Không tìm thấy mã khách hàng trong file tổng: ${missingCodes.slice(0, 12).join(', ')}. Hãy tạo khách hàng/tài khoản trước khi import.`,
+      400,
+    );
+  }
+
+  return targets;
+}
+
 async function buildImportStatements({
   byteSize,
+  bulkUploadId,
   db,
   filename,
   importSummary,
@@ -195,10 +353,12 @@ async function buildImportStatements({
   sha256,
   stagingReportPeriodId,
   uploadId,
+  uploadMode,
   uploaderId,
   now,
 }: {
   byteSize: number;
+  bulkUploadId: string;
   db: D1Database;
   filename: string;
   importSummary: Record<string, unknown>;
@@ -209,9 +369,18 @@ async function buildImportStatements({
   sha256: string;
   stagingReportPeriodId: string;
   uploadId: string;
+  uploadMode: UploadMode;
   uploaderId: string;
   now: string;
 }) {
+  const settlementResults: Array<{
+    carryForward: number;
+    currency: CurrencyCode;
+    paidAmount: number;
+    payable: number;
+    revenue: number;
+    status: string;
+  }> = [];
   const statements: D1PreparedStatement[] = [
     db
       .prepare(
@@ -296,13 +465,22 @@ async function buildImportStatements({
     const costs = 0;
     const reservesWithheld = 0;
     const reservesReleased = 0;
-    const closing = roundMoney(
-      opening +
-        parsedStatement.revenue -
-        costs -
-        reservesWithheld +
-        reservesReleased,
-    );
+    const settlement = summarizeSettlement({
+      costs,
+      opening,
+      reservesReleased,
+      reservesWithheld,
+      revenue: parsedStatement.revenue,
+    });
+    const closing = settlement.carryForward;
+    settlementResults.push({
+      carryForward: settlement.carryForward,
+      currency: parsedStatement.currency,
+      paidAmount: settlement.paidAmount,
+      payable: settlement.payable,
+      revenue: parsedStatement.revenue,
+      status: settlement.status,
+    });
 
     statements.push(
       db
@@ -442,11 +620,14 @@ async function buildImportStatements({
         selectedClient.id,
         uploadId,
         JSON.stringify({
+          bulkUploadId,
           currencies: importSummary.currencies,
           filename,
           period,
           rowCount: importSummary.rowCount,
+          settlements: settlementResults,
           sha256,
+          uploadMode,
         }),
         now,
       ),
@@ -471,7 +652,13 @@ async function readPreviousClosingBalance(
 ) {
   const previous = await db
     .prepare(
-      `SELECT s.closing_balance AS closing
+      `SELECT
+         s.opening_balance AS opening,
+         s.net_revenue AS revenue,
+         s.net_costs AS costs,
+         s.reserves_withheld AS reservesWithheld,
+         s.reserves_released AS reservesReleased,
+         s.closing_balance AS closing
        FROM statements s
        JOIN report_periods rp
          ON rp.id = s.report_period_id
@@ -484,9 +671,24 @@ async function readPreviousClosingBalance(
        LIMIT 1`,
     )
     .bind(clientId, clientId, period)
-    .first<{ closing: number }>();
+    .first<{
+      closing: number;
+      costs: number;
+      opening: number;
+      reservesReleased: number;
+      reservesWithheld: number;
+      revenue: number;
+    }>();
 
-  return Number(previous?.closing) || 0;
+  if (!previous) return 0;
+
+  return summarizeSettlement({
+    costs: Number(previous.costs) || 0,
+    opening: Number(previous.opening) || 0,
+    reservesReleased: Number(previous.reservesReleased) || 0,
+    reservesWithheld: Number(previous.reservesWithheld) || 0,
+    revenue: Number(previous.revenue) || 0,
+  }).carryForward;
 }
 
 async function readCustomerUploadSummary(db: D1Database, clientId: string) {
@@ -531,6 +733,13 @@ function readRequiredText(formData: FormData, key: string) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readUploadMode(formData: FormData): UploadMode {
+  const value =
+    readRequiredText(formData, 'uploadMode') ||
+    readRequiredText(formData, 'mode');
+  return value === 'bulk' ? 'bulk' : 'single';
+}
+
 async function findUploadClient(
   clientId: string,
 ): Promise<UploadClient | null> {
@@ -559,6 +768,60 @@ async function findUploadClient(
     legalName: sampleClient.legalName,
     name: sampleClient.name,
   };
+}
+
+async function readActiveClientLookup(db: D1Database) {
+  const rows = await db
+    .prepare(
+      `SELECT
+         id,
+         code,
+         legal_name AS legalName,
+         display_name AS name
+       FROM clients
+       WHERE status = 'active'
+       ORDER BY display_name ASC
+       LIMIT 5000`,
+    )
+    .all<UploadClient>();
+  const lookup = new Map<string, UploadClient>();
+
+  for (const client of rows.results) {
+    addClientLookup(lookup, client);
+  }
+
+  for (const client of clients) {
+    addClientLookup(lookup, {
+      code: client.code,
+      id: client.id,
+      legalName: client.legalName,
+      name: client.name,
+    });
+  }
+
+  return lookup;
+}
+
+function addClientLookup(
+  lookup: Map<string, UploadClient>,
+  client: UploadClient,
+) {
+  const keys = [
+    normalizeClientLookupKey(client.id),
+    normalizeClientLookupKey(client.code),
+  ].filter(Boolean);
+
+  for (const key of keys) {
+    if (!lookup.has(key)) lookup.set(key, client);
+  }
+}
+
+function normalizeClientLookupKey(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
 }
 
 async function validateWorkbookFile(
@@ -624,10 +887,6 @@ function reportPeriodIdForCurrency(
   currency: CurrencyCode,
 ) {
   return `${clientId}:${period}:${currency}`;
-}
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function jsonError(message: string, status: number) {

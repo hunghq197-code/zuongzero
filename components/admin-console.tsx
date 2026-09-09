@@ -74,6 +74,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { clients } from '@/lib/dashboard-data';
 import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
+import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import { type AdminActivityRow } from '@/lib/admin-activity';
 import {
   fallbackAdminOverviewData,
@@ -116,6 +117,7 @@ type CustomerActionState = 'idle' | 'saving' | 'saved' | 'failed';
 type StatementAction = 'publish' | 'unpublish' | 'lock';
 type CustomerStatusFilter = 'all' | CustomerStatus;
 type StatementStatusFilter = 'all' | AdminStatementRow['status'];
+type UploadMode = 'single' | 'bulk';
 
 const adminPalette = [
   '#00b8a9',
@@ -226,6 +228,24 @@ function statementStatusFilterLabel(status: StatementStatusFilter) {
   return statementStatusLabel(status);
 }
 
+function settlementStatusLabel(status: AdminStatementRow['settlementStatus']) {
+  return status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán';
+}
+
+function settlementBadgeClass(status: AdminStatementRow['settlementStatus']) {
+  return status === 'paid'
+    ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
+    : 'rounded-lg bg-[#fff8e7] text-[#986200]';
+}
+
+function settlementHelper(statement: AdminStatementRow) {
+  if (statement.settlementStatus === 'paid') {
+    return `Paid ${formatMoney(statement.paid)}`;
+  }
+
+  return `Qua quý sau ${formatMoney(statement.carryForward)}`;
+}
+
 function trendLabel(trend: AdminTrendItem['trend']) {
   if (trend === 'new') return 'New';
   if (trend === 'up') return 'Up';
@@ -278,7 +298,7 @@ function rowMatchesSearch(query: string, values: Array<string | null>) {
   return values.some((value) => value?.toLowerCase().includes(query));
 }
 
-function validateWorkbook(file: File | null) {
+function validateWorkbook(file: File | null, uploadMode: UploadMode) {
   if (!file) {
     return {
       state: 'idle',
@@ -314,7 +334,10 @@ function validateWorkbook(file: File | null) {
 
   return {
     state: 'ready',
-    message: 'File hợp lệ.',
+    message:
+      uploadMode === 'bulk'
+        ? 'File hợp lệ. Khi import, hệ thống sẽ kiểm tra cột Mã khách hàng/Client ID.'
+        : 'File hợp lệ.',
     progress: 86,
   };
 }
@@ -371,6 +394,7 @@ export function AdminConsole({
     'idle' | 'saved' | 'failed'
   >('idle');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadMode, setUploadMode] = useState<UploadMode>('single');
   const [uploadState, setUploadState] = useState<
     'idle' | 'uploading' | 'stored' | 'failed'
   >('idle');
@@ -441,14 +465,15 @@ export function AdminConsole({
           statement.clientName,
           statement.filename,
           statement.period,
+          settlementStatusLabel(statement.settlementStatus),
           statement.status,
         ])
       );
     });
   }, [statementRows, statementSearch, statementStatusFilter]);
   const validation = useMemo(
-    () => validateWorkbook(selectedFile),
-    [selectedFile],
+    () => validateWorkbook(selectedFile, uploadMode),
+    [selectedFile, uploadMode],
   );
   const activeCustomerCount = overview.summary.activeCustomers;
   const uploadedQuarterCount = overview.summary.statementCount;
@@ -831,7 +856,7 @@ export function AdminConsole({
   }
 
   async function uploadWorkbook() {
-    if (!activeClient) {
+    if (uploadMode === 'single' && !activeClient) {
       setUploadState('failed');
       setUploadMessage('Cần tạo khách hàng trước khi upload statement.');
       return;
@@ -844,7 +869,10 @@ export function AdminConsole({
 
     const body = new FormData();
     body.append('file', selectedFile);
-    body.append('clientId', activeClient.id);
+    body.append('uploadMode', uploadMode);
+    if (uploadMode === 'single' && activeClient) {
+      body.append('clientId', activeClient.id);
+    }
     body.append('period', selectedPeriod);
 
     try {
@@ -858,6 +886,7 @@ export function AdminConsole({
           totalRevenue: number;
           uploadedQuarters: number;
         };
+        importedClients?: number;
         message?: string;
       }>(response);
 
@@ -868,7 +897,7 @@ export function AdminConsole({
       }
 
       setUploadState('stored');
-      if (result.customer) {
+      if (uploadMode === 'single' && result.customer && activeClient) {
         setCustomers((currentCustomers) =>
           currentCustomers.map((customer) =>
             customer.id === activeClient.id
@@ -1144,6 +1173,7 @@ export function AdminConsole({
   }
 
   function prepareStatementReplace(statement: AdminStatementRow) {
+    setUploadMode('single');
     setSelectedClient(statement.clientId);
     setSelectedPeriod(statement.period);
     setUploadState('idle');
@@ -2078,32 +2108,66 @@ export function AdminConsole({
                     </div>
 
                     <div className="mt-5 grid gap-3">
-                      <div className="space-y-2">
-                        <span className="block text-sm font-medium">
-                          Khách hàng
+                      <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white px-3 py-3">
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium">
+                            File tổng nhiều khách hàng
+                          </span>
+                          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                            Bật khi Excel có cột Mã khách hàng/Client ID. Ngưỡng
+                            thanh toán {formatMoney(SETTLEMENT_THRESHOLD_VND)}.
+                          </span>
                         </span>
-                        <Select
-                          onValueChange={(value) => {
-                            if (value) setSelectedClient(value);
+                        <input
+                          aria-label="File tổng nhiều khách hàng"
+                          checked={uploadMode === 'bulk'}
+                          className="size-5 accent-primary"
+                          onChange={(event) => {
+                            setUploadMode(
+                              event.target.checked ? 'bulk' : 'single',
+                            );
+                            setUploadState('idle');
+                            setUploadMessage('');
                           }}
-                          value={selectedClient}
-                        >
-                          <SelectTrigger
-                            aria-label="Khách hàng"
-                            className="music-control h-10 w-full"
-                          >
-                            <span className="flex-1 truncate text-left">
-                              {activeClient?.name ?? 'Chọn khách hàng'}
+                          type="checkbox"
+                        />
+                      </label>
+
+                      <div className="space-y-2">
+                        {uploadMode === 'single' ? (
+                          <>
+                            <span className="block text-sm font-medium">
+                              Khách hàng
                             </span>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {customers.map((client) => (
-                              <SelectItem key={client.id} value={client.id}>
-                                {client.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                            <Select
+                              onValueChange={(value) => {
+                                if (value) setSelectedClient(value);
+                              }}
+                              value={selectedClient}
+                            >
+                              <SelectTrigger
+                                aria-label="Khách hàng"
+                                className="music-control h-10 w-full"
+                              >
+                                <span className="flex-1 truncate text-left">
+                                  {activeClient?.name ?? 'Chọn khách hàng'}
+                                </span>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {customers.map((client) => (
+                                  <SelectItem key={client.id} value={client.id}>
+                                    {client.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </>
+                        ) : (
+                          <div className="rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-3 text-sm leading-6 text-[#047a70]">
+                            Hệ thống sẽ tự match từng dòng theo mã khách hàng đã
+                            có trong mục Tài khoản/Khách hàng.
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-2">
@@ -2189,7 +2253,11 @@ export function AdminConsole({
                       onClick={uploadWorkbook}
                     >
                       <FolderLock className="size-4" />
-                      {uploadState === 'uploading' ? 'Đang lưu...' : 'Lưu file'}
+                      {uploadState === 'uploading'
+                        ? 'Đang lưu...'
+                        : uploadMode === 'bulk'
+                          ? 'Import file tổng'
+                          : 'Lưu file'}
                     </Button>
                     {uploadMessage ? (
                       <p
@@ -2289,7 +2357,8 @@ export function AdminConsole({
                           <TableHead>Rows</TableHead>
                           <TableHead>Units</TableHead>
                           <TableHead>Revenue</TableHead>
-                          <TableHead>Closing</TableHead>
+                          <TableHead>Carry</TableHead>
+                          <TableHead>Đối soát</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Action</TableHead>
                         </TableRow>
@@ -2317,7 +2386,22 @@ export function AdminConsole({
                                 {formatMoney(statement.revenue)}
                               </TableCell>
                               <TableCell>
-                                {formatMoney(statement.closing)}
+                                {formatMoney(statement.carryForward)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  className={settlementBadgeClass(
+                                    statement.settlementStatus,
+                                  )}
+                                  variant="secondary"
+                                >
+                                  {settlementStatusLabel(
+                                    statement.settlementStatus,
+                                  )}
+                                </Badge>
+                                <span className="mt-1 block text-xs text-muted-foreground">
+                                  {settlementHelper(statement)}
+                                </span>
                               </TableCell>
                               <TableCell>
                                 <Badge className="rounded-lg" variant="outline">
@@ -2423,7 +2507,7 @@ export function AdminConsole({
                           <TableRow>
                             <TableCell
                               className="h-24 text-center text-sm text-muted-foreground"
-                              colSpan={8}
+                              colSpan={9}
                             >
                               {statementRows.length > 0
                                 ? 'Không có statement khớp bộ lọc.'

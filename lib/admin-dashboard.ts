@@ -10,6 +10,7 @@ import {
   periodDisplayLabel,
   previousCalendarQuarter,
 } from '@/lib/reporting-periods';
+import { summarizeSettlement, type SettlementStatus } from '@/lib/settlements';
 
 export type AdminOverviewData = {
   period: string;
@@ -67,6 +68,7 @@ export type AdminTrendItem = {
 };
 
 export type AdminStatementRow = {
+  carryForward: number;
   clientCode: string;
   clientId: string;
   clientName: string;
@@ -76,14 +78,33 @@ export type AdminStatementRow = {
   lockedAt: string | null;
   period: string;
   periodLabel: string;
+  paid: number;
+  payable: number;
   publishedAt: string | null;
   reportPeriodId: string;
   revenue: number;
   rowCount: number;
+  settlementStatus: SettlementStatus;
   status: 'draft' | 'validating' | 'published' | 'locked' | 'replaced';
   units: number;
   uploadId: string | null;
   uploadedAt: string | null;
+};
+
+type AdminStatementSqlRow = Omit<
+  AdminStatementRow,
+  | 'carryForward'
+  | 'closing'
+  | 'paid'
+  | 'payable'
+  | 'periodLabel'
+  | 'settlementStatus'
+> & {
+  closing: number;
+  costs: number;
+  opening: number;
+  reservesReleased: number;
+  reservesWithheld: number;
 };
 
 type SummaryRow = {
@@ -193,8 +214,12 @@ export async function listAdminStatements(
          rp.status,
          rp.published_at AS publishedAt,
          rp.locked_at AS lockedAt,
+         s.opening_balance AS opening,
          s.net_revenue AS revenue,
          s.closing_balance AS closing,
+         s.net_costs AS costs,
+         s.reserves_withheld AS reservesWithheld,
+         s.reserves_released AS reservesReleased,
          s.units,
          s.row_count AS rowCount,
          u.id AS uploadId,
@@ -212,17 +237,33 @@ export async function listAdminStatements(
        LIMIT 150`,
     )
     .bind(...bindings)
-    .all<AdminStatementRow>();
+    .all<AdminStatementSqlRow>();
 
-  return rows.results.map((row) => ({
-    ...row,
-    closing: Number(row.closing) || 0,
-    currency: 'VND',
-    periodLabel: periodDisplayLabel(row.period),
-    revenue: Number(row.revenue) || 0,
-    rowCount: Number(row.rowCount) || 0,
-    units: Number(row.units) || 0,
-  }));
+  return rows.results.map((row) => {
+    const opening = Number(row.opening) || 0;
+    const revenue = Number(row.revenue) || 0;
+    const settlement = summarizeSettlement({
+      costs: Number(row.costs) || 0,
+      opening,
+      reservesReleased: Number(row.reservesReleased) || 0,
+      reservesWithheld: Number(row.reservesWithheld) || 0,
+      revenue,
+    });
+
+    return {
+      ...row,
+      carryForward: settlement.carryForward,
+      closing: settlement.carryForward,
+      currency: 'VND',
+      paid: settlement.paidAmount,
+      payable: settlement.payable,
+      periodLabel: periodDisplayLabel(row.period),
+      revenue,
+      rowCount: Number(row.rowCount) || 0,
+      settlementStatus: settlement.status,
+      units: Number(row.units) || 0,
+    };
+  });
 }
 
 export function fallbackAdminOverviewData(
@@ -285,19 +326,23 @@ export function fallbackAdminOverviewData(
 
 export function fallbackAdminStatements(): AdminStatementRow[] {
   return fallbackPeriods.slice(0, 12).map((period) => ({
+    carryForward: period.carryForward,
     clientCode: period.clientId,
     clientId: period.clientId,
     clientName: period.clientName,
-    closing: period.closing,
+    closing: period.carryForward,
     currency: 'VND',
     filename: null,
     lockedAt: null,
+    paid: period.paid,
+    payable: period.payable,
     period: period.period,
     periodLabel: period.label,
     publishedAt: null,
     reportPeriodId: period.id,
     revenue: period.revenue,
     rowCount: period.rowCount,
+    settlementStatus: period.settlementStatus,
     status: period.status === 'empty' ? 'draft' : 'published',
     units: period.units,
     uploadId: null,

@@ -16,6 +16,7 @@ export type BreakdownItem = {
 };
 
 export type StatementPeriod = {
+  carryForward: number;
   id: string;
   clientId: string;
   period: string;
@@ -24,9 +25,12 @@ export type StatementPeriod = {
   currency: CurrencyCode;
   status: 'published' | 'validating' | 'locked' | 'empty';
   opening: number;
+  paid: number;
+  payable: number;
   revenue: number;
   costs: number;
   closing: number;
+  settlementStatus: 'paid' | 'carried_forward';
   units: number;
   rowCount: number;
 };
@@ -93,9 +97,13 @@ export const periods: StatementPeriod[] = [
     currency: 'VND',
     status: 'published',
     opening: 0,
+    payable: 742_563_571,
+    paid: 742_563_571,
+    carryForward: 0,
     revenue: 742_563_571,
     costs: 0,
-    closing: 742_563_571,
+    closing: 0,
+    settlementStatus: 'paid',
     units: 883_526,
     rowCount: 425,
   },
@@ -108,9 +116,13 @@ export const periods: StatementPeriod[] = [
     currency: 'VND',
     status: 'locked',
     opening: 0,
+    payable: 244_025_742,
+    paid: 244_025_742,
+    carryForward: 0,
     revenue: 244_025_742,
     costs: 0,
-    closing: 244_025_742,
+    closing: 0,
+    settlementStatus: 'paid',
     units: 293_099,
     rowCount: 131,
   },
@@ -123,9 +135,13 @@ export const periods: StatementPeriod[] = [
     currency: 'VND',
     status: 'published',
     opening: 0,
+    payable: 194_824_171,
+    paid: 194_824_171,
+    carryForward: 0,
     revenue: 194_824_171,
     costs: 0,
-    closing: 194_824_171,
+    closing: 0,
+    settlementStatus: 'paid',
     units: 230_239,
     rowCount: 93,
   },
@@ -363,7 +379,7 @@ export const uploadChecks = [
   {
     label: 'Template columns',
     value:
-      'Source, Territory, Track Title, ISRC, Configuration, Units, Net Payable, Sale Date',
+      'Mã khách hàng/Client ID for bulk, Source, Territory, Track Title, ISRC, Configuration, Units, Net Payable, Sale Date',
     state: 'Required',
   },
   {
@@ -383,7 +399,13 @@ export const uploadChecks = [
   },
   {
     label: 'Ownership',
-    value: 'client_id selected by admin and rechecked server-side',
+    value:
+      'Single upload uses selected client; bulk upload matches active client code per row',
+    state: 'Server',
+  },
+  {
+    label: 'Đối soát',
+    value: 'Từ 1.000.000 VND là đã thanh toán; thấp hơn sẽ chuyển quý sau.',
     state: 'Server',
   },
   {

@@ -21,6 +21,7 @@ type SheetRow = {
 type HeaderMap = Record<FieldKey, number | undefined>;
 
 type FieldKey =
+  | 'clientCode'
   | 'currency'
   | 'netRevenue'
   | 'units'
@@ -54,15 +55,41 @@ export type ParsedCurrencyStatement = {
   units: number;
 };
 
+export type ParsedClientStatementGroup = {
+  clientCode: string;
+  currencies: CurrencyCode[];
+  rowCount: number;
+  statements: ParsedCurrencyStatement[];
+};
+
 export type ParsedRoyaltyWorkbook = {
+  clientStatements: ParsedClientStatementGroup[];
   currencies: CurrencyCode[];
   rowCount: number;
   statements: ParsedCurrencyStatement[];
   warnings: string[];
 };
 
+export type ParseRoyaltyWorkbookOptions = {
+  groupByClientCode?: boolean;
+};
+
 const fieldAliases: Record<FieldKey, string[]> = {
   artist: ['artist', 'artistname', 'trackartist', 'trackartistname'],
+  clientCode: [
+    'clientid',
+    'clientcode',
+    'client',
+    'customerid',
+    'customercode',
+    'customer',
+    'accountid',
+    'vendorid',
+    'makhachhang',
+    'makh',
+    'idkhachhang',
+    'maartist',
+  ],
   configuration: [
     'configuration',
     'config',
@@ -106,16 +133,21 @@ const breakdownFields: Array<{ field: FieldKey; key: BreakdownKey }> = [
 
 export function parseRoyaltyWorkbook(
   buffer: ArrayBuffer,
+  options: ParseRoyaltyWorkbookOptions = {},
 ): ParsedRoyaltyWorkbook {
   const files = unzipSync(new Uint8Array(buffer));
   const sharedStrings = parseSharedStrings(
     readZipText(files, 'xl/sharedStrings.xml'),
   );
   const worksheetPaths = findWorksheetPaths(files);
-  const accumulators = new Map<CurrencyCode, CurrencyAccumulator>();
+  const clientAccumulators = new Map<
+    string,
+    Map<CurrencyCode, CurrencyAccumulator>
+  >();
   const warnings = new Set<string>();
   let importedRowCount = 0;
   let sawUsableSheet = false;
+  const groupByClientCode = Boolean(options.groupByClientCode);
 
   for (const worksheetPath of worksheetPaths) {
     const xml = readZipText(files, worksheetPath);
@@ -126,12 +158,27 @@ export function parseRoyaltyWorkbook(
     if (!parsedSheet) continue;
 
     sawUsableSheet = true;
+    if (groupByClientCode && parsedSheet.headers.clientCode === undefined) {
+      throw new Error(
+        'File tổng phải có cột Mã khách hàng/Client ID để hệ thống tự gom dữ liệu.',
+      );
+    }
+
     for (const row of parsedSheet.rows) {
       const amount = parseNumber(readCell(row, parsedSheet.headers.netRevenue));
       const units = parseNumber(readCell(row, parsedSheet.headers.units)) ?? 0;
       const rowHasText = row.cells.some((cell) => cell.trim());
 
       if (!rowHasText || amount === null) continue;
+
+      const clientCode = groupByClientCode
+        ? parseClientCode(readCell(row, parsedSheet.headers.clientCode))
+        : 'single-client';
+      if (!clientCode) {
+        throw new Error(
+          `Dòng ${row.index} thiếu mã khách hàng. Vui lòng bổ sung cột Mã khách hàng/Client ID.`,
+        );
+      }
 
       const currency = parseCurrency(
         readCell(row, parsedSheet.headers.currency),
@@ -142,7 +189,14 @@ export function parseRoyaltyWorkbook(
         );
       }
 
-      const accumulator = getCurrencyAccumulator(accumulators, currency);
+      const currencyAccumulators = getClientAccumulator(
+        clientAccumulators,
+        clientCode,
+      );
+      const accumulator = getCurrencyAccumulator(
+        currencyAccumulators,
+        currency,
+      );
       accumulator.value += amount;
       accumulator.units += Math.round(units);
       accumulator.rowCount += 1;
@@ -180,18 +234,37 @@ export function parseRoyaltyWorkbook(
     throw new Error('File không có dòng doanh thu hợp lệ để import.');
   }
 
-  const statements = Array.from(accumulators.entries())
-    .map(([currency, accumulator]) => ({
-      breakdowns: finalizeBreakdowns(accumulator),
-      currency,
-      revenue: roundMoney(accumulator.value),
-      rowCount: accumulator.rowCount,
-      units: accumulator.units,
-    }))
-    .sort((left, right) => left.currency.localeCompare(right.currency));
+  const clientStatements = Array.from(clientAccumulators.entries())
+    .map(([clientCode, accumulators]) => {
+      const statements = Array.from(accumulators.entries())
+        .map(([currency, accumulator]) => ({
+          breakdowns: finalizeBreakdowns(accumulator),
+          currency,
+          revenue: roundMoney(accumulator.value),
+          rowCount: accumulator.rowCount,
+          units: accumulator.units,
+        }))
+        .sort((left, right) => left.currency.localeCompare(right.currency));
+
+      return {
+        clientCode: groupByClientCode ? clientCode : '',
+        currencies: statements.map((statement) => statement.currency),
+        rowCount: statements.reduce(
+          (total, statement) => total + statement.rowCount,
+          0,
+        ),
+        statements,
+      };
+    })
+    .sort((left, right) => left.clientCode.localeCompare(right.clientCode));
+  const statements = clientStatements.flatMap((group) => group.statements);
+  const currencies = Array.from(
+    new Set(statements.map((statement) => statement.currency)),
+  ).sort();
 
   return {
-    currencies: statements.map((statement) => statement.currency),
+    clientStatements,
+    currencies,
     rowCount: importedRowCount,
     statements,
     warnings: Array.from(warnings),
@@ -241,6 +314,7 @@ function hasRequiredHeaders(headers: HeaderMap) {
 function mapHeaderRow(cells: string[]) {
   const headers: HeaderMap = {
     artist: undefined,
+    clientCode: undefined,
     configuration: undefined,
     currency: undefined,
     label: undefined,
@@ -439,6 +513,18 @@ function getCurrencyAccumulator(
   return created;
 }
 
+function getClientAccumulator(
+  accumulators: Map<string, Map<CurrencyCode, CurrencyAccumulator>>,
+  clientCode: string,
+) {
+  const existing = accumulators.get(clientCode);
+  if (existing) return existing;
+
+  const created = new Map<CurrencyCode, CurrencyAccumulator>();
+  accumulators.set(clientCode, created);
+  return created;
+}
+
 function addBreakdownValue(
   target: Map<string, BreakdownAccumulator>,
   label: string,
@@ -514,6 +600,10 @@ function readCell(row: SheetRow, index: number | undefined) {
 function normalizeLabel(value: string) {
   const label = value.replace(/\s+/g, ' ').trim();
   return label || 'Unknown';
+}
+
+function parseClientCode(value: string) {
+  return value.replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
 function normalizeHeader(value: string) {

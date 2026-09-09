@@ -1,6 +1,6 @@
 # Zuong Zero Artist Portal - Implementation Log
 
-Cap nhat ngay 2026-09-09, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
+Cap nhat ngay 2026-09-10, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
 ## Muc tieu san pham
 
@@ -43,7 +43,8 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Tong quan admin tong hop du lieu tat ca khach hang theo quy: doanh thu, so statement, so track, so artist, trend track, trend artist, top customers.
 - Ky doi soat dung quy lich duong, timezone UTC+7, ap dung dong bo cho admin va client.
 - Trang khach hang ho tro tim kiem, loc trang thai, sua thong tin, archive, xoa.
-- Trang statement ho tro upload .xlsx theo tung khach hang/quy, replace neu upload nham, publish/unpublish/lock/delete.
+- Trang statement ho tro upload .xlsx theo tung khach hang/quy hoac file tong nhieu ma khach hang, replace neu upload nham, publish/unpublish/lock/delete.
+- Statement tu dong tinh doi soat theo nguong 1.000.000 VND: du nguong thi da thanh toan, chua du nguong thi chuyen so du sang quy sau.
 - Them audit trail cho cac hanh dong quan tri quan trong.
 - Cap nhat UX/UI theo huong giai tri media/music, co sidebar, visual identity, controls gon hon.
 - Da sua loi tab admin bi lech va tranh tran ngang layout.
@@ -55,6 +56,8 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Parser doc workbook Excel, map cac cot chinh nhu Net Payable/Revenue, Units, Source, Sub Source, Configuration, Territory, Track, Artist, Release, Label.
 - Du lieu chi su dung VND/VNĐ va cac breakdown phuc vu dashboard.
 - Phase 1 da chuyen period sang dinh dang quy `YYYY-Q1` den `YYYY-Q4`.
+- Phase 2 da them che do file tong nhieu khach hang: Excel can co cot `Ma khach hang`/`Client ID`; backend match voi client active va tu SUM theo tung client/noi dung.
+- Phase 2 ap dung nguong doi soat 1.000.000 VND de xac dinh `da thanh toan` hoac `chua thanh toan + chuyen quy sau`.
 - Backend validate lai file truoc khi luu/import.
 
 ## Bao mat
@@ -92,5 +95,6 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Cau hinh domain gui email that trong Resend va cap nhat `EMAIL_FROM` bang domain da verify.
 - Test flow tao tai khoan client bang email that: tao tai khoan, nhan mail, kich hoat, doi mat khau, vao dashboard.
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
+- Thiet ke Phase 3 cho GM/advance theo bai hat de tru doanh thu dan ve 0.
+- Thiet ke cron/email ngay 15 hang thang sau khi domain email Resend san sang.
 - Bo sung test tu dong cho API auth, upload, statement publish/delete neu dua vao van hanh that.
-- Theo doi validation SSL/custom domain neu Sites van bao trang thai pending.

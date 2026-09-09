@@ -57,6 +57,7 @@ import {
 } from '@/lib/reporting-periods';
 import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
+import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 
 declare global {
   interface Document {
@@ -132,6 +133,24 @@ function statusLabel(status: string) {
   return 'Validating';
 }
 
+function settlementStatusLabel(status: StatementPeriod['settlementStatus']) {
+  return status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán';
+}
+
+function settlementBadgeClass(status: StatementPeriod['settlementStatus']) {
+  return status === 'paid'
+    ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
+    : 'rounded-lg bg-[#fff8e7] text-[#986200]';
+}
+
+function settlementHelper(period: StatementPeriod) {
+  if (period.settlementStatus === 'paid') {
+    return `Đã thanh toán ${formatMoney(period.paid)}`;
+  }
+
+  return `Chuyển quý sau ${formatMoney(period.carryForward)}`;
+}
+
 function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
   return [
     {
@@ -147,10 +166,34 @@ function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
       tone: 'blue',
     },
     {
+      label: 'Payable Balance',
+      value: formatMoney(activePeriod.payable),
+      helper: 'Opening + quarter',
+      tone: 'violet',
+    },
+    {
+      label: 'Settlement',
+      value: settlementStatusLabel(activePeriod.settlementStatus),
+      helper: `Ngưỡng ${formatMoney(SETTLEMENT_THRESHOLD_VND)}`,
+      tone: activePeriod.settlementStatus === 'paid' ? 'teal' : 'amber',
+    },
+    {
+      label: 'Paid Amount',
+      value: formatMoney(activePeriod.paid),
+      helper: activePeriod.settlementStatus === 'paid' ? 'Paid' : 'Pending',
+      tone: 'teal',
+    },
+    {
+      label: 'Carry Forward',
+      value: formatMoney(activePeriod.carryForward),
+      helper: 'Qua quý sau nếu chưa đủ ngưỡng',
+      tone: 'rose',
+    },
+    {
       label: 'Units',
       value: formatNumber(activePeriod.units),
       helper: 'Reported usage',
-      tone: 'violet',
+      tone: 'ink',
     },
     {
       label: 'Source Rows',
@@ -163,12 +206,6 @@ function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
       value: formatMoney(activePeriod.costs),
       helper: 'Deducted costs',
       tone: 'rose',
-    },
-    {
-      label: 'Closing Balance',
-      value: formatMoney(activePeriod.closing),
-      helper: 'Ending balance',
-      tone: 'teal',
     },
   ];
 }
@@ -183,6 +220,7 @@ function makeEmptyPeriod({
   period: string;
 }): StatementPeriod {
   return {
+    carryForward: 0,
     clientId,
     clientName,
     closing: 0,
@@ -191,9 +229,12 @@ function makeEmptyPeriod({
     id: `${clientId}:${period}:VND:empty`,
     label: periodDisplayLabel(period),
     opening: 0,
+    paid: 0,
+    payable: 0,
     period,
     revenue: 0,
     rowCount: 0,
+    settlementStatus: 'carried_forward',
     status: 'empty',
     units: 0,
   };
@@ -409,6 +450,14 @@ export function RoyaltyDashboard({
                       <CheckCircle2 className="size-4" />
                       {statusLabel(activePeriod.status)}
                     </div>
+                    <Badge
+                      className={settlementBadgeClass(
+                        activePeriod.settlementStatus,
+                      )}
+                      variant="secondary"
+                    >
+                      {settlementStatusLabel(activePeriod.settlementStatus)}
+                    </Badge>
                   </div>
 
                   <div className="mt-5 grid gap-3 md:grid-cols-[190px]">
@@ -472,7 +521,7 @@ export function RoyaltyDashboard({
               </div>
             </section>
 
-            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map((metric) => (
                 <article
                   className={`music-card min-h-[134px] border-l-4 p-4 ${toneClass[metric.tone]}`}
@@ -486,10 +535,10 @@ export function RoyaltyDashboard({
                       className={`size-2.5 rounded-full ${toneDotClass[metric.tone]}`}
                     />
                   </div>
-                  <p className="font-display mt-5 truncate text-3xl font-semibold">
+                  <p className="font-display mt-5 break-words text-2xl font-semibold leading-tight md:text-3xl">
                     {metric.value}
                   </p>
-                  <p className="mt-3 truncate text-xs font-medium text-muted-foreground">
+                  <p className="mt-3 text-xs font-medium leading-5 text-muted-foreground">
                     {metric.helper}
                   </p>
                 </article>
@@ -535,7 +584,10 @@ export function RoyaltyDashboard({
                           </Badge>
                         </div>
                         <p className="font-display mt-2 text-xl font-semibold">
-                          {formatMoney(period.closing)}
+                          {settlementStatusLabel(period.settlementStatus)}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {settlementHelper(period)}
                         </p>
                       </div>
                     ))
@@ -606,6 +658,8 @@ export function RoyaltyDashboard({
                       <TableHead>Rows</TableHead>
                       <TableHead>Units</TableHead>
                       <TableHead>Net Payable</TableHead>
+                      <TableHead>Payable</TableHead>
+                      <TableHead>Đối soát</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -619,6 +673,20 @@ export function RoyaltyDashboard({
                           <TableCell>{formatNumber(period.rowCount)}</TableCell>
                           <TableCell>{formatNumber(period.units)}</TableCell>
                           <TableCell>{formatMoney(period.revenue)}</TableCell>
+                          <TableCell>{formatMoney(period.payable)}</TableCell>
+                          <TableCell>
+                            <Badge
+                              className={settlementBadgeClass(
+                                period.settlementStatus,
+                              )}
+                              variant="secondary"
+                            >
+                              {settlementStatusLabel(period.settlementStatus)}
+                            </Badge>
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {settlementHelper(period)}
+                            </span>
+                          </TableCell>
                           <TableCell>
                             <Badge className="rounded-lg" variant="outline">
                               {statusLabel(period.status)}
@@ -630,7 +698,7 @@ export function RoyaltyDashboard({
                       <TableRow>
                         <TableCell
                           className="h-24 text-center text-sm text-muted-foreground"
-                          colSpan={6}
+                          colSpan={7}
                         >
                           Chưa có statement cho khách hàng này.
                         </TableCell>

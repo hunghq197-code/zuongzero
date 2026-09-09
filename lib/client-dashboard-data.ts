@@ -15,6 +15,7 @@ import {
   createEmptyCurrencyBreakdowns,
   dimensionToBreakdownKey,
 } from '@/lib/royalty-breakdowns';
+import { summarizeSettlement } from '@/lib/settlements';
 
 export type DashboardBreakdownsByPeriod = Record<
   string,
@@ -35,6 +36,8 @@ type StatementRow = {
   id: string;
   opening: number;
   period: string;
+  reservesReleased: number;
+  reservesWithheld: number;
   revenue: number;
   rowCount: number;
   status: 'published' | 'locked';
@@ -73,6 +76,8 @@ export async function getClientDashboardData({
        s.opening_balance AS opening,
        s.net_revenue AS revenue,
        s.net_costs AS costs,
+       s.reserves_withheld AS reservesWithheld,
+       s.reserves_released AS reservesReleased,
        s.closing_balance AS closing,
        s.units,
        s.row_count AS rowCount
@@ -90,21 +95,38 @@ export async function getClientDashboardData({
     .bind(clientId)
     .all<StatementRow>();
 
-  const statementPeriods = statementRows.results.map((row) => ({
-    clientId,
-    clientName: row.clientName || clientName,
-    closing: Number(row.closing) || 0,
-    costs: Number(row.costs) || 0,
-    currency: row.currency,
-    id: row.id,
-    label: periodDisplayLabel(row.period),
-    opening: Number(row.opening) || 0,
-    period: row.period,
-    revenue: Number(row.revenue) || 0,
-    rowCount: Number(row.rowCount) || 0,
-    status: row.status,
-    units: Number(row.units) || 0,
-  }));
+  const statementPeriods = statementRows.results.map((row) => {
+    const opening = Number(row.opening) || 0;
+    const revenue = Number(row.revenue) || 0;
+    const costs = Number(row.costs) || 0;
+    const settlement = summarizeSettlement({
+      costs,
+      opening,
+      reservesReleased: Number(row.reservesReleased) || 0,
+      reservesWithheld: Number(row.reservesWithheld) || 0,
+      revenue,
+    });
+
+    return {
+      carryForward: settlement.carryForward,
+      clientId,
+      clientName: row.clientName || clientName,
+      closing: settlement.carryForward,
+      costs,
+      currency: row.currency,
+      id: row.id,
+      label: periodDisplayLabel(row.period),
+      opening,
+      paid: settlement.paidAmount,
+      payable: settlement.payable,
+      period: row.period,
+      revenue,
+      rowCount: Number(row.rowCount) || 0,
+      settlementStatus: settlement.status,
+      status: row.status,
+      units: Number(row.units) || 0,
+    };
+  });
 
   if (statementPeriods.length === 0) {
     return {
