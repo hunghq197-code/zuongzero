@@ -10,6 +10,7 @@ import {
   breakdownKeys,
   createEmptyCurrencyBreakdowns,
 } from '@/lib/royalty-breakdowns';
+import type { StatementLineItem } from '@/lib/statement-line-items';
 
 const BREAKDOWN_LIMIT = 12;
 
@@ -22,18 +23,28 @@ type HeaderMap = Record<FieldKey, number | undefined>;
 
 type FieldKey =
   | 'clientCode'
-  | 'currency'
-  | 'netRevenue'
-  | 'units'
-  | 'source'
-  | 'subSource'
   | 'configuration'
+  | 'contractName'
+  | 'contentType'
+  | 'currency'
+  | 'distributionChannel'
+  | 'grossIncome'
+  | 'label'
+  | 'netRevenue'
+  | 'periodEndDate'
+  | 'release'
+  | 'releaseArtist'
+  | 'royaltyRate'
+  | 'salesPeriod'
+  | 'source'
+  | 'startDate'
+  | 'subSource'
   | 'territory'
   | 'track'
   | 'trackExternalId'
+  | 'trackVersion'
   | 'artist'
-  | 'release'
-  | 'label';
+  | 'units';
 
 type BreakdownAccumulator = {
   rows: number;
@@ -43,6 +54,8 @@ type BreakdownAccumulator = {
 
 type CurrencyAccumulator = {
   breakdowns: Record<BreakdownKey, Map<string, BreakdownAccumulator>>;
+  grossValue: number;
+  lineItems: StatementLineItem[];
   rowCount: number;
   trackRevenue: Map<string, TrackRevenueAccumulator>;
   units: number;
@@ -65,6 +78,8 @@ export type ParsedTrackRevenue = {
 export type ParsedCurrencyStatement = {
   breakdowns: CurrencyBreakdowns;
   currency: CurrencyCode;
+  grossRevenue: number;
+  lineItems: StatementLineItem[];
   revenue: number;
   rowCount: number;
   trackRevenue: ParsedTrackRevenue[];
@@ -112,13 +127,20 @@ const fieldAliases: Record<FieldKey, string[]> = {
   configuration: [
     'configuration',
     'config',
-    'distributionchannel',
-    'channel',
     'saleconfiguration',
     'usagetype',
     'royaltytype',
   ],
+  contractName: ['contractname', 'contract', 'agreementname'],
+  contentType: ['type', 'contenttype', 'assettype', 'titletype'],
   currency: ['currency', 'currencycode', 'ccy'],
+  distributionChannel: [
+    'distributionchannel',
+    'channel',
+    'distribution',
+    'saleschannel',
+  ],
+  grossIncome: ['grossincome', 'grossrevenue', 'grossamount'],
   label: ['label', 'releaselabel', 'labelname'],
   netRevenue: [
     'netpayable',
@@ -132,19 +154,25 @@ const fieldAliases: Record<FieldKey, string[]> = {
     'earnings',
     'revenue',
   ],
+  periodEndDate: ['periodenddate', 'enddate', 'periodend'],
   release: ['release', 'releasetitle', 'album', 'albumtitle', 'producttitle'],
+  releaseArtist: ['releaseartist', 'albumartist', 'productartist'],
+  royaltyRate: ['royaltyrate', 'rate', 'royaltypercentage'],
+  salesPeriod: ['salesperiod', 'salemonth', 'reportingmonth'],
   source: ['source', 'store', 'platform', 'service', 'dsp', 'partner'],
+  startDate: ['startdate', 'periodstartdate', 'periodstart'],
   subSource: ['subsource', 'subsources', 'substore', 'subplatform'],
   territory: ['territory', 'country', 'countrycode', 'region'],
   track: ['track', 'tracktitle', 'song', 'songtitle', 'title'],
   trackExternalId: ['isrc', 'trackid', 'songid', 'trackexternalid', 'idbaihat'],
+  trackVersion: ['trackversion', 'version', 'mixversion'],
   units: ['units', 'unit', 'quantity', 'qty', 'streams', 'sales'],
 };
 
 const breakdownFields: Array<{ field: FieldKey; key: BreakdownKey }> = [
   { field: 'source', key: 'sources' },
   { field: 'subSource', key: 'subSources' },
-  { field: 'configuration', key: 'configurations' },
+  { field: 'distributionChannel', key: 'configurations' },
   { field: 'territory', key: 'territories' },
   { field: 'track', key: 'tracks' },
   { field: 'artist', key: 'artists' },
@@ -219,6 +247,10 @@ export function parseRoyaltyWorkbook(
         currency,
       );
       accumulator.value += amount;
+      const grossIncome = parseNumber(
+        readCell(row, parsedSheet.headers.grossIncome),
+      );
+      accumulator.grossValue += grossIncome ?? amount;
       accumulator.units += Math.round(units);
       accumulator.rowCount += 1;
       importedRowCount += 1;
@@ -228,9 +260,24 @@ export function parseRoyaltyWorkbook(
       const trackExternalId = normalizeOptionalLabel(
         readCell(row, parsedSheet.headers.trackExternalId),
       );
+      accumulator.lineItems.push(
+        buildStatementLineItem({
+          amount,
+          clientCode,
+          currency,
+          grossIncome,
+          row,
+          headers: parsedSheet.headers,
+          units,
+        }),
+      );
 
       for (const breakdownField of breakdownFields) {
-        const columnIndex = parsedSheet.headers[breakdownField.field];
+        const columnIndex =
+          breakdownField.field === 'distributionChannel'
+            ? (parsedSheet.headers.distributionChannel ??
+              parsedSheet.headers.configuration)
+            : parsedSheet.headers[breakdownField.field];
         if (columnIndex === undefined) {
           if (breakdownField.field !== 'subSource') {
             warnings.add(
@@ -240,7 +287,11 @@ export function parseRoyaltyWorkbook(
           continue;
         }
 
-        const label = normalizeLabel(readCell(row, columnIndex));
+        const label = normalizeLabel(
+          breakdownField.field === 'distributionChannel'
+            ? readCell(row, columnIndex)
+            : readCell(row, columnIndex),
+        );
         addBreakdownValue(
           accumulator.breakdowns[breakdownField.key],
           label,
@@ -263,7 +314,7 @@ export function parseRoyaltyWorkbook(
 
   if (!sawUsableSheet) {
     throw new Error(
-      'Không tìm thấy sheet dữ liệu có đủ cột Net Payable và thông tin track/source.',
+      'Không tìm thấy sheet dữ liệu có đủ cột Net Payable và thông tin track/partner.',
     );
   }
 
@@ -277,6 +328,8 @@ export function parseRoyaltyWorkbook(
         .map(([currency, accumulator]) => ({
           breakdowns: finalizeBreakdowns(accumulator),
           currency,
+          grossRevenue: roundMoney(accumulator.grossValue),
+          lineItems: accumulator.lineItems,
           revenue: roundMoney(accumulator.value),
           rowCount: accumulator.rowCount,
           trackRevenue: finalizeTrackRevenue(accumulator.trackRevenue),
@@ -344,6 +397,7 @@ function hasRequiredHeaders(headers: HeaderMap) {
     headers.source !== undefined ||
     headers.territory !== undefined ||
     headers.track !== undefined ||
+    headers.distributionChannel !== undefined ||
     headers.configuration !== undefined;
 
   return hasRevenue && hasContext;
@@ -354,15 +408,25 @@ function mapHeaderRow(cells: string[]) {
     artist: undefined,
     clientCode: undefined,
     configuration: undefined,
+    contractName: undefined,
+    contentType: undefined,
     currency: undefined,
+    distributionChannel: undefined,
+    grossIncome: undefined,
     label: undefined,
     netRevenue: undefined,
+    periodEndDate: undefined,
     release: undefined,
+    releaseArtist: undefined,
+    royaltyRate: undefined,
+    salesPeriod: undefined,
     source: undefined,
+    startDate: undefined,
     subSource: undefined,
     territory: undefined,
     track: undefined,
     trackExternalId: undefined,
+    trackVersion: undefined,
     units: undefined,
   };
 
@@ -436,12 +500,12 @@ function parseWorksheetRows(xml: string, sharedStrings: string[]) {
     let nextIndex = 0;
 
     for (const cellMatch of rowMatch[2].matchAll(
-      /<c\b([^>]*)>([\s\S]*?)<\/c>/g,
+      /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g,
     )) {
       const cellAttrs = parseAttributes(cellMatch[1]);
       const columnIndex = cellAttrs.r ? cellRefToIndex(cellAttrs.r) : nextIndex;
       cells[columnIndex] = readCellValue(
-        cellMatch[2],
+        cellMatch[2] ?? '',
         cellAttrs.t,
         sharedStrings,
       );
@@ -543,6 +607,8 @@ function getCurrencyAccumulator(
         new Map<string, BreakdownAccumulator>(),
       ]),
     ) as Record<BreakdownKey, Map<string, BreakdownAccumulator>>,
+    grossValue: 0,
+    lineItems: [],
     rowCount: 0,
     trackRevenue: new Map<string, TrackRevenueAccumulator>(),
     units: 0,
@@ -563,6 +629,56 @@ function getClientAccumulator(
   const created = new Map<CurrencyCode, CurrencyAccumulator>();
   accumulators.set(clientCode, created);
   return created;
+}
+
+function buildStatementLineItem({
+  amount,
+  clientCode,
+  currency,
+  grossIncome,
+  headers,
+  row,
+  units,
+}: {
+  amount: number;
+  clientCode: string;
+  currency: CurrencyCode;
+  grossIncome: number | null;
+  headers: HeaderMap;
+  row: SheetRow;
+  units: number;
+}): StatementLineItem {
+  const accountNo =
+    parseClientCode(readCell(row, headers.clientCode)) ||
+    (clientCode === 'single-client' ? '' : clientCode);
+
+  return {
+    accountNo,
+    configuration: normalizeOptionalLabel(readCell(row, headers.configuration)),
+    contractName: normalizeOptionalLabel(readCell(row, headers.contractName)),
+    contentType: normalizeOptionalLabel(readCell(row, headers.contentType)),
+    currency,
+    distributionChannel: normalizeOptionalLabel(
+      readCell(row, headers.distributionChannel),
+    ),
+    grossIncome,
+    isrc: normalizeOptionalLabel(readCell(row, headers.trackExternalId)),
+    netPayable: roundMoney(amount),
+    partner: normalizeOptionalLabel(readCell(row, headers.source)),
+    periodEndDate: normalizeDateCell(readCell(row, headers.periodEndDate)),
+    releaseArtist: normalizeOptionalLabel(readCell(row, headers.releaseArtist)),
+    releaseLabel: normalizeOptionalLabel(readCell(row, headers.label)),
+    releaseTitle: normalizeOptionalLabel(readCell(row, headers.release)),
+    royaltyRate: parseNumber(readCell(row, headers.royaltyRate)),
+    rowIndex: row.index,
+    sales: units,
+    salesPeriod: normalizeOptionalLabel(readCell(row, headers.salesPeriod)),
+    startDate: normalizeDateCell(readCell(row, headers.startDate)),
+    territory: normalizeOptionalLabel(readCell(row, headers.territory)),
+    trackArtist: normalizeOptionalLabel(readCell(row, headers.artist)),
+    trackTitle: normalizeOptionalLabel(readCell(row, headers.track)),
+    trackVersion: normalizeOptionalLabel(readCell(row, headers.trackVersion)),
+  };
 }
 
 function addBreakdownValue(
@@ -686,6 +802,29 @@ function normalizeOptionalLabel(value: string) {
   return label || null;
 }
 
+function normalizeDateCell(value: string) {
+  const label = normalizeOptionalLabel(value);
+  if (!label) return null;
+
+  const isoLike = label.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoLike) {
+    return [
+      isoLike[1],
+      isoLike[2].padStart(2, '0'),
+      isoLike[3].padStart(2, '0'),
+    ].join('-');
+  }
+
+  if (/^\d+(?:\.\d+)?$/.test(label)) {
+    const serial = Number(label);
+    if (Number.isFinite(serial) && serial >= 20_000 && serial <= 80_000) {
+      return excelSerialDate(serial);
+    }
+  }
+
+  return label;
+}
+
 function parseClientCode(value: string) {
   return value.replace(/\s+/g, ' ').trim().toUpperCase();
 }
@@ -773,6 +912,14 @@ function roundMoney(value: number) {
 
 function roundPercentage(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function excelSerialDate(value: number) {
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const date = new Date(
+    Date.UTC(1899, 11, 30) + Math.floor(value) * millisecondsPerDay,
+  );
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeLookupKey(value: string) {

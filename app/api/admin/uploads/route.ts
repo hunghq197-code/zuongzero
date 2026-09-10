@@ -19,6 +19,11 @@ import {
   type ParsedCurrencyStatement,
 } from '@/lib/xlsx-royalty-parser';
 import {
+  hasStatementLineItemsTable,
+  standardStatementColumnLabels,
+  type StatementLineItem,
+} from '@/lib/statement-line-items';
+import {
   SETTLEMENT_THRESHOLD_VND,
   summarizeSettlement,
 } from '@/lib/settlements';
@@ -119,6 +124,7 @@ async function uploadResponse(request: Request) {
 
   const bulkUploadId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const storeLineItems = await hasStatementLineItemsTable(env.DB);
   const uploader = await ensureUserRecord(env.DB, {
     displayName: user.displayName,
     email: user.email,
@@ -157,6 +163,7 @@ async function uploadResponse(request: Request) {
           clientCount: uploadTargets.length,
           currencies: parsedWorkbook.currencies,
           rowCount: target.rowCount,
+          storeLineItems,
           totalRowCount: parsedWorkbook.rowCount,
           uploadMode,
           warnings: parsedWorkbook.warnings,
@@ -167,6 +174,7 @@ async function uploadResponse(request: Request) {
         selectedClient: target.client,
         sha256,
         stagingReportPeriodId: `${target.client.id}:${period}:staging`,
+        storeLineItems,
         uploadId: target.uploadId,
         uploadMode,
         uploaderId: uploader.id,
@@ -195,7 +203,7 @@ async function uploadResponse(request: Request) {
     status: 'imported',
     uploadId:
       uploadMode === 'single' ? uploadTargets[0]?.uploadId : bulkUploadId,
-    warnings: parsedWorkbook.warnings,
+    warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
     message:
       uploadMode === 'bulk'
         ? `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${uploadTargets.length} khách hàng, ${periodDisplayLabel(period)} (VNĐ).`
@@ -222,6 +230,7 @@ function buildImportSummary({
   clientCount,
   currencies,
   rowCount,
+  storeLineItems,
   totalRowCount,
   uploadMode,
   warnings,
@@ -229,34 +238,16 @@ function buildImportSummary({
   clientCount: number;
   currencies: CurrencyCode[];
   rowCount: number;
+  storeLineItems: boolean;
   totalRowCount: number;
   uploadMode: UploadMode;
   warnings: string[];
 }) {
-  const expectedColumns = [
-    'Account No.',
-    'Release Title',
-    'Release Artist',
-    'ISRC',
-    'Track Title',
-    'Track Version',
-    'Track Artist',
-    'Sales Period',
-    'Release Label',
-    'Territory',
-    'Distribution Channel',
-    'Configuration',
-    'Partner',
-    'Sales',
-    'Net Payable',
-    'Currency',
-  ];
-
   return {
     clientCount,
     currencies,
     currencyPolicy: 'VND-only-before-publish',
-    expectedColumns,
+    expectedColumns: standardStatementColumnLabels,
     fileType: 'xlsx',
     importStatus: 'imported',
     malwareScan: 'pending',
@@ -264,10 +255,20 @@ function buildImportSummary({
     rowCount,
     settlementPolicy: `payable >= ${SETTLEMENT_THRESHOLD_VND} VND is paid; lower balances carry forward`,
     signature: 'zip',
+    lineItemStorage: storeLineItems ? 'enabled' : 'pending-migration',
     totalRowCount,
     uploadMode,
-    warnings,
+    warnings: uploadWarnings(warnings, storeLineItems),
   };
+}
+
+function uploadWarnings(warnings: string[], storeLineItems: boolean) {
+  if (storeLineItems) return warnings;
+
+  return [
+    ...warnings,
+    'Chưa có bảng statement_line_items; hệ thống vẫn import tổng nhưng chưa lưu detail 22 cột.',
+  ];
 }
 
 async function resolveUploadTargets({
@@ -353,6 +354,7 @@ async function buildImportStatements({
   selectedClient,
   sha256,
   stagingReportPeriodId,
+  storeLineItems,
   uploadId,
   uploadMode,
   uploaderId,
@@ -369,6 +371,7 @@ async function buildImportStatements({
   selectedClient: UploadClient;
   sha256: string;
   stagingReportPeriodId: string;
+  storeLineItems: boolean;
   uploadId: string;
   uploadMode: UploadMode;
   uploaderId: string;
@@ -576,7 +579,7 @@ async function buildImportStatements({
           reportPeriodId,
           uploadId,
           opening,
-          parsedStatement.revenue,
+          parsedStatement.grossRevenue,
           parsedStatement.revenue,
           costs,
           reservesWithheld,
@@ -588,6 +591,17 @@ async function buildImportStatements({
           now,
         ),
     );
+
+    if (storeLineItems) {
+      statements.push(
+        db
+          .prepare(
+            `DELETE FROM statement_line_items
+             WHERE report_period_id = ?`,
+          )
+          .bind(reportPeriodId),
+      );
+    }
 
     for (const key of breakdownKeys) {
       for (const item of parsedStatement.breakdowns[key]) {
@@ -622,6 +636,20 @@ async function buildImportStatements({
             ),
         );
       }
+    }
+
+    if (storeLineItems) {
+      statements.push(
+        ...buildStatementLineItemStatements({
+          clientCode: selectedClient.code,
+          clientId: selectedClient.id,
+          db,
+          items: parsedStatement.lineItems,
+          now,
+          reportPeriodId,
+          sourceUploadId: uploadId,
+        }),
+      );
     }
   }
 
@@ -660,6 +688,91 @@ async function buildImportStatements({
   );
 
   return statements;
+}
+
+function buildStatementLineItemStatements({
+  clientCode,
+  clientId,
+  db,
+  items,
+  now,
+  reportPeriodId,
+  sourceUploadId,
+}: {
+  clientCode: string;
+  clientId: string;
+  db: D1Database;
+  items: StatementLineItem[];
+  now: string;
+  reportPeriodId: string;
+  sourceUploadId: string;
+}) {
+  return items.map((item) =>
+    db
+      .prepare(
+        `INSERT INTO statement_line_items (
+           id,
+           client_id,
+           report_period_id,
+           source_upload_id,
+           row_index,
+           account_no,
+           contract_name,
+           content_type,
+           start_date,
+           period_end_date,
+           release_title,
+           release_artist,
+           isrc,
+           track_title,
+           track_version,
+           track_artist,
+           sales_period,
+           release_label,
+           territory,
+           distribution_channel,
+           configuration,
+           partner,
+           sales,
+           gross_income,
+           royalty_rate,
+           net_payable,
+           currency,
+           created_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        clientId,
+        reportPeriodId,
+        sourceUploadId,
+        item.rowIndex,
+        item.accountNo || clientCode,
+        item.contractName,
+        item.contentType,
+        item.startDate,
+        item.periodEndDate,
+        item.releaseTitle,
+        item.releaseArtist,
+        item.isrc,
+        item.trackTitle,
+        item.trackVersion,
+        item.trackArtist,
+        item.salesPeriod,
+        item.releaseLabel,
+        item.territory,
+        item.distributionChannel,
+        item.configuration,
+        item.partner,
+        item.sales,
+        item.grossIncome,
+        item.royaltyRate,
+        item.netPayable,
+        item.currency,
+        now,
+      ),
+  );
 }
 
 async function runBatchInChunks(

@@ -65,6 +65,11 @@ import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
 import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import type { TrackGuaranteeRow } from '@/lib/guarantees';
+import {
+  standardStatementColumns,
+  type StandardStatementColumnKey,
+  type StatementLineItem,
+} from '@/lib/statement-line-items';
 
 declare global {
   interface Document {
@@ -131,6 +136,31 @@ function formatMoney(value: number) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('vi-VN').format(value);
+}
+
+function formatRate(value: number | null) {
+  if (value === null) return '-';
+  const normalized = Math.abs(value) <= 1 ? value * 100 : value;
+  return `${normalized.toFixed(2)}%`;
+}
+
+function formatLineItemValue(
+  item: StatementLineItem,
+  key: StandardStatementColumnKey,
+) {
+  const value = item[key];
+  if (value === null || value === '') return '-';
+  if (key === 'grossIncome' || key === 'netPayable') {
+    return typeof value === 'number' ? formatMoney(value) : '-';
+  }
+  if (key === 'royaltyRate') {
+    return typeof value === 'number' ? formatRate(value) : '-';
+  }
+  if (key === 'sales') {
+    return typeof value === 'number' ? formatNumber(value) : '-';
+  }
+
+  return String(value);
 }
 
 function statusLabel(status: string) {
@@ -263,6 +293,7 @@ export function RoyaltyDashboard({
   clientId,
   clientName,
   guarantees = [],
+  lineItemsByPeriod = {},
   statementPeriods: statementPeriodsProp,
   trend: trendProp,
   userEmail,
@@ -272,6 +303,7 @@ export function RoyaltyDashboard({
   clientId: string;
   clientName: string;
   guarantees?: TrackGuaranteeRow[];
+  lineItemsByPeriod?: Record<string, StatementLineItem[]>;
   statementPeriods?: StatementPeriod[];
   trend?: RevenueTrendPoint[];
   userEmail: string;
@@ -332,6 +364,9 @@ export function RoyaltyDashboard({
     breakdownsByPeriod?.[activePeriod.period]?.VND ??
     (usesProvidedData ? emptyBreakdowns : breakdownsByCurrency.VND);
   const activeBreakdown = hasStatements ? activeBreakdownData[activeTab] : [];
+  const activeLineItems = hasStatements
+    ? (lineItemsByPeriod[activePeriod.period] ?? [])
+    : [];
   const trendData = hasStatements ? dashboardTrend : [];
   const activeGuarantees = useMemo(
     () => guarantees.filter((guarantee) => guarantee.status !== 'archived'),
@@ -339,6 +374,7 @@ export function RoyaltyDashboard({
   );
   const statementPreviewPage = usePaginatedRows(clientPeriods);
   const guaranteePage = usePaginatedRows(activeGuarantees);
+  const lineItemPage = usePaginatedRows(activeLineItems);
   const ledgerPage = usePaginatedRows(clientPeriods);
 
   useEffect(() => {
@@ -749,6 +785,65 @@ export function RoyaltyDashboard({
                 />
               </TabsContent>
             </Tabs>
+
+            <section className="music-card p-4 md:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Source data
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold">
+                    Dữ liệu chuẩn theo dòng
+                  </h2>
+                </div>
+                <Badge className="rounded-lg" variant="outline">
+                  {formatNumber(activeLineItems.length)} dòng
+                </Badge>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-border">
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[2200px]">
+                    <TableHeader>
+                      <TableRow>
+                        {standardStatementColumns.map((column) => (
+                          <TableHead key={column.key}>
+                            {column.label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {activeLineItems.length > 0 ? (
+                        lineItemPage.visibleRows.map((item) => (
+                          <TableRow key={`${item.rowIndex}-${item.isrc ?? ''}`}>
+                            {standardStatementColumns.map((column) => (
+                              <TableCell
+                                className="max-w-[180px] truncate"
+                                key={column.key}
+                                title={formatLineItemValue(item, column.key)}
+                              >
+                                {formatLineItemValue(item, column.key)}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            className="h-24 text-center text-sm text-muted-foreground"
+                            colSpan={standardStatementColumns.length}
+                          >
+                            Chưa có dữ liệu chi tiết cho statement này.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <TablePagination {...lineItemPage} itemLabel="dòng dữ liệu" />
+              </div>
+            </section>
 
             <section className="music-card p-4 md:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">

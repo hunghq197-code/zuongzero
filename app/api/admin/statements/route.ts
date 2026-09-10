@@ -14,6 +14,7 @@ import {
 } from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
 import { buildReverseGuaranteeRecoupmentStatements } from '@/lib/guarantees';
+import { hasStatementLineItemsTable } from '@/lib/statement-line-items';
 import { ensureUserRecord } from '@/lib/user-records';
 
 type StatementBody = {
@@ -235,8 +236,9 @@ async function deleteStatementResponse(request: Request) {
       reportPeriodId,
       now,
     );
+  const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
 
-  await env.DB.batch([
+  const deleteStatements = [
     ...guaranteeReversalStatements,
     env.DB.prepare(
       `DELETE FROM revenue_breakdowns
@@ -266,7 +268,20 @@ async function deleteStatementResponse(request: Request) {
       },
       now,
     ),
-  ]);
+  ];
+
+  if (lineItemsTableReady) {
+    deleteStatements.splice(
+      guaranteeReversalStatements.length + 1,
+      0,
+      env.DB.prepare(
+        `DELETE FROM statement_line_items
+         WHERE report_period_id = ?`,
+      ).bind(reportPeriodId),
+    );
+  }
+
+  await env.DB.batch(deleteStatements);
 
   if (statement.sourceUploadId) {
     const uploadStillUsed = await isUploadStillUsed(
@@ -306,7 +321,7 @@ async function deleteStatementResponse(request: Request) {
     statements: await listAdminStatements(env.DB, {
       period: statement.period,
     }),
-    message: 'Đã xoá statement và dữ liệu breakdown liên quan.',
+    message: 'Đã xoá statement, breakdown và dữ liệu dòng liên quan.',
   });
 }
 

@@ -59,10 +59,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 - Chi chap nhan file `.xlsx`.
 - Gioi han upload hien tai: 15MB.
-- Parser doc workbook Excel, map cac cot chinh nhu Net Payable/Revenue, Units, Source, Sub Source, Configuration, Territory, Track, Artist, Release, Label.
+- Parser doc workbook Excel, map cac cot chinh nhu Net Payable/Revenue, Sales, Partner, Sub Source, Distribution Channel, Territory, Track, Track Artist, Release, Release Label.
 - Du lieu chi su dung VND/VNĐ va cac breakdown phuc vu dashboard.
 - File data chuan tu 2026-09-10 la workbook co cac cot: `Account No.`, `Contract Name`, `Type`, `Start Date`, `Period End Date`, `Release Title`, `Release Artist`, `ISRC`, `Track Title`, `Track Version`, `Track Artist`, `Sales Period`, `Release Label`, `Territory`, `Distribution Channel`, `Configuration`, `Partner`, `Sales`, `Gross Income`, `Royalty Rate`, `Net Payable`, `Currency`.
 - Quy uoc file chuan: `Account No.` la ID khach hang dung cho bulk import; `ISRC` la ID bai hat dung cho GM/song tracking; `Partner` la platform/source; `Distribution Channel` la configuration; `Sales` la units.
+- 2026-09-10: da them bang D1 `statement_line_items` va migration `drizzle/0010_statement_line_items.sql` de luu du 22 cot file chuan theo tung dong statement. Cot trung voi logic cu tiep tuc nuoi dashboard/breakdown; cot moi nhu `Contract Name`, `Type`, `Start Date`, `Period End Date`, `Release Artist`, `Track Version`, `Sales Period`, `Configuration`, `Gross Income`, `Royalty Rate` duoc luu trong detail rows va export.
+- UX/UI da co bang mapping 22 cot trong admin upload panel va bang `Du lieu chuan theo dong` tren client dashboard. Export Excel statement co sheet `Source Rows` gom du 22 cot.
+- Parser da sua bug o self-closing blank cells trong XLSX: cac o rong nhu `Configuration` khong con nuot gia tri o ke tiep, nen `Partner` doc dung tu cot Partner.
 - Phase 1 da chuyen period sang dinh dang quy `YYYY-Q1` den `YYYY-Q4`.
 - Phase 2 da them che do file tong nhieu khach hang: Excel chuan dung cot `Account No.` lam ID khach hang; backend match voi client active va tu SUM theo tung client/noi dung.
 - Phase 2 ap dung nguong doi soat 1.000.000 VND de xac dinh `da thanh toan` hoac `chua thanh toan + chuyen quy sau`.
@@ -223,6 +226,16 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npx oxlint lib\xlsx-royalty-parser.ts lib\guarantees.ts app\api\admin\uploads\route.ts components\admin-console.tsx lib\dashboard-data.ts tests\unit\guarantees.test.mjs tests\static\security-contracts.test.mjs`.
 - 2026-09-10: `npm run test` thanh cong: 17 unit tests + 10 contract tests.
 - 2026-09-10: `npm run build` thanh cong sau khi cap nhat mapping file chuan.
+- 2026-09-10: CODE DONE cho standard 22-column line items: them `lib/statement-line-items.ts`, bang/migration `statement_line_items`, import detail rows, client detail UI, admin schema UI, export sheet `Source Rows`, cleanup khi xoa/replace statement/client.
+- 2026-09-10: verify parser voi file that `C:\Users\huynh\OneDrive\Desktop\test.xlsx`: doc 1 client, 1.349 dong, `VND`, tong `Net Payable` 782.027.729,98; `Partner` doc dung Spotify/Apple Music/YouTube sau fix self-closing cells.
+- 2026-09-10: `npx oxlint lib\xlsx-royalty-parser.ts app\api\admin\uploads\route.ts app\api\admin\statements\route.ts app\api\admin\customers\route.ts lib\client-dashboard-data.ts components\royalty-dashboard.tsx components\admin-console.tsx lib\statement-export.ts lib\dashboard-data.ts db\schema.ts tests\static\security-contracts.test.mjs lib\statement-line-items.ts`.
+- 2026-09-10: `npm run test` thanh cong: 17 unit tests + 10 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau khi them line item schema/UI/export.
+- 2026-09-10: thu apply remote D1 migration `drizzle/0010_statement_line_items.sql` bang `npx wrangler d1 execute ... --file`; Cloudflare tra authentication error `10000` o endpoint import. Thu lai bang `--command` thi Cloudflare tra `7403` o endpoint query. Can cap nhat/doi `CLOUDFLARE_API_TOKEN` co quyen D1 edit/query/import cho account `2b6f84a024bc49c8d450f9bead71a702`, sau do chay lai migration.
+- 2026-09-10: da them guard `hasStatementLineItemsTable` de production khong loi neu migration 0010 chua co: dashboard/export van hoat dong, upload van import tong; detail 22 cot se duoc luu sau khi migration duoc apply.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc` thanh cong, Worker version `1d807731-631c-4c4e-a7a5-755d627ec45b`.
+- 2026-09-10: `npm run test:production` thanh cong tren `https://artistportal.zuongzeroent.com`: `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin/export nhay cam tra 401 khi chua dang nhap.
+- Viec con lai de bat luu detail rows production: apply remote D1 migration `drizzle/0010_statement_line_items.sql` sau khi token Cloudflare co quyen D1.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
@@ -238,6 +251,8 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 5 - Email production: DEPLOYED. Da co tab Email/API de verify Resend domain, SPF/DKIM, DMARC va gui email test that; can admin dang nhap va bam gui test de xac nhan mailbox nhan mail.
 - Phase 6 - Test va van hanh production: DONE. Da co unit/contract test va production smoke test de kiem auth, upload single/bulk contract, publish/delete guard, GM recoup/reverse, dashboard client/admin va domain production.
 - Phase 7 - Bao cao/export doi soat: DEPLOYED. Da co export PDF/Excel statement theo quy cho client/admin va download audit; con nen tach tiep lich su thanh toan/payment marking thanh buoc tiep theo neu can van hanh doi soat that.
+- Phase 8 - Data chuan 22 cot: WORKER DEPLOYED, D1 MIGRATION PENDING. Da merge file `test.xlsx` lam schema chuan, UI admin/client hien mapping/detail, export co sheet `Source Rows`; Worker co guard khi bang chua ton tai. Can apply migration 0010 de bat luu du detail rows vao `statement_line_items`.
+- Phase tiep theo de van hanh doi soat that: payment marking/manual paid date, lich su thanh toan theo client/quarter, export bien ban doi soat co trang thai thanh toan va audit nguoi mark paid.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 

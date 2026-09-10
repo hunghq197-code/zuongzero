@@ -1,3 +1,5 @@
+import { standardStatementColumnLabels } from '@/lib/statement-line-items';
+
 export type CurrencyCode = 'VND';
 
 export type StatementMetric = {
@@ -167,8 +169,8 @@ export const revenueTrend: RevenueTrendPoint[] = [
 export const breakdownSections: BreakdownSection[] = [
   {
     id: 'sources',
-    label: 'Sources',
-    sourceColumn: 'Source',
+    label: 'Partners',
+    sourceColumn: 'Partner',
     chartType: 'bar',
   },
   {
@@ -179,8 +181,8 @@ export const breakdownSections: BreakdownSection[] = [
   },
   {
     id: 'configurations',
-    label: 'Configurations',
-    sourceColumn: 'Configuration',
+    label: 'Distribution Channels',
+    sourceColumn: 'Distribution Channel',
     chartType: 'donut',
   },
   {
@@ -197,13 +199,13 @@ export const breakdownSections: BreakdownSection[] = [
   },
   {
     id: 'artists',
-    label: 'Artists',
+    label: 'Track Artists',
     sourceColumn: 'Track Artist',
     chartType: 'donut',
   },
   {
     id: 'releases',
-    label: 'Release Title',
+    label: 'Release Titles',
     sourceColumn: 'Release Title',
     chartType: 'donut',
   },
@@ -378,8 +380,7 @@ export const breakdownsByCurrency: Record<CurrencyCode, CurrencyBreakdowns> = {
 export const uploadChecks = [
   {
     label: 'Template columns',
-    value:
-      'Account No. for customer ID, ISRC for song ID, Partner, Distribution Channel, Track Title, Sales, Net Payable, Currency',
+    value: standardStatementColumnLabels.join(', '),
     state: 'Required',
   },
   {

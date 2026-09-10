@@ -93,6 +93,7 @@ import {
   type AdminTrendItem,
 } from '@/lib/admin-dashboard';
 import type { TrackGuaranteeRow, TrackGuaranteeStatus } from '@/lib/guarantees';
+import { standardStatementColumns } from '@/lib/statement-line-items';
 
 type AdminRole = 'super_admin' | 'admin';
 type ManagedAccountRole = 'admin' | 'client';
@@ -241,6 +242,16 @@ function formatMoney(value: number) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('vi-VN').format(value);
+}
+
+function standardColumnStorageLabel(storage: 'matched' | 'added') {
+  return storage === 'matched' ? 'Đã map' : 'Bổ sung';
+}
+
+function standardColumnStorageClass(storage: 'matched' | 'added') {
+  return storage === 'matched'
+    ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
+    : 'rounded-lg bg-[#eef4ff] text-[#2f5da8]';
 }
 
 function accountRoleLabel(role: ManagedAccountRow['role']) {
@@ -2119,7 +2130,7 @@ export function AdminConsole({
                   <TrendList
                     icon={<RadioTower className="size-5 text-[#f59e0b]" />}
                     items={overview.topSources}
-                    title="Top platform"
+                    title="Top partner"
                   />
                   <TrendList
                     icon={<Disc3 className="size-5 text-[#ff4d6d]" />}
@@ -2909,6 +2920,55 @@ export function AdminConsole({
                       <p className="mt-3 text-sm leading-6 text-muted-foreground">
                         {validation.message}
                       </p>
+                    </div>
+
+                    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-white">
+                      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+                        <span className="text-sm font-medium">
+                          Cột dữ liệu chuẩn
+                        </span>
+                        <Badge className="rounded-lg" variant="outline">
+                          {standardStatementColumns.length} cột
+                        </Badge>
+                      </div>
+                      <div className="max-h-[360px] overflow-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Cột</TableHead>
+                              <TableHead>Map</TableHead>
+                              <TableHead>Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {standardStatementColumns.map((column) => (
+                              <TableRow key={column.key}>
+                                <TableCell className="font-medium">
+                                  <span className="block">{column.label}</span>
+                                  {column.required ? (
+                                    <span className="mt-1 block text-xs text-[#a26400]">
+                                      Bắt buộc
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="min-w-[180px] text-xs leading-5 text-muted-foreground">
+                                  {column.mapping}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={standardColumnStorageClass(
+                                      column.storage,
+                                    )}
+                                    variant="secondary"
+                                  >
+                                    {standardColumnStorageLabel(column.storage)}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
 
                     <Button

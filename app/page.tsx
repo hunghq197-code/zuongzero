@@ -37,6 +37,7 @@ export default async function Home() {
       clientId={access.clientId}
       clientName={access.clientName}
       guarantees={dashboardData.guarantees}
+      lineItemsByPeriod={dashboardData.lineItemsByPeriod}
       statementPeriods={dashboardData.statementPeriods}
       trend={dashboardData.trend}
       userEmail={user.email}

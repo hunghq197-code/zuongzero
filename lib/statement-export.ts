@@ -1,5 +1,11 @@
 import { periodDisplayLabel } from '@/lib/reporting-periods';
 import { summarizeSettlement } from '@/lib/settlements';
+import {
+  hasStatementLineItemsTable,
+  standardStatementColumns,
+  type StandardStatementColumnKey,
+  type StatementLineItem,
+} from '@/lib/statement-line-items';
 
 export type StatementExportFormat = 'excel' | 'pdf';
 
@@ -11,6 +17,7 @@ export type StatementExportData = {
   currency: string;
   filename: string | null;
   legalName: string;
+  lineItems: StatementLineItem[];
   period: string;
   periodLabel: string;
   publishedAt: string | null;
@@ -53,6 +60,8 @@ type StatementExportRecoupment = {
   trackExternalId: string | null;
   trackTitle: string;
 };
+
+type StatementExportLineItemRow = StatementLineItem;
 
 type StatementExportRow = {
   clientCode: string;
@@ -133,7 +142,8 @@ export async function getStatementExportData(
 
   if (!statement) return null;
 
-  const [breakdowns, recoupments] = await Promise.all([
+  const lineItemsTableReady = await hasStatementLineItemsTable(db);
+  const [breakdowns, recoupments, lineItems] = await Promise.all([
     db
       .prepare(
         `SELECT
@@ -168,6 +178,41 @@ export async function getStatementExportData(
       )
       .bind(reportPeriodId)
       .all<StatementExportRecoupment>(),
+    lineItemsTableReady
+      ? db
+          .prepare(
+            `SELECT
+               row_index AS rowIndex,
+               account_no AS accountNo,
+               contract_name AS contractName,
+               content_type AS contentType,
+               start_date AS startDate,
+               period_end_date AS periodEndDate,
+               release_title AS releaseTitle,
+               release_artist AS releaseArtist,
+               isrc,
+               track_title AS trackTitle,
+               track_version AS trackVersion,
+               track_artist AS trackArtist,
+               sales_period AS salesPeriod,
+               release_label AS releaseLabel,
+               territory,
+               distribution_channel AS distributionChannel,
+               configuration,
+               partner,
+               sales,
+               gross_income AS grossIncome,
+               royalty_rate AS royaltyRate,
+               net_payable AS netPayable,
+               currency
+             FROM statement_line_items
+             WHERE report_period_id = ?
+             ORDER BY row_index ASC
+             LIMIT 20000`,
+          )
+          .bind(reportPeriodId)
+          .all<StatementExportLineItemRow>()
+      : Promise.resolve({ results: [] as StatementExportLineItemRow[] }),
   ]);
 
   const settlement = summarizeSettlement({
@@ -193,6 +238,7 @@ export async function getStatementExportData(
     currency: statement.currency,
     filename: statement.filename,
     legalName: statement.legalName,
+    lineItems: lineItems.results.map(normalizeExportLineItem),
     period: statement.period,
     periodLabel: periodDisplayLabel(statement.period),
     publishedAt: statement.publishedAt,
@@ -354,6 +400,15 @@ function buildStatementWorkbook(data: StatementExportData) {
     ]),
   ];
 
+  const sourceRows = [
+    standardStatementColumns.map((column) => column.label),
+    ...data.lineItems.map((row) =>
+      standardStatementColumns.map((column) =>
+        exportLineItemValue(row, column.key),
+      ),
+    ),
+  ];
+
   const workbook = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
@@ -363,6 +418,7 @@ function buildStatementWorkbook(data: StatementExportData) {
 ${worksheetXml('Summary', rows)}
 ${worksheetXml('Breakdowns', breakdownRows)}
 ${worksheetXml('GM Recoupment', recoupmentRows)}
+${worksheetXml('Source Rows', sourceRows)}
 </Workbook>`;
 
   return new TextEncoder().encode(workbook);
@@ -407,6 +463,22 @@ function buildStatementPdf(data: StatementExportData) {
               .join(' / '),
           )
       : ['No GM recoupment in this period.']),
+    '',
+    'SOURCE ROWS',
+    ...(data.lineItems.length
+      ? data.lineItems.slice(0, 18).map((row) =>
+          [
+            row.isrc ? `ISRC ${row.isrc}` : null,
+            row.trackTitle,
+            row.trackVersion,
+            row.partner,
+            formatInteger(row.sales),
+            formatMoneyPlain(row.netPayable),
+          ]
+            .filter(Boolean)
+            .join(' / '),
+        )
+      : ['No source rows stored for this statement.']),
   ].map(asciiPdfText);
 
   return renderSimplePdf(lines);
@@ -513,6 +585,49 @@ function numberValue(value: unknown) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function nullableNumberValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeExportLineItem(row: StatementExportLineItemRow) {
+  return {
+    accountNo: row.accountNo,
+    configuration: row.configuration,
+    contractName: row.contractName,
+    contentType: row.contentType,
+    currency: 'VND' as const,
+    distributionChannel: row.distributionChannel,
+    grossIncome: nullableNumberValue(row.grossIncome),
+    isrc: row.isrc,
+    netPayable: numberValue(row.netPayable),
+    partner: row.partner,
+    periodEndDate: row.periodEndDate,
+    releaseArtist: row.releaseArtist,
+    releaseLabel: row.releaseLabel,
+    releaseTitle: row.releaseTitle,
+    royaltyRate: nullableNumberValue(row.royaltyRate),
+    rowIndex: numberValue(row.rowIndex),
+    sales: numberValue(row.sales),
+    salesPeriod: row.salesPeriod,
+    startDate: row.startDate,
+    territory: row.territory,
+    trackArtist: row.trackArtist,
+    trackTitle: row.trackTitle,
+    trackVersion: row.trackVersion,
+  } satisfies StatementLineItem;
+}
+
+function exportLineItemValue(
+  item: StatementLineItem,
+  key: StandardStatementColumnKey,
+) {
+  const value = item[key];
+  if (value === null || value === undefined) return '';
+  return value;
+}
+
 function formatMoneyPlain(value: number) {
   return `${formatInteger(value)} VND`;
 }
@@ -531,10 +646,10 @@ function dimensionLabel(value: string) {
   const labels: Record<string, string> = {
     artist: 'Artist',
     channel: 'Channel',
-    configuration: 'Configuration',
+    configuration: 'Distribution Channel',
     label: 'Label',
     release: 'Release',
-    source: 'Source',
+    source: 'Partner',
     sub_source: 'Sub Source',
     territory: 'Territory',
     track: 'Track',

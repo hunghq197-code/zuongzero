@@ -9,6 +9,7 @@ import {
 import { getAdminOverviewData } from '@/lib/admin-dashboard';
 import { currentCalendarQuarter } from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
+import { hasStatementLineItemsTable } from '@/lib/statement-line-items';
 import { ensureUserRecord } from '@/lib/user-records';
 
 type CustomerBody = {
@@ -221,7 +222,8 @@ async function deleteCustomerResponse(request: Request) {
     await Promise.all(uploadKeys.map((key) => env.FILES.delete(key)));
   }
 
-  await env.DB.batch([
+  const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
+  const deleteStatements = [
     createAuditLog(
       actor.id,
       null,
@@ -298,7 +300,20 @@ async function deleteCustomerResponse(request: Request) {
       `DELETE FROM clients
        WHERE id = ?`,
     ).bind(clientId),
-  ]);
+  ];
+
+  if (lineItemsTableReady) {
+    deleteStatements.splice(
+      7,
+      0,
+      env.DB.prepare(
+        `DELETE FROM statement_line_items
+         WHERE client_id = ?`,
+      ).bind(clientId),
+    );
+  }
+
+  await env.DB.batch(deleteStatements);
 
   return Response.json({
     customers: await listManagedCustomers(env.DB),

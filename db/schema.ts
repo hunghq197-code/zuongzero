@@ -305,6 +305,55 @@ export const revenueBreakdowns = sqliteTable(
   ],
 );
 
+export const statementLineItems = sqliteTable(
+  'statement_line_items',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id),
+    reportPeriodId: text('report_period_id')
+      .notNull()
+      .references(() => reportPeriods.id),
+    sourceUploadId: text('source_upload_id')
+      .notNull()
+      .references(() => uploads.id),
+    rowIndex: integer('row_index').notNull(),
+    accountNo: text('account_no').notNull(),
+    contractName: text('contract_name'),
+    contentType: text('content_type'),
+    startDate: text('start_date'),
+    periodEndDate: text('period_end_date'),
+    releaseTitle: text('release_title'),
+    releaseArtist: text('release_artist'),
+    isrc: text('isrc'),
+    trackTitle: text('track_title'),
+    trackVersion: text('track_version'),
+    trackArtist: text('track_artist'),
+    salesPeriod: text('sales_period'),
+    releaseLabel: text('release_label'),
+    territory: text('territory'),
+    distributionChannel: text('distribution_channel'),
+    configuration: text('configuration'),
+    partner: text('partner'),
+    sales: real('sales').notNull().default(0),
+    grossIncome: real('gross_income'),
+    royaltyRate: real('royalty_rate'),
+    netPayable: real('net_payable').notNull(),
+    currency: text('currency').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_statement_line_items_period').on(table.reportPeriodId),
+    index('idx_statement_line_items_client_period').on(
+      table.clientId,
+      table.reportPeriodId,
+    ),
+    index('idx_statement_line_items_upload').on(table.sourceUploadId),
+    index('idx_statement_line_items_isrc').on(table.clientId, table.isrc),
+  ],
+);
+
 export const trackGuarantees = sqliteTable(
   'track_guarantees',
   {

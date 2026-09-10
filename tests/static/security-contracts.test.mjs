@@ -42,8 +42,10 @@ test('super-admin-only destructive routes stay explicitly guarded', () => {
 
   assert.match(customersRoute, /authorization\.role !== 'super_admin'/);
   assert.match(customersRoute, /DELETE FROM clients/);
+  assert.match(customersRoute, /DELETE FROM statement_line_items/);
   assert.match(statementsRoute, /authorization\.role !== 'super_admin'/);
   assert.match(statementsRoute, /buildReverseGuaranteeRecoupmentStatements/);
+  assert.match(statementsRoute, /DELETE FROM statement_line_items/);
   assert.match(accountsRoute, /access\.role !== 'super_admin'/);
   assert.match(accountsRoute, /managed_account_created/);
 });
@@ -61,6 +63,8 @@ test('client account creation creates a new customer instead of choosing one', (
 test('upload contracts enforce quarterly xlsx import and bulk client matching', () => {
   const uploadsRoute = readSource('app/api/admin/uploads/route.ts');
   const parser = readSource('lib/xlsx-royalty-parser.ts');
+  const schema = readSource('db/schema.ts');
+  const lineItems = readSource('lib/statement-line-items.ts');
 
   assert.match(uploadsRoute, /MAX_UPLOAD_BYTES = 15 \* 1024 \* 1024/);
   assert.match(uploadsRoute, /filename\.endsWith\('\.xlsx'\)/);
@@ -70,12 +74,20 @@ test('upload contracts enforce quarterly xlsx import and bulk client matching', 
   assert.match(uploadsRoute, /YYYY-Q1 đến YYYY-Q4/);
   assert.match(uploadsRoute, /uploadMode === 'bulk'/);
   assert.match(uploadsRoute, /Không tìm thấy mã khách hàng trong file tổng/);
+  assert.match(uploadsRoute, /statement_line_items/);
+  assert.match(schema, /statement_line_items/);
+  assert.match(lineItems, /Contract Name/);
+  assert.match(lineItems, /Gross Income/);
+  assert.match(lineItems, /Royalty Rate/);
   assert.match(parser, /'accountno'/);
   assert.match(parser, /'isrc'/);
   assert.match(parser, /'partner'/);
   assert.match(parser, /'distributionchannel'/);
+  assert.match(parser, /contentType: \['type'/);
+  assert.match(parser, /distributionChannel'.*key: 'configurations'/s);
+  assert.match(parser, /\?:\\\/>\|>/);
   assert.match(parser, /trackExternalId: string \| null/);
-  assert.doesNotMatch(parser, /'type',/);
+  assert.doesNotMatch(parser, /configuration:\s*\[[^\]]*'type'/s);
 });
 
 test('client and admin dashboard regressions keep empty states and aggregate views', () => {
@@ -86,9 +98,13 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   const musicBrand = readSource('components/music-brand.tsx');
 
   assert.match(clientData, /statementPeriods: \[\]/);
+  assert.match(clientData, /lineItemsByPeriod: \{\}/);
+  assert.match(clientData, /statement_line_items/);
   assert.match(clientData, /trend: \[\]/);
   assert.match(clientDashboard, /createEmptyCurrencyBreakdowns/);
   assert.match(clientDashboard, /Chưa có statement/);
+  assert.match(clientDashboard, /standardStatementColumns/);
+  assert.match(clientDashboard, /Dữ liệu chuẩn theo dòng/);
   assert.match(adminDashboard, /trendingTracks/);
   assert.match(adminDashboard, /trendingArtists/);
   assert.match(adminDashboard, /emptyAdminOverviewData/);
@@ -121,6 +137,8 @@ test('statement exports require scoped access and write audit logs', () => {
   assert.match(exportBuilder, /buildStatementPdf/);
   assert.match(exportBuilder, /auditStatementExport/);
   assert.match(exportBuilder, /statement_export_/);
+  assert.match(exportBuilder, /statement_line_items/);
+  assert.match(exportBuilder, /Source Rows/);
   assert.match(adminExportRoute, /getAdminAccess/);
   assert.match(adminExportRoute, /auditStatementExport/);
   assert.match(clientExportRoute, /getClientPortalAccess/);

@@ -20,6 +20,10 @@ import {
   listTrackGuarantees,
   type TrackGuaranteeRow,
 } from '@/lib/guarantees';
+import {
+  hasStatementLineItemsTable,
+  type StatementLineItem,
+} from '@/lib/statement-line-items';
 
 export type DashboardBreakdownsByPeriod = Record<
   string,
@@ -29,6 +33,7 @@ export type DashboardBreakdownsByPeriod = Record<
 export type ClientDashboardData = {
   breakdownsByPeriod: DashboardBreakdownsByPeriod;
   guarantees: TrackGuaranteeRow[];
+  lineItemsByPeriod: Record<string, StatementLineItem[]>;
   statementPeriods: StatementPeriod[];
   trend: RevenueTrendPoint[];
 };
@@ -58,6 +63,11 @@ type BreakdownRow = {
   rowCount: number;
   units: number;
   value: number;
+};
+
+type StatementLineItemSqlRow = Omit<StatementLineItem, 'currency'> & {
+  currency: CurrencyCode;
+  period: string;
 };
 
 export async function getClientDashboardData({
@@ -143,37 +153,82 @@ export async function getClientDashboardData({
     return {
       breakdownsByPeriod: {},
       guarantees,
+      lineItemsByPeriod: {},
       statementPeriods: [],
       trend: [],
     };
   }
 
-  const breakdownRows = await env.DB.prepare(
-    `SELECT
-       rp.period,
-       rp.currency,
-       rb.dimension,
-       rb.label,
-       rb.value,
-       rb.percentage,
-       rb.units,
-       rb.row_count AS rowCount
-     FROM revenue_breakdowns rb
-     JOIN report_periods rp
-       ON rp.id = rb.report_period_id
-     WHERE rb.client_id = ?
-       AND rp.client_id = ?
-       AND rp.status IN ('published', 'locked')
-       AND rp.currency = 'VND'
-     ORDER BY rp.period DESC, rb.dimension ASC, abs(rb.value) DESC
-     LIMIT 2000`,
-  )
-    .bind(clientId, clientId)
-    .all<BreakdownRow>();
+  const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
+  const [breakdownRows, lineItemRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT
+         rp.period,
+         rp.currency,
+         rb.dimension,
+         rb.label,
+         rb.value,
+         rb.percentage,
+         rb.units,
+         rb.row_count AS rowCount
+       FROM revenue_breakdowns rb
+       JOIN report_periods rp
+         ON rp.id = rb.report_period_id
+       WHERE rb.client_id = ?
+         AND rp.client_id = ?
+         AND rp.status IN ('published', 'locked')
+         AND rp.currency = 'VND'
+       ORDER BY rp.period DESC, rb.dimension ASC, abs(rb.value) DESC
+       LIMIT 2000`,
+    )
+      .bind(clientId, clientId)
+      .all<BreakdownRow>(),
+    lineItemsTableReady
+      ? env.DB.prepare(
+          `SELECT
+             rp.period,
+             li.row_index AS rowIndex,
+             li.account_no AS accountNo,
+             li.contract_name AS contractName,
+             li.content_type AS contentType,
+             li.start_date AS startDate,
+             li.period_end_date AS periodEndDate,
+             li.release_title AS releaseTitle,
+             li.release_artist AS releaseArtist,
+             li.isrc,
+             li.track_title AS trackTitle,
+             li.track_version AS trackVersion,
+             li.track_artist AS trackArtist,
+             li.sales_period AS salesPeriod,
+             li.release_label AS releaseLabel,
+             li.territory,
+             li.distribution_channel AS distributionChannel,
+             li.configuration,
+             li.partner,
+             li.sales,
+             li.gross_income AS grossIncome,
+             li.royalty_rate AS royaltyRate,
+             li.net_payable AS netPayable,
+             li.currency
+           FROM statement_line_items li
+           JOIN report_periods rp
+             ON rp.id = li.report_period_id
+           WHERE li.client_id = ?
+             AND rp.client_id = ?
+             AND rp.status IN ('published', 'locked')
+             AND rp.currency = 'VND'
+           ORDER BY rp.period DESC, li.row_index ASC
+           LIMIT 5000`,
+        )
+          .bind(clientId, clientId)
+          .all<StatementLineItemSqlRow>()
+      : Promise.resolve({ results: [] as StatementLineItemSqlRow[] }),
+  ]);
 
   return {
     breakdownsByPeriod: mapBreakdownsByPeriod(breakdownRows.results),
     guarantees,
+    lineItemsByPeriod: mapLineItemsByPeriod(lineItemRows.results),
     statementPeriods,
     trend: mapTrend(statementPeriods),
   };
@@ -194,6 +249,7 @@ function staticDashboardData(clientId: string): ClientDashboardData {
           }
         : {},
     guarantees: [],
+    lineItemsByPeriod: {},
     statementPeriods,
     trend: statementPeriods.length > 0 ? revenueTrend : [],
   };
@@ -238,6 +294,43 @@ function mapBreakdownsByPeriod(rows: BreakdownRow[]) {
       value: Number(row.value) || 0,
     } satisfies BreakdownItem);
     result[row.period][row.currency] = currencyBreakdowns;
+  }
+
+  return result;
+}
+
+function mapLineItemsByPeriod(rows: StatementLineItemSqlRow[]) {
+  const result: Record<string, StatementLineItem[]> = {};
+
+  for (const row of rows) {
+    const items = (result[row.period] ??= []);
+    items.push({
+      accountNo: row.accountNo,
+      configuration: row.configuration,
+      contractName: row.contractName,
+      contentType: row.contentType,
+      currency: row.currency,
+      distributionChannel: row.distributionChannel,
+      grossIncome:
+        row.grossIncome === null ? null : Number(row.grossIncome) || 0,
+      isrc: row.isrc,
+      netPayable: Number(row.netPayable) || 0,
+      partner: row.partner,
+      periodEndDate: row.periodEndDate,
+      releaseArtist: row.releaseArtist,
+      releaseLabel: row.releaseLabel,
+      releaseTitle: row.releaseTitle,
+      royaltyRate:
+        row.royaltyRate === null ? null : Number(row.royaltyRate) || 0,
+      rowIndex: Number(row.rowIndex) || 0,
+      sales: Number(row.sales) || 0,
+      salesPeriod: row.salesPeriod,
+      startDate: row.startDate,
+      territory: row.territory,
+      trackArtist: row.trackArtist,
+      trackTitle: row.trackTitle,
+      trackVersion: row.trackVersion,
+    });
   }
 
   return result;
