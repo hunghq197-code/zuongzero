@@ -234,23 +234,23 @@ function buildImportSummary({
   warnings: string[];
 }) {
   const expectedColumns = [
-    'Source',
-    'Sub Source',
-    'Territory',
-    'Track Title',
-    'ISRC',
+    'Account No.',
     'Release Title',
+    'Release Artist',
+    'ISRC',
+    'Track Title',
+    'Track Version',
     'Track Artist',
+    'Sales Period',
     'Release Label',
+    'Territory',
+    'Distribution Channel',
     'Configuration',
-    'Units',
+    'Partner',
+    'Sales',
     'Net Payable',
-    'Sale Date',
+    'Currency',
   ];
-
-  if (uploadMode === 'bulk') {
-    expectedColumns.unshift('Mã khách hàng / Client ID');
-  }
 
   return {
     clientCount,

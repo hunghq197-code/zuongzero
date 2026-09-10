@@ -544,7 +544,7 @@ function validateWorkbook(file: File | null, uploadMode: UploadMode) {
     state: 'ready',
     message:
       uploadMode === 'bulk'
-        ? 'File hợp lệ. Khi import, hệ thống sẽ kiểm tra cột Mã khách hàng/Client ID.'
+        ? 'File hợp lệ. Khi import, hệ thống sẽ kiểm tra cột Account No. / Mã khách hàng.'
         : 'File hợp lệ.',
     progress: 86,
   };
@@ -2781,7 +2781,7 @@ export function AdminConsole({
                             File tổng nhiều khách hàng
                           </span>
                           <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                            Bật khi Excel có cột Mã khách hàng/Client ID. Ngưỡng
+                            Bật khi Excel có cột Account No. / Mã khách hàng. Ngưỡng
                             thanh toán {formatMoney(SETTLEMENT_THRESHOLD_VND)}.
                           </span>
                         </span>

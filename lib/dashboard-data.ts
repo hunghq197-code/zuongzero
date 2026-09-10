@@ -379,7 +379,7 @@ export const uploadChecks = [
   {
     label: 'Template columns',
     value:
-      'Mã khách hàng/Client ID for bulk, Source, Territory, Track Title, ISRC, Configuration, Units, Net Payable, Sale Date',
+      'Account No. for customer ID, ISRC for song ID, Partner, Distribution Channel, Track Title, Sales, Net Payable, Currency',
     state: 'Required',
   },
   {

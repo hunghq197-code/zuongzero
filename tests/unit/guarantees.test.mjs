@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildReverseGuaranteeRecoupmentStatements,
+  normalizeTrackExternalId,
   normalizeTrackKey,
   planTrackGuaranteeRecoupments,
 } from '../../lib/guarantees.ts';
@@ -74,6 +75,7 @@ class MockD1 {
 test('track keys normalize accents, punctuation, and casing', () => {
   assert.equal(normalizeTrackKey('Bài Hát Số 01 - Remix!'), 'baihatso01remix');
   assert.equal(normalizeTrackKey('  THE   SINGLE  '), 'thesingle');
+  assert.equal(normalizeTrackExternalId('VN-A38-24-00008'), 'vna382400008');
 });
 
 test('GM recoupment deducts at most the active track revenue and balance', async () => {
@@ -86,6 +88,7 @@ test('GM recoupment deducts at most the active track revenue and balance', async
         initialAmount: 1_000,
         recoupedAmount: 250,
         status: 'active',
+        trackExternalId: null,
         trackKey: normalizeTrackKey('Bài hát A'),
         trackTitle: 'Bài hát A',
       },
@@ -101,6 +104,7 @@ test('GM recoupment deducts at most the active track revenue and balance', async
     trackRevenue: [
       {
         rows: 2,
+        trackExternalId: null,
         trackTitle: 'Bai hat A',
         units: 100,
         value: 300,
@@ -141,6 +145,7 @@ test('GM recoupment reverses an existing period before replacing it', async () =
         initialAmount: 1_000,
         recoupedAmount: 700,
         status: 'active',
+        trackExternalId: null,
         trackKey: normalizeTrackKey('Single B'),
         trackTitle: 'Single B',
       },
@@ -157,6 +162,7 @@ test('GM recoupment reverses an existing period before replacing it', async () =
     trackRevenue: [
       {
         rows: 1,
+        trackExternalId: null,
         trackTitle: 'Single B',
         units: 50,
         value: 100,
@@ -172,6 +178,52 @@ test('GM recoupment reverses an existing period before replacing it', async () =
     plan.statements[1].sql,
     /DELETE FROM track_guarantee_recoupments/,
   );
+});
+
+test('GM recoupment prefers ISRC over track title when song IDs exist', async () => {
+  const db = new MockD1({
+    candidates: [
+      {
+        balanceAmount: 1_000,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        id: 'gm-isrc',
+        initialAmount: 1_000,
+        recoupedAmount: 0,
+        status: 'active',
+        trackExternalId: 'VNA382400008',
+        trackKey: normalizeTrackKey('Same Title'),
+        trackTitle: 'Same Title',
+      },
+    ],
+  });
+
+  const plan = await planTrackGuaranteeRecoupments({
+    clientId: 'client-1',
+    db,
+    now: '2026-09-10T00:00:00.000Z',
+    reportPeriodId: 'client-1:2026-Q3:VND',
+    sourceUploadId: 'upload-isrc',
+    trackRevenue: [
+      {
+        rows: 1,
+        trackExternalId: 'VNA382400999',
+        trackTitle: 'Same Title',
+        units: 10,
+        value: 900,
+      },
+      {
+        rows: 1,
+        trackExternalId: 'VNA382400008',
+        trackTitle: 'Same Title',
+        units: 20,
+        value: 250,
+      },
+    ],
+  });
+
+  assert.equal(plan.deductionTotal, 250);
+  assert.equal(plan.recoupments[0].revenueAmount, 250);
+  assert.equal(plan.recoupments[0].balanceAfter, 750);
 });
 
 test('statement delete builds GM reversal statements', async () => {

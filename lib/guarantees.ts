@@ -22,6 +22,7 @@ export type TrackGuaranteeRow = {
 
 export type TrackRevenueInput = {
   rows: number;
+  trackExternalId: string | null;
   trackTitle: string;
   units: number;
   value: number;
@@ -68,6 +69,7 @@ type RecoupmentCandidateRow = {
   initialAmount: number;
   recoupedAmount: number;
   status: TrackGuaranteeStatus;
+  trackExternalId: string | null;
   trackKey: string;
   trackTitle: string;
 };
@@ -213,9 +215,9 @@ export async function planTrackGuaranteeRecoupments({
       )
       .bind(reportPeriodId),
   ];
-  const revenueByTrack = buildTrackRevenueMap(trackRevenue);
+  const revenueMap = buildTrackRevenueMap(trackRevenue);
 
-  if (revenueByTrack.size === 0) {
+  if (revenueMap.size === 0) {
     return {
       deductionTotal: 0,
       recoupments: [],
@@ -227,7 +229,7 @@ export async function planTrackGuaranteeRecoupments({
   const recoupments: PlannedTrackRecoupment[] = [];
 
   for (const guarantee of candidates) {
-    const revenue = revenueByTrack.get(guarantee.trackKey);
+    const revenue = findTrackRevenueForGuarantee(revenueMap, guarantee);
     if (!revenue || revenue.remaining <= 0) continue;
 
     const restoredAmount = previousByGuarantee.get(guarantee.id) ?? 0;
@@ -339,6 +341,14 @@ export function normalizeTrackKey(value: string) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+export function normalizeTrackExternalId(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
 export async function hasGuaranteeTables(db: D1Database) {
   const rows = await db
     .prepare(
@@ -356,27 +366,59 @@ export async function hasGuaranteeTables(db: D1Database) {
 }
 
 function buildTrackRevenueMap(trackRevenue: TrackRevenueInput[]) {
-  const revenueByTrack = new Map<
+  const byExternalId = new Map<
+    string,
+    { remaining: number; trackTitle: string; value: number }
+  >();
+  const byTrackKey = new Map<
     string,
     { remaining: number; trackTitle: string; value: number }
   >();
 
   for (const item of trackRevenue) {
-    const key = normalizeTrackKey(item.trackTitle);
     const value = Number(item.value) || 0;
-    if (!key || value <= 0) continue;
+    if (value <= 0) continue;
 
-    const existing = revenueByTrack.get(key) ?? {
-      remaining: 0,
-      trackTitle: item.trackTitle,
-      value: 0,
-    };
-    existing.remaining = roundMoney(existing.remaining + value);
-    existing.value = roundMoney(existing.value + value);
-    revenueByTrack.set(key, existing);
+    const trackKey = normalizeTrackKey(item.trackTitle);
+    if (trackKey) addTrackRevenueEntry(byTrackKey, trackKey, item, value);
+
+    const externalKey = normalizeTrackExternalId(item.trackExternalId ?? '');
+    if (externalKey) {
+      addTrackRevenueEntry(byExternalId, externalKey, item, value);
+    }
   }
 
-  return revenueByTrack;
+  return {
+    byExternalId,
+    byTrackKey,
+    size: byExternalId.size + byTrackKey.size,
+  };
+}
+
+function findTrackRevenueForGuarantee(
+  revenueMap: ReturnType<typeof buildTrackRevenueMap>,
+  guarantee: RecoupmentCandidateRow,
+) {
+  const externalKey = normalizeTrackExternalId(guarantee.trackExternalId ?? '');
+  if (externalKey) return revenueMap.byExternalId.get(externalKey);
+
+  return revenueMap.byTrackKey.get(guarantee.trackKey);
+}
+
+function addTrackRevenueEntry(
+  target: Map<string, { remaining: number; trackTitle: string; value: number }>,
+  key: string,
+  item: TrackRevenueInput,
+  value: number,
+) {
+  const existing = target.get(key) ?? {
+    remaining: 0,
+    trackTitle: item.trackTitle,
+    value: 0,
+  };
+  existing.remaining = roundMoney(existing.remaining + value);
+  existing.value = roundMoney(existing.value + value);
+  target.set(key, existing);
 }
 
 async function readReportPeriodRecoupments(
@@ -402,6 +444,7 @@ async function readRecoupmentCandidates(db: D1Database, clientId: string) {
       `SELECT
          id,
          track_title AS trackTitle,
+         track_external_id AS trackExternalId,
          track_key AS trackKey,
          initial_amount AS initialAmount,
          recouped_amount AS recoupedAmount,

@@ -61,10 +61,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Gioi han upload hien tai: 15MB.
 - Parser doc workbook Excel, map cac cot chinh nhu Net Payable/Revenue, Units, Source, Sub Source, Configuration, Territory, Track, Artist, Release, Label.
 - Du lieu chi su dung VND/VNĐ va cac breakdown phuc vu dashboard.
+- File data chuan tu 2026-09-10 la workbook co cac cot: `Account No.`, `Contract Name`, `Type`, `Start Date`, `Period End Date`, `Release Title`, `Release Artist`, `ISRC`, `Track Title`, `Track Version`, `Track Artist`, `Sales Period`, `Release Label`, `Territory`, `Distribution Channel`, `Configuration`, `Partner`, `Sales`, `Gross Income`, `Royalty Rate`, `Net Payable`, `Currency`.
+- Quy uoc file chuan: `Account No.` la ID khach hang dung cho bulk import; `ISRC` la ID bai hat dung cho GM/song tracking; `Partner` la platform/source; `Distribution Channel` la configuration; `Sales` la units.
 - Phase 1 da chuyen period sang dinh dang quy `YYYY-Q1` den `YYYY-Q4`.
-- Phase 2 da them che do file tong nhieu khach hang: Excel can co cot `Ma khach hang`/`Client ID`; backend match voi client active va tu SUM theo tung client/noi dung.
+- Phase 2 da them che do file tong nhieu khach hang: Excel chuan dung cot `Account No.` lam ID khach hang; backend match voi client active va tu SUM theo tung client/noi dung.
 - Phase 2 ap dung nguong doi soat 1.000.000 VND de xac dinh `da thanh toan` hoac `chua thanh toan + chuyen quy sau`.
 - Phase 3 them track revenue day du trong parser de GM match tren toan bo file, khong phu thuoc top track hien thi tren dashboard.
+- GM recoup uu tien match bang `ISRC`/`track_external_id`; neu GM cu khong co ID bai hat thi moi fallback theo ten bai hat da normalize.
 - Backend validate lai file truoc khi luu/import.
 
 ## Phase 3 - GM/advance theo bai hat
@@ -216,6 +219,10 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: bo sung `tests/production-smoke.mjs` de verify export route cua admin/client deu tra `401` khi chua dang nhap.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `030ca940-09d4-4f44-8036-810ed4322eb6`.
 - 2026-09-10: `npm run test:production` thanh cong sau deploy Phase 7; `/login`, `/forgot-password`, `/login/verify` tra 200, cac API admin va export statement admin/client tra 401 khi chua dang nhap.
+- 2026-09-10: cap nhat parser theo file data chuan `test.xlsx`: `Account No.` la ID khach hang, `ISRC` la ID bai hat, `Partner` la source/platform, `Distribution Channel` la configuration; GM recoup uu tien match bang ISRC truoc khi fallback theo ten bai hat.
+- 2026-09-10: `npx oxlint lib\xlsx-royalty-parser.ts lib\guarantees.ts app\api\admin\uploads\route.ts components\admin-console.tsx lib\dashboard-data.ts tests\unit\guarantees.test.mjs tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 17 unit tests + 10 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau khi cap nhat mapping file chuan.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`

@@ -60,6 +60,7 @@ test('client account creation creates a new customer instead of choosing one', (
 
 test('upload contracts enforce quarterly xlsx import and bulk client matching', () => {
   const uploadsRoute = readSource('app/api/admin/uploads/route.ts');
+  const parser = readSource('lib/xlsx-royalty-parser.ts');
 
   assert.match(uploadsRoute, /MAX_UPLOAD_BYTES = 15 \* 1024 \* 1024/);
   assert.match(uploadsRoute, /filename\.endsWith\('\.xlsx'\)/);
@@ -69,6 +70,12 @@ test('upload contracts enforce quarterly xlsx import and bulk client matching', 
   assert.match(uploadsRoute, /YYYY-Q1 đến YYYY-Q4/);
   assert.match(uploadsRoute, /uploadMode === 'bulk'/);
   assert.match(uploadsRoute, /Không tìm thấy mã khách hàng trong file tổng/);
+  assert.match(parser, /'accountno'/);
+  assert.match(parser, /'isrc'/);
+  assert.match(parser, /'partner'/);
+  assert.match(parser, /'distributionchannel'/);
+  assert.match(parser, /trackExternalId: string \| null/);
+  assert.doesNotMatch(parser, /'type',/);
 });
 
 test('client and admin dashboard regressions keep empty states and aggregate views', () => {
@@ -161,6 +168,8 @@ test('track guarantees keep an external song id for tracking', () => {
 
   assert.match(schema, /track_external_id/);
   assert.match(guarantees, /trackExternalId/);
+  assert.match(guarantees, /normalizeTrackExternalId/);
+  assert.match(guarantees, /byExternalId/);
   assert.match(guaranteesRoute, /trackExternalId\?: unknown/);
   assert.match(guaranteesRoute, /track_external_id/);
   assert.match(adminConsole, /ID bài hát/);

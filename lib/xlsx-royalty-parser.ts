@@ -30,6 +30,7 @@ type FieldKey =
   | 'configuration'
   | 'territory'
   | 'track'
+  | 'trackExternalId'
   | 'artist'
   | 'release'
   | 'label';
@@ -43,13 +44,19 @@ type BreakdownAccumulator = {
 type CurrencyAccumulator = {
   breakdowns: Record<BreakdownKey, Map<string, BreakdownAccumulator>>;
   rowCount: number;
-  trackRevenue: Map<string, BreakdownAccumulator>;
+  trackRevenue: Map<string, TrackRevenueAccumulator>;
   units: number;
   value: number;
 };
 
+type TrackRevenueAccumulator = BreakdownAccumulator & {
+  trackExternalId: string | null;
+  trackTitle: string;
+};
+
 export type ParsedTrackRevenue = {
   rows: number;
+  trackExternalId: string | null;
   trackTitle: string;
   units: number;
   value: number;
@@ -92,6 +99,9 @@ const fieldAliases: Record<FieldKey, string[]> = {
     'customerid',
     'customercode',
     'customer',
+    'account',
+    'accountno',
+    'accountnumber',
     'accountid',
     'vendorid',
     'makhachhang',
@@ -102,9 +112,10 @@ const fieldAliases: Record<FieldKey, string[]> = {
   configuration: [
     'configuration',
     'config',
+    'distributionchannel',
+    'channel',
     'saleconfiguration',
     'usagetype',
-    'type',
     'royaltytype',
   ],
   currency: ['currency', 'currencycode', 'ccy'],
@@ -122,10 +133,11 @@ const fieldAliases: Record<FieldKey, string[]> = {
     'revenue',
   ],
   release: ['release', 'releasetitle', 'album', 'albumtitle', 'producttitle'],
-  source: ['source', 'store', 'platform', 'service', 'dsp'],
+  source: ['source', 'store', 'platform', 'service', 'dsp', 'partner'],
   subSource: ['subsource', 'subsources', 'substore', 'subplatform'],
   territory: ['territory', 'country', 'countrycode', 'region'],
   track: ['track', 'tracktitle', 'song', 'songtitle', 'title'],
+  trackExternalId: ['isrc', 'trackid', 'songid', 'trackexternalid', 'idbaihat'],
   units: ['units', 'unit', 'quantity', 'qty', 'streams', 'sales'],
 };
 
@@ -169,7 +181,7 @@ export function parseRoyaltyWorkbook(
     sawUsableSheet = true;
     if (groupByClientCode && parsedSheet.headers.clientCode === undefined) {
       throw new Error(
-        'File tổng phải có cột Mã khách hàng/Client ID để hệ thống tự gom dữ liệu.',
+        'File tổng phải có cột Account No. / Mã khách hàng để hệ thống tự gom dữ liệu.',
       );
     }
 
@@ -185,7 +197,7 @@ export function parseRoyaltyWorkbook(
         : 'single-client';
       if (!clientCode) {
         throw new Error(
-          `Dòng ${row.index} thiếu mã khách hàng. Vui lòng bổ sung cột Mã khách hàng/Client ID.`,
+          `Dòng ${row.index} thiếu mã khách hàng. Vui lòng bổ sung cột Account No. / Mã khách hàng.`,
         );
       }
 
@@ -210,6 +222,12 @@ export function parseRoyaltyWorkbook(
       accumulator.units += Math.round(units);
       accumulator.rowCount += 1;
       importedRowCount += 1;
+      const trackTitle = normalizeLabel(
+        readCell(row, parsedSheet.headers.track),
+      );
+      const trackExternalId = normalizeOptionalLabel(
+        readCell(row, parsedSheet.headers.trackExternalId),
+      );
 
       for (const breakdownField of breakdownFields) {
         const columnIndex = parsedSheet.headers[breakdownField.field];
@@ -231,9 +249,10 @@ export function parseRoyaltyWorkbook(
         );
 
         if (breakdownField.key === 'tracks') {
-          addBreakdownValue(
+          addTrackRevenueValue(
             accumulator.trackRevenue,
-            label,
+            trackTitle,
+            trackExternalId,
             amount,
             Math.round(units),
           );
@@ -343,6 +362,7 @@ function mapHeaderRow(cells: string[]) {
     subSource: undefined,
     territory: undefined,
     track: undefined,
+    trackExternalId: undefined,
     units: undefined,
   };
 
@@ -524,7 +544,7 @@ function getCurrencyAccumulator(
       ]),
     ) as Record<BreakdownKey, Map<string, BreakdownAccumulator>>,
     rowCount: 0,
-    trackRevenue: new Map<string, BreakdownAccumulator>(),
+    trackRevenue: new Map<string, TrackRevenueAccumulator>(),
     units: 0,
     value: 0,
   };
@@ -560,6 +580,31 @@ function addBreakdownValue(
   entry.units += units;
   entry.value += value;
   target.set(label, entry);
+}
+
+function addTrackRevenueValue(
+  target: Map<string, TrackRevenueAccumulator>,
+  trackTitle: string,
+  trackExternalId: string | null,
+  value: number,
+  units: number,
+) {
+  const key = trackExternalId
+    ? `isrc:${normalizeLookupKey(trackExternalId)}`
+    : `title:${normalizeLookupKey(trackTitle)}`;
+  if (!key) return;
+
+  const entry = target.get(key) ?? {
+    rows: 0,
+    trackExternalId,
+    trackTitle,
+    units: 0,
+    value: 0,
+  };
+  entry.rows += 1;
+  entry.units += units;
+  entry.value += value;
+  target.set(key, entry);
 }
 
 function finalizeBreakdowns(accumulator: CurrencyAccumulator) {
@@ -613,13 +658,14 @@ function finalizeBreakdownItems(
 }
 
 function finalizeTrackRevenue(
-  source: Map<string, BreakdownAccumulator>,
+  source: Map<string, TrackRevenueAccumulator>,
 ): ParsedTrackRevenue[] {
   return Array.from(source.entries())
     .sort(([, left], [, right]) => Math.abs(right.value) - Math.abs(left.value))
-    .map(([trackTitle, entry]) => ({
+    .map(([, entry]) => ({
       rows: entry.rows,
-      trackTitle,
+      trackExternalId: entry.trackExternalId,
+      trackTitle: entry.trackTitle,
       units: entry.units,
       value: roundMoney(entry.value),
     }));
@@ -633,6 +679,11 @@ function readCell(row: SheetRow, index: number | undefined) {
 function normalizeLabel(value: string) {
   const label = value.replace(/\s+/g, ' ').trim();
   return label || 'Unknown';
+}
+
+function normalizeOptionalLabel(value: string) {
+  const label = value.replace(/\s+/g, ' ').trim();
+  return label || null;
 }
 
 function parseClientCode(value: string) {
@@ -722,6 +773,14 @@ function roundMoney(value: number) {
 
 function roundPercentage(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeLookupKey(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
 }
 
 function decodeXml(value: string) {
