@@ -73,7 +73,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - `statements.net_costs` duoc dung lam tong GM recoup trong ky; cong thuc doi soat giu nguyen: opening + revenue - GM - reserve + release.
 - Client dashboard hien thi metric `GM Recouped`, cot GM trong ledger, va bang GM cua khach hang.
 - Audit log co nhan: tao GM, archive GM, kich hoat GM.
-- Co guard neu production chua apply migration GM: dashboard van load va upload cu khong bi loi; tao/cap nhat GM se bao can chay migration 0006.
+- Co guard phong truong hop moi truong nao chua apply migration GM: dashboard van load va upload cu khong bi loi; tao/cap nhat GM se bao can chay migration 0006.
 
 ## Bao mat
 
@@ -96,7 +96,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Lenh build: `npm run build`.
 - Lenh deploy: `npx wrangler deploy --config wrangler.cloudflare.jsonc`.
 - Chinh sach deploy tu 2026-09-09: chi deploy production bang Cloudflare/Wrangler va chi ban giao URL `https://artistportal.zuongzeroent.com`; khong deploy/ban giao qua URL `chatgpt.site`.
-- 2026-09-10: da deploy Worker Phase 3 len Cloudflare, version `de5d2f11-a19b-4212-beeb-9b3069e833cf`; production `/login` tra `200 OK`.
+- 2026-09-10: da apply D1 migration Phase 3 `0006_track_guarantees` bang lenh execute SQL truc tiep va deploy Worker Phase 3 len Cloudflare, version `dde0f42e-5d9d-4f20-b605-211fd38a8690`; production `/login` tra `200 OK`.
 
 ## Kiem thu da chay
 
@@ -104,9 +104,11 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npx drizzle-kit generate --name track_guarantees`
 - 2026-09-10: `npx oxlint app\api\admin\guarantees\route.ts app\api\admin\uploads\route.ts app\api\admin\statements\route.ts app\api\admin\customers\route.ts components\admin-console.tsx components\royalty-dashboard.tsx lib\guarantees.ts lib\xlsx-royalty-parser.ts lib\client-dashboard-data.ts lib\admin-dashboard.ts lib\admin-activity.ts app\page.tsx db\schema.ts`
 - 2026-09-10: `npm run build`
-- 2026-09-10: thu chay `npx wrangler d1 migrations apply royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc`; Cloudflare tra `7403` do token/account hien tai chua co quyen D1 remote.
-- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`
-- 2026-09-10: `curl.exe -I https://artistportal.zuongzeroent.com/login`
+- 2026-09-10: thu chay `npx wrangler d1 migrations list royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc`; Cloudflare tra `7403` tren endpoint migration-list/query.
+- 2026-09-10: `npx wrangler d1 execute royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc --file drizzle/0006_track_guarantees.sql` thanh cong: 7 queries executed, tao bang `track_guarantees` va `track_guarantee_recoupments`.
+- 2026-09-10: verify D1 remote bang `SELECT name FROM sqlite_master ...`; ca hai bang GM da ton tai, `guarantee_count = 0`, `recoupment_count = 0`.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `dde0f42e-5d9d-4f20-b605-211fd38a8690`.
+- 2026-09-10: verify production `https://royalty-dashboard.hung-hq197.workers.dev/login` tra `200 OK`, `https://artistportal.zuongzeroent.com/login` tra `200 OK`, `GET /api/admin/guarantees` khi chua dang nhap tra `401` dung ky vong.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
@@ -117,7 +119,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 - Phase 1 - Quy + VND-only: DONE. Da chuyen ky bao cao tu thang sang quy `YYYY-Qn` va loai bo USD/ngoai te khoi luong import/dashboard.
 - Phase 2 - File tong + doi soat nguong 1.000.000 VND: DONE. Da ho tro upload Excel gom nhieu ma khach hang, tu SUM theo client va tinh da thanh toan/chua thanh toan + carry forward.
-- Phase 3 - GM/advance theo bai hat: CODE DONE, DEPLOYED WITH GUARD. Source da co migration/API/UI/recoup logic va da deploy Worker version `de5d2f11-a19b-4212-beeb-9b3069e833cf`. Production van can apply D1 migration `0006_track_guarantees` sau khi token Cloudflare co quyen D1 remote; hien bi chan boi loi Cloudflare `7403`.
+- Phase 3 - GM/advance theo bai hat: DONE. Source da co migration/API/UI/recoup logic, D1 production da co hai bang GM, va Worker da deploy version `dde0f42e-5d9d-4f20-b605-211fd38a8690`.
 - Phase 4 - Nhac doi soat ngay 15: NOT STARTED. Can thiet ke Cloudflare scheduled trigger/cron ngay 15 hang thang, danh sach nguoi nhan theo client active, noi dung email/thong bao, log da gui, retry khi loi, va che do preview/dry-run cho admin.
 - Phase 5 - Email production: NOT STARTED / PARTIAL. Can verify domain gui email that trong Resend hoac provider duoc chon, cap nhat `EMAIL_FROM`, kiem tra SPF/DKIM/DMARC, test flow kich hoat tai khoan/reset password/thong bao doi soat bang email that.
 - Phase 6 - Test va van hanh production: NOT STARTED. Can bo sung test tu dong cho auth, account invite/reset, upload single/bulk, publish/delete statement, GM recoup/reverse, va regression dashboard client/admin.
@@ -135,6 +137,6 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Cau hinh domain gui email that trong Resend va cap nhat `EMAIL_FROM` bang domain da verify.
 - Test flow tao tai khoan client bang email that: tao tai khoan, nhan mail, kich hoat, doi mat khau, vao dashboard.
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
-- Test production flow Phase 3: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
+- Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
 - Thiet ke cron/email ngay 15 hang thang sau khi domain email Resend san sang.
 - Bo sung test tu dong cho API auth, upload, statement publish/delete neu dua vao van hanh that.
