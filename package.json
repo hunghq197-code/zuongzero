@@ -11,7 +11,11 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test": "npm run test:unit && npm run test:contracts",
+    "test:unit": "node --test --experimental-strip-types tests/unit/settlements.test.mjs tests/unit/reporting-periods.test.mjs tests/unit/app-auth.test.mjs tests/unit/guarantees.test.mjs",
+    "test:contracts": "node --test tests/static/security-contracts.test.mjs",
+    "test:production": "node tests/production-smoke.mjs"
   },
   "dependencies": {
     "react": "19.2.6",

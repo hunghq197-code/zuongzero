@@ -99,6 +99,14 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Them audit log `email_test_sent` cho moi lan gui email test, khong luu secret.
 - Worker production da co secret names `RESEND_API_KEY` va `EMAIL_FROM`.
 
+## Phase 6 - Test va van hanh production
+
+- Them script `npm run test`, `npm run test:unit`, `npm run test:contracts` va `npm run test:production`.
+- Unit test bao phu logic doi soat nguong 1.000.000 VND, carry-forward, period theo quy lich duong UTC+7, helper auth/session/password, va GM recoup/reverse.
+- Contract test doc source de chan regression bao mat: moi API admin phai co session + admin guard, hanh dong xoa khach hang/statement can super admin, tao account client phai tao khach hang moi, upload chi nhan `.xlsx` theo quy va co bulk matching, dashboard client co empty state, admin co aggregate trend.
+- Production smoke test chi doc `https://artistportal.zuongzeroent.com`: kiem `/login`, `/forgot-password` tra 200 va cac API admin nhay cam tra 401 khi chua dang nhap.
+- Phase nay khong doi schema D1/R2 va khong yeu cau deploy Worker moi; muc tieu la tao lop regression gate truoc cac lan deploy tiep theo.
+
 ## Bao mat
 
 - Client khong co API upload/sua statement.
@@ -147,6 +155,11 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `8900420f-75ec-4e0a-86b7-5f57de0d0da1`, schedule `0 2 15 * *`.
 - 2026-09-10: verify production `https://artistportal.zuongzeroent.com/login` tra `200 OK`, `GET https://royalty-dashboard.hung-hq197.workers.dev/api/admin/email` khi chua dang nhap tra `401` dung ky vong.
 - 2026-09-10: `npx wrangler secret list --config wrangler.cloudflare.jsonc` xac nhan Worker co secret names `EMAIL_FROM` va `RESEND_API_KEY`.
+- 2026-09-10: `npx oxfmt --write package.json tests\unit\settlements.test.mjs tests\unit\reporting-periods.test.mjs tests\unit\app-auth.test.mjs tests\unit\guarantees.test.mjs tests\static\security-contracts.test.mjs tests\production-smoke.mjs`.
+- 2026-09-10: `npx oxlint package.json tests\unit\settlements.test.mjs tests\unit\reporting-periods.test.mjs tests\unit\app-auth.test.mjs tests\unit\guarantees.test.mjs tests\static\security-contracts.test.mjs tests\production-smoke.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 13 unit tests + 6 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau khi them bo test Phase 6.
+- 2026-09-10: `npm run test:production` thanh cong tren `https://artistportal.zuongzeroent.com`: `/login` va `/forgot-password` tra 200, cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
@@ -160,7 +173,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 3 - GM/advance theo bai hat: DONE. Source da co migration/API/UI/recoup logic, D1 production da co hai bang GM, va Worker da deploy version `dde0f42e-5d9d-4f20-b605-211fd38a8690`.
 - Phase 4 - Nhac doi soat ngay 15: DONE. Da co Cloudflare scheduled trigger ngay 15 hang thang, danh sach nguoi nhan theo client active, email Resend, send log, retry loi va preview/dry-run trong admin.
 - Phase 5 - Email production: DEPLOYED. Da co tab Email/API de verify Resend domain, SPF/DKIM, DMARC va gui email test that; can admin dang nhap va bam gui test de xac nhan mailbox nhan mail.
-- Phase 6 - Test va van hanh production: NOT STARTED. Can bo sung test tu dong cho auth, account invite/reset, upload single/bulk, publish/delete statement, GM recoup/reverse, va regression dashboard client/admin.
+- Phase 6 - Test va van hanh production: DONE. Da co unit/contract test va production smoke test de kiem auth, upload single/bulk contract, publish/delete guard, GM recoup/reverse, dashboard client/admin va domain production.
 - Phase 7 - Bao cao/export doi soat: NOT STARTED. Chua co export PDF/Excel statement theo quy cho client/admin; neu can van hanh that nen them export statement, lich su thanh toan va download audit.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
@@ -178,4 +191,4 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
 - Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
 - Test flow nhac doi soat bang email that voi mot client co statement published, gom dry-run, gui ngay va retry loi.
-- Bo sung test tu dong cho API auth, upload, statement publish/delete neu dua vao van hanh that.
+- Neu bat dau Phase 7, them export PDF/Excel statement theo quy va dua `npm run test` vao checklist truoc moi lan deploy.
