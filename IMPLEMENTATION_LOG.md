@@ -206,6 +206,16 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npm run build` thanh cong sau khi them chuc nang cho console rail.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `0432f8d5-e2ae-46f9-b594-d78da961d706`.
 - 2026-09-10: `npm run test:production` thanh cong sau deploy console rail; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
+- 2026-09-10: Phase 7 export statement CODE DONE: them API export PDF/Excel cho client/admin theo `reportPeriodId`, chi client dung assignment moi tai duoc statement published/locked cua minh, admin tai duoc statement VND trong console.
+- 2026-09-10: Phase 7 them audit download: moi lan export ghi `statement_export_pdf` hoac `statement_export_excel` vao `audit_logs` kem client, period, currency, format va status.
+- 2026-09-10: Phase 7 them UI tai file: client co nut PDF/Excel o Statement moi nhat va Ledger; admin co nut PDF/Excel tren tung statement trong tab Statement.
+- 2026-09-10: `npx oxfmt --write lib\statement-export.ts app\api\admin\statements\[reportPeriodId]\export\route.ts app\api\statements\[reportPeriodId]\export\route.ts components\royalty-dashboard.tsx components\admin-console.tsx lib\admin-activity.ts tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npx oxlint lib\statement-export.ts app\api\admin\statements\[reportPeriodId]\export\route.ts app\api\statements\[reportPeriodId]\export\route.ts components\royalty-dashboard.tsx components\admin-console.tsx lib\admin-activity.ts tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 16 unit tests + 10 contract tests.
+- 2026-09-10: `npm run build` thanh cong, da dong goi route `/api/statements/:reportPeriodId/export` va `/api/admin/statements/:reportPeriodId/export`.
+- 2026-09-10: bo sung `tests/production-smoke.mjs` de verify export route cua admin/client deu tra `401` khi chua dang nhap.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `030ca940-09d4-4f44-8036-810ed4322eb6`.
+- 2026-09-10: `npm run test:production` thanh cong sau deploy Phase 7; `/login`, `/forgot-password`, `/login/verify` tra 200, cac API admin va export statement admin/client tra 401 khi chua dang nhap.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
@@ -220,7 +230,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 4 - Nhac doi soat ngay 15: DONE. Da co Cloudflare scheduled trigger ngay 15 hang thang, danh sach nguoi nhan theo client active, email Resend, send log, retry loi va preview/dry-run trong admin.
 - Phase 5 - Email production: DEPLOYED. Da co tab Email/API de verify Resend domain, SPF/DKIM, DMARC va gui email test that; can admin dang nhap va bam gui test de xac nhan mailbox nhan mail.
 - Phase 6 - Test va van hanh production: DONE. Da co unit/contract test va production smoke test de kiem auth, upload single/bulk contract, publish/delete guard, GM recoup/reverse, dashboard client/admin va domain production.
-- Phase 7 - Bao cao/export doi soat: NOT STARTED. Chua co export PDF/Excel statement theo quy cho client/admin; neu can van hanh that nen them export statement, lich su thanh toan va download audit.
+- Phase 7 - Bao cao/export doi soat: DEPLOYED. Da co export PDF/Excel statement theo quy cho client/admin va download audit; con nen tach tiep lich su thanh toan/payment marking thanh buoc tiep theo neu can van hanh doi soat that.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 
@@ -237,4 +247,4 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
 - Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
 - Test flow nhac doi soat bang email that voi mot client co statement published, gom dry-run, gui ngay va retry loi.
-- Neu bat dau Phase 7, them export PDF/Excel statement theo quy va dua `npm run test` vao checklist truoc moi lan deploy.
+- Phase 7 buoc tiep theo: them lich su thanh toan/payment marking, bien lai thanh toan va bo loc audit download theo client/quy.

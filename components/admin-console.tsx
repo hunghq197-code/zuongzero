@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Copy,
   Disc3,
+  Download,
   Edit3,
   EyeOff,
   FileSpreadsheet,
@@ -318,6 +319,13 @@ function statementStatusLabel(status: AdminStatementRow['status']) {
 function statementStatusFilterLabel(status: StatementStatusFilter) {
   if (status === 'all') return 'Tất cả status';
   return statementStatusLabel(status);
+}
+
+function adminStatementExportUrl(
+  reportPeriodId: string,
+  format: 'excel' | 'pdf',
+) {
+  return `/api/admin/statements/${encodeURIComponent(reportPeriodId)}/export?format=${format}`;
 }
 
 function settlementStatusLabel(status: AdminStatementRow['settlementStatus']) {
@@ -3075,6 +3083,26 @@ export function AdminConsole({
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-wrap gap-2">
+                                  <a
+                                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                                    href={adminStatementExportUrl(
+                                      statement.reportPeriodId,
+                                      'pdf',
+                                    )}
+                                  >
+                                    <Download className="size-4" />
+                                    PDF
+                                  </a>
+                                  <a
+                                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                                    href={adminStatementExportUrl(
+                                      statement.reportPeriodId,
+                                      'excel',
+                                    )}
+                                  >
+                                    <FileSpreadsheet className="size-4" />
+                                    Excel
+                                  </a>
                                   <Button
                                     className="h-9"
                                     onClick={() =>

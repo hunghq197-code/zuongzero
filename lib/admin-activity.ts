@@ -100,6 +100,8 @@ function activityActionLabel(action: string) {
     settlement_reminder_dry_run: 'Preview reminder',
     settlement_reminder_retry: 'Retry reminder',
     settlement_reminder_sent: 'Gửi reminder',
+    statement_export_excel: 'Tải Excel statement',
+    statement_export_pdf: 'Tải PDF statement',
     track_guarantee_archive: 'Archive GM',
     track_guarantee_created: 'Tạo GM',
     track_guarantee_reactivate: 'Kích hoạt GM',
@@ -131,6 +133,18 @@ function activitySummary(
     return compactParts([
       readString(metadata.period),
       readString(metadata.currency),
+      readString(metadata.status),
+    ]);
+  }
+
+  if (
+    action === 'statement_export_excel' ||
+    action === 'statement_export_pdf'
+  ) {
+    return compactParts([
+      readString(metadata.period),
+      readString(metadata.currency),
+      readString(metadata.format),
       readString(metadata.status),
     ]);
   }

@@ -45,6 +45,16 @@ const checks = [
     label: 'admin statements requires auth',
     path: '/api/admin/statements',
   },
+  {
+    expected: [401],
+    label: 'admin statement export requires auth',
+    path: '/api/admin/statements/smoke-report/export?format=pdf',
+  },
+  {
+    expected: [401],
+    label: 'client statement export requires auth',
+    path: '/api/statements/smoke-report/export?format=excel',
+  },
 ];
 
 let failures = 0;

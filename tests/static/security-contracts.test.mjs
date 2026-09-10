@@ -22,6 +22,7 @@ test('all admin API routes require signed-in admin authorization', () => {
     'app/api/admin/overview/route.ts',
     'app/api/admin/reminders/route.ts',
     'app/api/admin/statements/route.ts',
+    'app/api/admin/statements/[reportPeriodId]/export/route.ts',
     'app/api/admin/uploads/route.ts',
   ];
 
@@ -93,8 +94,34 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(clientDashboard, /ChartHoverTooltip/);
   assert.match(clientDashboard, /TablePagination/);
   assert.match(adminConsole, /activeAdminTab/);
+  assert.match(adminConsole, /adminStatementExportUrl/);
+  assert.match(clientDashboard, /statementExportUrl/);
   assert.match(musicBrand, /onSelect/);
   assert.match(musicBrand, /#client-statements/);
+});
+
+test('statement exports require scoped access and write audit logs', () => {
+  const exportBuilder = readSource('lib/statement-export.ts');
+  const adminExportRoute = readSource(
+    'app/api/admin/statements/[reportPeriodId]/export/route.ts',
+  );
+  const clientExportRoute = readSource(
+    'app/api/statements/[reportPeriodId]/export/route.ts',
+  );
+  const activity = readSource('lib/admin-activity.ts');
+
+  assert.match(exportBuilder, /buildStatementWorkbook/);
+  assert.match(exportBuilder, /buildStatementPdf/);
+  assert.match(exportBuilder, /auditStatementExport/);
+  assert.match(exportBuilder, /statement_export_/);
+  assert.match(adminExportRoute, /getAdminAccess/);
+  assert.match(adminExportRoute, /auditStatementExport/);
+  assert.match(clientExportRoute, /getClientPortalAccess/);
+  assert.match(clientExportRoute, /clientId: access\.clientId/);
+  assert.match(clientExportRoute, /publishedOnly: true/);
+  assert.match(clientExportRoute, /auditStatementExport/);
+  assert.match(activity, /Tải PDF statement/);
+  assert.match(activity, /Tải Excel statement/);
 });
 
 test('production email and reminder surfaces stay auditable', () => {

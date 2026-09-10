@@ -5,6 +5,7 @@ import {
   BarChart3,
   CheckCircle2,
   Disc3,
+  Download,
   FileSpreadsheet,
   Filter,
   KeyRound,
@@ -161,6 +162,10 @@ function settlementHelper(period: StatementPeriod) {
   }
 
   return `Chuyển quý sau ${formatMoney(period.carryForward)}`;
+}
+
+function statementExportUrl(reportPeriodId: string, format: 'excel' | 'pdf') {
+  return `/api/statements/${encodeURIComponent(reportPeriodId)}/export?format=${format}`;
 }
 
 function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
@@ -616,6 +621,22 @@ export function RoyaltyDashboard({
                         <p className="mt-1 text-xs text-muted-foreground">
                           {settlementHelper(period)}
                         </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <a
+                            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
+                            href={statementExportUrl(period.id, 'pdf')}
+                          >
+                            <Download className="size-3.5" />
+                            PDF
+                          </a>
+                          <a
+                            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
+                            href={statementExportUrl(period.id, 'excel')}
+                          >
+                            <FileSpreadsheet className="size-3.5" />
+                            Excel
+                          </a>
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -754,6 +775,7 @@ export function RoyaltyDashboard({
                       <TableHead>Payable</TableHead>
                       <TableHead>Đối soát</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Export</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -788,13 +810,31 @@ export function RoyaltyDashboard({
                               {statusLabel(period.status)}
                             </Badge>
                           </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-2">
+                              <a
+                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
+                                href={statementExportUrl(period.id, 'pdf')}
+                              >
+                                <Download className="size-3.5" />
+                                PDF
+                              </a>
+                              <a
+                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
+                                href={statementExportUrl(period.id, 'excel')}
+                              >
+                                <FileSpreadsheet className="size-3.5" />
+                                Excel
+                              </a>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
                         <TableCell
                           className="h-24 text-center text-sm text-muted-foreground"
-                          colSpan={8}
+                          colSpan={9}
                         >
                           Chưa có statement cho khách hàng này.
                         </TableCell>
