@@ -1,0 +1,1 @@
+ALTER TABLE `track_guarantees` ADD `track_external_id` text;

@@ -17,6 +17,7 @@ type GuaranteeBody = {
   clientId?: unknown;
   guaranteeId?: unknown;
   notes?: unknown;
+  trackExternalId?: unknown;
   trackTitle?: unknown;
 };
 
@@ -50,6 +51,7 @@ type GuaranteeTarget = {
   clientName: string;
   id: string;
   status: TrackGuaranteeStatus;
+  trackExternalId: string | null;
   trackTitle: string;
 };
 
@@ -122,6 +124,7 @@ async function createGuaranteeResponse(request: Request) {
   const clientId = cleanId(body.clientId);
   const trackTitle = cleanText(body.trackTitle, 220);
   const trackKey = normalizeTrackKey(trackTitle);
+  const trackExternalId = cleanText(body.trackExternalId, 120) || null;
   const amount = readVndAmount(body.amount);
   const notes = cleanText(body.notes, 500) || null;
 
@@ -138,10 +141,15 @@ async function createGuaranteeResponse(request: Request) {
     return jsonError('Khách hàng không hợp lệ hoặc đã lưu trữ.', 400);
   }
 
-  const duplicate = await findActiveGuarantee(env.DB, clientId, trackKey);
+  const duplicate = await findActiveGuarantee(
+    env.DB,
+    clientId,
+    trackKey,
+    trackExternalId,
+  );
   if (duplicate) {
     return jsonError(
-      'Bài hát này đang có GM active. Hãy archive GM cũ trước khi tạo mới.',
+      'Bài hát hoặc ID này đang có GM active. Hãy archive GM cũ trước khi tạo mới.',
       409,
     );
   }
@@ -163,6 +171,7 @@ async function createGuaranteeResponse(request: Request) {
          client_id,
          track_title,
          track_key,
+         track_external_id,
          initial_amount,
          recouped_amount,
          balance_amount,
@@ -172,12 +181,13 @@ async function createGuaranteeResponse(request: Request) {
          created_at,
          updated_at
        )
-       VALUES (?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, ?, ?)`,
     ).bind(
       guaranteeId,
       clientId,
       trackTitle,
       trackKey,
+      trackExternalId,
       amount,
       amount,
       notes,
@@ -195,6 +205,7 @@ async function createGuaranteeResponse(request: Request) {
         amount,
         clientCode: client.code,
         clientName: client.name,
+        trackExternalId,
         trackTitle,
       },
       now,
@@ -269,6 +280,7 @@ async function updateGuaranteeResponse(request: Request) {
         clientName: guarantee.clientName,
         previousStatus: guarantee.status,
         status: nextStatus,
+        trackExternalId: guarantee.trackExternalId,
         trackTitle: guarantee.trackTitle,
       },
       now,
@@ -277,8 +289,7 @@ async function updateGuaranteeResponse(request: Request) {
 
   return Response.json({
     guarantees: await listTrackGuarantees(env.DB),
-    message:
-      action === 'archive' ? 'Đã archive GM.' : 'Đã kích hoạt lại GM.',
+    message: action === 'archive' ? 'Đã archive GM.' : 'Đã kích hoạt lại GM.',
   });
 }
 
@@ -338,7 +349,25 @@ async function findActiveGuarantee(
   db: D1Database,
   clientId: string,
   trackKey: string,
+  trackExternalId: string | null,
 ) {
+  if (trackExternalId) {
+    return db
+      .prepare(
+        `SELECT id
+         FROM track_guarantees
+         WHERE client_id = ?
+           AND status = 'active'
+           AND (
+             track_key = ?
+             OR lower(track_external_id) = lower(?)
+           )
+         LIMIT 1`,
+      )
+      .bind(clientId, trackKey, trackExternalId)
+      .first<{ id: string }>();
+  }
+
   return db
     .prepare(
       `SELECT id
@@ -361,6 +390,7 @@ async function findGuarantee(db: D1Database, guaranteeId: string) {
          c.code AS clientCode,
          c.display_name AS clientName,
          g.track_title AS trackTitle,
+         g.track_external_id AS trackExternalId,
          g.status,
          g.balance_amount AS balanceAmount
        FROM track_guarantees g

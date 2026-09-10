@@ -64,6 +64,13 @@
       "when": 1789012687892,
       "tag": "0008_login_otps",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789015124671,
+      "tag": "0009_track_external_id",
+      "breakpoints": true
     }
   ]
 }

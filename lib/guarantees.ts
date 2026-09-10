@@ -14,6 +14,7 @@ export type TrackGuaranteeRow = {
   recoupedAmount: number;
   recoupmentCount: number;
   status: TrackGuaranteeStatus;
+  trackExternalId: string | null;
   trackKey: string;
   trackTitle: string;
   updatedAt: string;
@@ -49,6 +50,7 @@ type TrackGuaranteeDbRow = {
   recoupedAmount: number;
   recoupmentCount: number;
   status: TrackGuaranteeStatus;
+  trackExternalId: string | null;
   trackKey: string;
   trackTitle: string;
   updatedAt: string;
@@ -102,6 +104,7 @@ export async function listTrackGuarantees(
          c.code AS clientCode,
          c.display_name AS clientName,
          g.track_title AS trackTitle,
+         g.track_external_id AS trackExternalId,
          g.track_key AS trackKey,
          g.initial_amount AS initialAmount,
          g.recouped_amount AS recoupedAmount,
@@ -129,6 +132,7 @@ export async function listTrackGuarantees(
          c.code,
          c.display_name,
          g.track_title,
+         g.track_external_id,
          g.track_key,
          g.initial_amount,
          g.recouped_amount,
@@ -164,6 +168,7 @@ export async function listTrackGuarantees(
     recoupedAmount: Number(row.recoupedAmount) || 0,
     recoupmentCount: Number(row.recoupmentCount) || 0,
     status: row.status,
+    trackExternalId: row.trackExternalId,
     trackKey: row.trackKey,
     trackTitle: row.trackTitle,
     updatedAt: row.updatedAt,
@@ -346,8 +351,7 @@ export async function hasGuaranteeTables(db: D1Database) {
   const names = new Set(rows.results.map((row) => row.name));
 
   return (
-    names.has('track_guarantees') &&
-    names.has('track_guarantee_recoupments')
+    names.has('track_guarantees') && names.has('track_guarantee_recoupments')
   );
 }
 

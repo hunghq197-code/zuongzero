@@ -133,6 +133,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: da apply D1 migration Phase 4 `0007_settlement_reminders` bang lenh execute SQL truc tiep va deploy Worker Phase 4 len Cloudflare, version `f0df8f03-f149-4fbf-9900-71d9b3337d9b`; cron production `0 2 15 * *`.
 - 2026-09-10: da deploy Worker Phase 5 len Cloudflare, version `8900420f-75ec-4e0a-86b7-5f57de0d0da1`; production co tab Email va API `/api/admin/email`.
 - 2026-09-10: login OTP email DEPLOYED. Login bang email/password chi tao OTP challenge va gui ma 6 so qua Resend; session chi duoc tao sau khi submit OTP thanh cong tai `/login/verify`. D1 da co bang `auth_login_otps`; Worker version `82317518-1f59-4932-8d0c-a5afef2380c0`.
+- 2026-09-10: GM track external ID DEPLOYED. Form tao GM co them truong optional `ID bai hat`, luu vao `track_guarantees.track_external_id`, hien thi trong GM ledger/admin va dashboard client de tracking. Worker version `18dfb848-a3a1-4eb8-bb5c-228ec7fe2dd8`.
 
 ## Kiem thu da chay
 
@@ -178,6 +179,14 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: verify D1 remote bang `SELECT name FROM sqlite_master ...`; bang `auth_login_otps` va index `idx_auth_login_otps_challenge`, `idx_auth_login_otps_user_status`, `idx_auth_login_otps_expires` da ton tai.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `82317518-1f59-4932-8d0c-a5afef2380c0`.
 - 2026-09-10: `npm run test:production` thanh cong tren `https://artistportal.zuongzeroent.com`: `/login`, `/forgot-password`, `/login/verify` tra 200; cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
+- 2026-09-10: `npx drizzle-kit generate --name track_external_id`, tao migration `drizzle/0009_track_external_id.sql`.
+- 2026-09-10: `npx oxlint app\api\admin\guarantees\route.ts components\admin-console.tsx components\royalty-dashboard.tsx db\schema.ts lib\guarantees.ts tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 16 unit tests + 9 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau khi them `ID bai hat` cho GM.
+- 2026-09-10: `npx wrangler d1 execute royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc --file drizzle/0009_track_external_id.sql` thanh cong: 1 query executed, them cot `track_external_id`.
+- 2026-09-10: verify D1 remote bang `PRAGMA table_info(track_guarantees)`; cot `track_external_id` da ton tai.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `18dfb848-a3a1-4eb8-bb5c-228ec7fe2dd8`.
+- 2026-09-10: `npm run test:production` thanh cong sau deploy ID bai hat cho GM.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`

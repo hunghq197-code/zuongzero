@@ -113,6 +113,22 @@ test('forgot password sends the right recovery email for activated and pending a
   assert.match(forgotPasswordRoute, /genericForgotPasswordResponse/);
 });
 
+test('track guarantees keep an external song id for tracking', () => {
+  const guaranteesRoute = readSource('app/api/admin/guarantees/route.ts');
+  const adminConsole = readSource('components/admin-console.tsx');
+  const clientDashboard = readSource('components/royalty-dashboard.tsx');
+  const guarantees = readSource('lib/guarantees.ts');
+  const schema = readSource('db/schema.ts');
+
+  assert.match(schema, /track_external_id/);
+  assert.match(guarantees, /trackExternalId/);
+  assert.match(guaranteesRoute, /trackExternalId\?: unknown/);
+  assert.match(guaranteesRoute, /track_external_id/);
+  assert.match(adminConsole, /ID bài hát/);
+  assert.match(adminConsole, /setGuaranteeTrackExternalId/);
+  assert.match(clientDashboard, /trackExternalId/);
+});
+
 test('login requires an email OTP before creating a session', () => {
   const loginRoute = readSource('app/api/auth/login/route.ts');
   const verifyRoute = readSource('app/api/auth/verify-login/route.ts');

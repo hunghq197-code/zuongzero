@@ -314,6 +314,7 @@ export const trackGuarantees = sqliteTable(
       .references(() => clients.id),
     trackTitle: text('track_title').notNull(),
     trackKey: text('track_key').notNull(),
+    trackExternalId: text('track_external_id'),
     initialAmount: real('initial_amount').notNull(),
     recoupedAmount: real('recouped_amount').notNull().default(0),
     balanceAmount: real('balance_amount').notNull(),

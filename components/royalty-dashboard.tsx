@@ -645,7 +645,14 @@ export function RoyaltyDashboard({
                       {activeGuarantees.slice(0, 8).map((guarantee) => (
                         <TableRow key={guarantee.id}>
                           <TableCell className="font-medium">
-                            {guarantee.trackTitle}
+                            <span className="block">
+                              {guarantee.trackTitle}
+                            </span>
+                            {guarantee.trackExternalId ? (
+                              <span className="block text-xs text-muted-foreground">
+                                ID: {guarantee.trackExternalId}
+                              </span>
+                            ) : null}
                           </TableCell>
                           <TableCell>
                             {formatMoney(guarantee.initialAmount)}

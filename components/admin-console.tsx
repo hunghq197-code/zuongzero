@@ -616,6 +616,7 @@ export function AdminConsole({
   const [guaranteeClientId, setGuaranteeClientId] = useState(
     fallbackCustomers[0]?.id ?? '',
   );
+  const [guaranteeTrackExternalId, setGuaranteeTrackExternalId] = useState('');
   const [guaranteeTrackTitle, setGuaranteeTrackTitle] = useState('');
   const [guaranteeAmount, setGuaranteeAmount] = useState('');
   const [guaranteeNotes, setGuaranteeNotes] = useState('');
@@ -705,6 +706,7 @@ export function AdminConsole({
           guarantee.clientCode,
           guarantee.clientName,
           guarantee.notes,
+          guarantee.trackExternalId,
           guarantee.trackTitle,
           guarantee.status,
         ])
@@ -1317,6 +1319,7 @@ export function AdminConsole({
           amount,
           clientId: activeGuaranteeClient.id,
           notes: guaranteeNotes,
+          trackExternalId: guaranteeTrackExternalId,
           trackTitle: guaranteeTrackTitle,
         }),
         headers: {
@@ -1336,6 +1339,7 @@ export function AdminConsole({
       }
 
       setGuarantees(result.guarantees ?? []);
+      setGuaranteeTrackExternalId('');
       setGuaranteeTrackTitle('');
       setGuaranteeAmount('');
       setGuaranteeNotes('');
@@ -3179,6 +3183,23 @@ export function AdminConsole({
                       <div className="space-y-2">
                         <span
                           className="block text-sm font-medium"
+                          id="guarantee-track-id-label"
+                        >
+                          ID bài hát
+                        </span>
+                        <Input
+                          aria-labelledby="guarantee-track-id-label"
+                          onChange={(event) =>
+                            setGuaranteeTrackExternalId(event.target.value)
+                          }
+                          placeholder="ISRC / Track ID"
+                          value={guaranteeTrackExternalId}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <span
+                          className="block text-sm font-medium"
                           id="guarantee-amount-label"
                         >
                           Số tiền GM
@@ -3286,7 +3307,7 @@ export function AdminConsole({
                           onChange={(event) =>
                             setGuaranteeSearch(event.target.value)
                           }
-                          placeholder="Tìm client, bài hát..."
+                          placeholder="Tìm client, bài hát, ID..."
                           value={guaranteeSearch}
                         />
                       </div>
@@ -3349,8 +3370,13 @@ export function AdminConsole({
                                   <span className="block font-medium">
                                     {guarantee.trackTitle}
                                   </span>
+                                  {guarantee.trackExternalId ? (
+                                    <span className="block text-xs text-muted-foreground">
+                                      ID: {guarantee.trackExternalId}
+                                    </span>
+                                  ) : null}
                                   {guarantee.notes ? (
-                                    <span className="text-xs text-muted-foreground">
+                                    <span className="block text-xs text-muted-foreground">
                                       {guarantee.notes}
                                     </span>
                                   ) : null}
