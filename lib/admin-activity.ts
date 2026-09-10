@@ -96,6 +96,9 @@ function activityActionLabel(action: string) {
     managed_account_created: 'Tạo tài khoản',
     managed_account_status_updated: 'Cập nhật tài khoản',
     password_reset_requested: 'Gửi link đổi mật khẩu',
+    settlement_reminder_dry_run: 'Preview reminder',
+    settlement_reminder_retry: 'Retry reminder',
+    settlement_reminder_sent: 'Gửi reminder',
     track_guarantee_archive: 'Archive GM',
     track_guarantee_created: 'Tạo GM',
     track_guarantee_reactivate: 'Kích hoạt GM',
@@ -164,6 +167,19 @@ function activitySummary(
     ]);
   }
 
+  if (
+    action === 'settlement_reminder_dry_run' ||
+    action === 'settlement_reminder_retry' ||
+    action === 'settlement_reminder_sent'
+  ) {
+    return compactParts([
+      readString(metadata.period),
+      formatCount(metadata.targetCount, 'targets'),
+      formatCount(metadata.sentCount, 'sent'),
+      formatCount(metadata.failedCount, 'failed'),
+    ]);
+  }
+
   return '';
 }
 
@@ -192,6 +208,13 @@ function formatRows(value: unknown) {
   const rows = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(rows) || rows <= 0) return null;
   return `${new Intl.NumberFormat('en-US').format(rows)} rows`;
+}
+
+function formatCount(value: unknown, label: string) {
+  const count = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(count) || count <= 0) return null;
+
+  return `${new Intl.NumberFormat('en-US').format(count)} ${label}`;
 }
 
 function formatMoney(value: unknown) {

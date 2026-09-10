@@ -10,6 +10,11 @@ export type EmailDelivery =
   | { status: 'not_configured' }
   | { status: 'failed'; message: string };
 
+export type EmailRuntimeEnv = {
+  EMAIL_FROM?: string;
+  RESEND_API_KEY?: string;
+};
+
 export async function sendAccountInviteEmail(input: {
   displayName: string | null;
   email: string;
@@ -17,7 +22,8 @@ export async function sendAccountInviteEmail(input: {
   inviteUrl: string;
   role: 'admin' | 'client';
 }): Promise<EmailDelivery> {
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+  const config = emailConfig();
+  if (!config) {
     return { status: 'not_configured' };
   }
 
@@ -43,14 +49,14 @@ export async function sendAccountInviteEmail(input: {
   try {
     const response = await fetch('https://api.resend.com/emails', {
       body: JSON.stringify({
-        from: env.EMAIL_FROM,
+        from: config.from,
         html,
         subject,
         text,
         to: input.email,
       }),
       headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
       method: 'POST',
@@ -85,7 +91,8 @@ export async function sendPasswordResetEmail(input: {
   expiresAt: string;
   resetUrl: string;
 }): Promise<EmailDelivery> {
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+  const config = emailConfig();
+  if (!config) {
     return { status: 'not_configured' };
   }
 
@@ -110,14 +117,14 @@ export async function sendPasswordResetEmail(input: {
   try {
     const response = await fetch('https://api.resend.com/emails', {
       body: JSON.stringify({
-        from: env.EMAIL_FROM,
+        from: config.from,
         html,
         subject,
         text,
         to: input.email,
       }),
       headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
       method: 'POST',
@@ -141,6 +148,87 @@ export async function sendPasswordResetEmail(input: {
     return {
       message:
         'Email chưa gửi được. Link đặt lại mật khẩu đã được tạo để gửi thủ công.',
+      status: 'failed',
+    };
+  }
+}
+
+export async function sendSettlementReminderEmail(
+  input: {
+    carryForward: number;
+    clientCode: string;
+    clientName: string;
+    displayName: string | null;
+    email: string;
+    paidAmount: number;
+    payable: number;
+    periodLabel: string;
+    portalUrl: string;
+    settlementStatus: 'paid' | 'carried_forward';
+  },
+  runtimeEnv?: EmailRuntimeEnv,
+): Promise<EmailDelivery> {
+  const config = emailConfig(runtimeEnv);
+  if (!config) {
+    return { status: 'not_configured' };
+  }
+
+  const recipientName = input.displayName || input.email;
+  const settlementLine =
+    input.settlementStatus === 'paid'
+      ? `Số tiền đủ điều kiện thanh toán: ${formatVnd(input.paidAmount)}.`
+      : `Số dư hiện chuyển sang kỳ sau: ${formatVnd(input.carryForward)}.`;
+  const subject = `Nhắc đối soát ${input.periodLabel} - Zuong Zero Artist Portal`;
+  const text = [
+    `Xin chào ${recipientName},`,
+    '',
+    `Statement ${input.periodLabel} của ${input.clientName} đã được publish trên Zuong Zero Artist Portal.`,
+    `Tổng payable: ${formatVnd(input.payable)}.`,
+    settlementLine,
+    '',
+    `Đăng nhập để xem dashboard: ${input.portalUrl}`,
+  ].join('\n');
+  const html = [
+    `<p>Xin chào ${escapeHtml(recipientName)},</p>`,
+    `<p>Statement ${escapeHtml(input.periodLabel)} của <strong>${escapeHtml(input.clientName)}</strong> đã được publish trên Zuong Zero Artist Portal.</p>`,
+    `<p>Tổng payable: <strong>${escapeHtml(formatVnd(input.payable))}</strong>.</p>`,
+    `<p>${escapeHtml(settlementLine)}</p>`,
+    `<p><a href="${escapeHtml(input.portalUrl)}">Đăng nhập xem dashboard</a></p>`,
+    `<p style="color:#64748b;font-size:13px">Client code: ${escapeHtml(input.clientCode)}</p>`,
+  ].join('');
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      body: JSON.stringify({
+        from: config.from,
+        html,
+        subject,
+        text,
+        to: input.email,
+      }),
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    if (response.ok) return { status: 'sent' };
+
+    const detail = await response.text().catch(() => '');
+    console.error('[email:settlement-reminder] resend rejected request', {
+      detail: detail.slice(0, 500),
+      status: response.status,
+    });
+
+    return {
+      message: 'Email nhắc đối soát chưa gửi được.',
+      status: 'failed',
+    };
+  } catch (error) {
+    console.error('[email:settlement-reminder] delivery failed', error);
+    return {
+      message: 'Email nhắc đối soát chưa gửi được.',
       status: 'failed',
     };
   }
@@ -174,6 +262,22 @@ function formatInviteExpiry(expiresAt: string) {
     timeStyle: 'short',
     timeZone: 'Asia/Bangkok',
   }).format(new Date(expiresAt));
+}
+
+function emailConfig(runtimeEnv?: EmailRuntimeEnv) {
+  const apiKey = runtimeEnv?.RESEND_API_KEY ?? env.RESEND_API_KEY;
+  const from = runtimeEnv?.EMAIL_FROM ?? env.EMAIL_FROM;
+
+  if (!apiKey || !from) return null;
+  return { apiKey, from };
+}
+
+function formatVnd(value: number) {
+  return new Intl.NumberFormat('vi-VN', {
+    currency: 'VND',
+    maximumFractionDigits: 0,
+    style: 'currency',
+  }).format(value);
 }
 
 function escapeHtml(value: string) {

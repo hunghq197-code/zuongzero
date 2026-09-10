@@ -342,6 +342,72 @@ export const trackGuaranteeRecoupments = sqliteTable(
   ],
 );
 
+export const settlementReminderRuns = sqliteTable(
+  'settlement_reminder_runs',
+  {
+    id: text('id').primaryKey(),
+    period: text('period').notNull(),
+    reminderDate: text('reminder_date').notNull(),
+    runType: text('run_type', {
+      enum: ['scheduled', 'manual', 'dry_run', 'retry'],
+    }).notNull(),
+    status: text('status', {
+      enum: ['completed', 'partial', 'failed', 'skipped'],
+    }).notNull(),
+    requestedByUserId: text('requested_by_user_id').references(() => users.id),
+    targetCount: integer('target_count').notNull().default(0),
+    sentCount: integer('sent_count').notNull().default(0),
+    skippedCount: integer('skipped_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    notConfiguredCount: integer('not_configured_count').notNull().default(0),
+    errorSummary: text('error_summary'),
+    metadata: text('metadata'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_settlement_reminder_runs_period_date').on(
+      table.period,
+      table.reminderDate,
+    ),
+    index('idx_settlement_reminder_runs_created').on(table.createdAt),
+    index('idx_settlement_reminder_runs_status').on(table.status),
+  ],
+);
+
+export const settlementReminderDeliveries = sqliteTable(
+  'settlement_reminder_deliveries',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => settlementReminderRuns.id),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    email: text('email').notNull(),
+    period: text('period').notNull(),
+    status: text('status', {
+      enum: ['sent', 'failed', 'skipped', 'not_configured', 'dry_run'],
+    }).notNull(),
+    reason: text('reason'),
+    errorMessage: text('error_message'),
+    sentAt: text('sent_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_settlement_reminder_deliveries_run').on(table.runId),
+    index('idx_settlement_reminder_deliveries_client').on(table.clientId),
+    index('idx_settlement_reminder_deliveries_email_period').on(
+      table.email,
+      table.period,
+    ),
+  ],
+);
+
 export const accessRequests = sqliteTable(
   'access_requests',
   {

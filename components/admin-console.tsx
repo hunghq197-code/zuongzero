@@ -5,6 +5,7 @@ import {
   Activity,
   Archive,
   BarChart3,
+  BellRing,
   Copy,
   Disc3,
   Edit3,
@@ -20,6 +21,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Trash2,
@@ -83,14 +85,11 @@ import {
   type AdminStatementRow,
   type AdminTrendItem,
 } from '@/lib/admin-dashboard';
-import type {
-  TrackGuaranteeRow,
-  TrackGuaranteeStatus,
-} from '@/lib/guarantees';
+import type { TrackGuaranteeRow, TrackGuaranteeStatus } from '@/lib/guarantees';
 
 type AdminRole = 'super_admin' | 'admin';
 type ManagedAccountRole = 'admin' | 'client';
-type ClientAccessLevel = 'owner' | 'viewer' | 'finance';
+type ClientAccessLevel = 'owner' | 'viewer' | 'finance' | 'uploader';
 
 type ManagedAccountRow = {
   id: string;
@@ -123,6 +122,43 @@ type CustomerStatusFilter = 'all' | CustomerStatus;
 type StatementStatusFilter = 'all' | AdminStatementRow['status'];
 type GuaranteeStatusFilter = 'all' | TrackGuaranteeStatus;
 type UploadMode = 'single' | 'bulk';
+type ReminderActionState = 'idle' | 'saving' | 'saved' | 'failed';
+
+type ReminderRecipientRow = {
+  accessLevel: ClientAccessLevel;
+  canSend: boolean;
+  carryForward: number;
+  clientCode: string;
+  clientId: string;
+  clientName: string;
+  displayName: string | null;
+  email: string;
+  latestPublishedAt: string | null;
+  paidAmount: number;
+  payable: number;
+  period: string;
+  periodLabel: string;
+  settlementStatus: 'paid' | 'carried_forward' | 'no_statement';
+  statementStatus: 'published' | 'locked' | 'missing';
+  userId: string;
+};
+
+type ReminderRunRow = {
+  createdAt: string;
+  errorSummary: string | null;
+  failedCount: number;
+  id: string;
+  notConfiguredCount: number;
+  period: string;
+  periodLabel: string;
+  reminderDate: string;
+  runType: 'scheduled' | 'manual' | 'dry_run' | 'retry';
+  sentCount: number;
+  skippedCount: number;
+  status: 'completed' | 'partial' | 'failed' | 'skipped';
+  targetCount: number;
+  updatedAt: string;
+};
 
 const adminPalette = [
   '#00b8a9',
@@ -191,6 +227,7 @@ function accessLevelLabel(accessLevel: ClientAccessLevel | null) {
   const labels: Record<ClientAccessLevel, string> = {
     finance: 'Finance',
     owner: 'Owner',
+    uploader: 'Uploader',
     viewer: 'Viewer',
   };
 
@@ -265,6 +302,53 @@ function guaranteeStatusFilterLabel(status: GuaranteeStatusFilter) {
 function guaranteeBadgeClass(status: TrackGuaranteeStatus) {
   if (status === 'active') return 'rounded-lg bg-[#e7fbf7] text-[#00796f]';
   if (status === 'recouped') return 'rounded-lg bg-[#eef4ff] text-[#2f5da8]';
+  return 'rounded-lg bg-muted text-muted-foreground';
+}
+
+function reminderStatementLabel(
+  status: ReminderRecipientRow['statementStatus'],
+) {
+  if (status === 'published') return 'Published';
+  if (status === 'locked') return 'Locked';
+  return 'Chưa publish';
+}
+
+function reminderStatementClass(
+  status: ReminderRecipientRow['statementStatus'],
+) {
+  if (status === 'published') return 'rounded-lg bg-[#e7fbf7] text-[#00796f]';
+  if (status === 'locked') return 'rounded-lg bg-[#eef4ff] text-[#2f5da8]';
+  return 'rounded-lg bg-[#fff8e7] text-[#986200]';
+}
+
+function reminderSettlementLabel(
+  status: ReminderRecipientRow['settlementStatus'],
+) {
+  if (status === 'paid') return 'Đủ ngưỡng';
+  if (status === 'carried_forward') return 'Carry forward';
+  return 'Chưa có số liệu';
+}
+
+function reminderRunTypeLabel(type: ReminderRunRow['runType']) {
+  if (type === 'scheduled') return 'Tự động';
+  if (type === 'manual') return 'Gửi tay';
+  if (type === 'dry_run') return 'Dry-run';
+  return 'Retry';
+}
+
+function reminderRunStatusLabel(status: ReminderRunRow['status']) {
+  if (status === 'completed') return 'Completed';
+  if (status === 'partial') return 'Partial';
+  if (status === 'failed') return 'Failed';
+  return 'Skipped';
+}
+
+function reminderRunStatusClass(status: ReminderRunRow['status']) {
+  if (status === 'completed') {
+    return 'rounded-lg bg-[#e7fbf7] text-[#00796f]';
+  }
+  if (status === 'partial') return 'rounded-lg bg-[#fff8e7] text-[#986200]';
+  if (status === 'failed') return 'rounded-lg bg-[#fff2f0] text-[#a53a30]';
   return 'rounded-lg bg-muted text-muted-foreground';
 }
 
@@ -467,6 +551,13 @@ export function AdminConsole({
   >('idle');
   const [guaranteeMessage, setGuaranteeMessage] = useState('');
   const [activeGuaranteeActionId, setActiveGuaranteeActionId] = useState('');
+  const [reminderRecipients, setReminderRecipients] = useState<
+    ReminderRecipientRow[]
+  >([]);
+  const [reminderRuns, setReminderRuns] = useState<ReminderRunRow[]>([]);
+  const [reminderState, setReminderState] =
+    useState<ReminderActionState>('idle');
+  const [reminderMessage, setReminderMessage] = useState('');
 
   const activeClient =
     customers.find((client) => client.id === selectedClient) ??
@@ -556,6 +647,14 @@ export function AdminConsole({
     (total, guarantee) => total + guarantee.recoupedAmount,
     0,
   );
+  const sendableReminderCount = reminderRecipients.filter(
+    (recipient) => recipient.canSend,
+  ).length;
+  const missingReminderCount =
+    reminderRecipients.length - sendableReminderCount;
+  const latestRetryableReminderRun = reminderRuns.find(
+    (run) => run.failedCount + run.notConfiguredCount > 0,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -569,6 +668,7 @@ export function AdminConsole({
           statementsResponse,
           activityResponse,
           guaranteesResponse,
+          remindersResponse,
         ] = await Promise.all([
           fetchWithSession(
             isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers',
@@ -581,6 +681,9 @@ export function AdminConsole({
           ),
           fetchWithSession('/api/admin/activity?limit=12'),
           fetchWithSession('/api/admin/guarantees'),
+          fetchWithSession(
+            `/api/admin/reminders?period=${encodeURIComponent(selectedPeriod)}`,
+          ),
         ]);
         const result = await readJsonResponse<{
           accounts?: ManagedAccountRow[];
@@ -603,6 +706,11 @@ export function AdminConsole({
           guarantees?: TrackGuaranteeRow[];
           message?: string;
         }>(guaranteesResponse);
+        const remindersResult = await readJsonResponse<{
+          message?: string;
+          recipients?: ReminderRecipientRow[];
+          runs?: ReminderRunRow[];
+        }>(remindersResponse);
 
         if (!accountsResponse.ok) {
           throw new Error(result.message ?? 'Không thể tải dữ liệu admin.');
@@ -625,6 +733,11 @@ export function AdminConsole({
         if (!guaranteesResponse.ok) {
           throw new Error(
             guaranteesResult.message ?? 'Không thể tải danh sách GM.',
+          );
+        }
+        if (!remindersResponse.ok) {
+          throw new Error(
+            remindersResult.message ?? 'Không thể tải lịch nhắc đối soát.',
           );
         }
 
@@ -653,6 +766,8 @@ export function AdminConsole({
           setStatementRows(statementsResult.statements ?? []);
           setActivityRows(activityResult.activity ?? []);
           setGuarantees(guaranteesResult.guarantees ?? []);
+          setReminderRecipients(remindersResult.recipients ?? []);
+          setReminderRuns(remindersResult.runs ?? []);
           setOperationsMessage('');
           setOperationsState('ready');
         }
@@ -690,6 +805,7 @@ export function AdminConsole({
       statementsResponse,
       activityResponse,
       guaranteesResponse,
+      remindersResponse,
     ] = await Promise.all([
       fetchWithSession('/api/admin/customers'),
       fetchWithSession(
@@ -700,6 +816,9 @@ export function AdminConsole({
       ),
       fetchWithSession('/api/admin/activity?limit=12'),
       fetchWithSession('/api/admin/guarantees'),
+      fetchWithSession(
+        `/api/admin/reminders?period=${encodeURIComponent(period)}`,
+      ),
     ]);
     const customersResult = await readJsonResponse<{
       customers?: ManagedCustomerRow[];
@@ -721,6 +840,11 @@ export function AdminConsole({
       guarantees?: TrackGuaranteeRow[];
       message?: string;
     }>(guaranteesResponse);
+    const remindersResult = await readJsonResponse<{
+      message?: string;
+      recipients?: ReminderRecipientRow[];
+      runs?: ReminderRunRow[];
+    }>(remindersResponse);
 
     if (!customersResponse.ok) {
       throw new Error(
@@ -747,6 +871,11 @@ export function AdminConsole({
         guaranteesResult.message ?? 'Không thể tải lại danh sách GM.',
       );
     }
+    if (!remindersResponse.ok) {
+      throw new Error(
+        remindersResult.message ?? 'Không thể tải lại lịch nhắc đối soát.',
+      );
+    }
 
     const nextCustomers = customersResult.customers ?? fallbackCustomers;
     setCustomers(nextCustomers);
@@ -764,6 +893,8 @@ export function AdminConsole({
     setStatementRows(statementsResult.statements ?? []);
     setActivityRows(activityResult.activity ?? []);
     setGuarantees(guaranteesResult.guarantees ?? []);
+    setReminderRecipients(remindersResult.recipients ?? []);
+    setReminderRuns(remindersResult.runs ?? []);
   }
 
   async function createManagedAccount(event: { preventDefault: () => void }) {
@@ -1082,7 +1213,9 @@ export function AdminConsole({
       }>(response);
 
       if (!response.ok) {
-        throw new Error(result.message ?? `Không thể tạo GM (${response.status}).`);
+        throw new Error(
+          result.message ?? `Không thể tạo GM (${response.status}).`,
+        );
       }
 
       setGuarantees(result.guarantees ?? []);
@@ -1147,6 +1280,54 @@ export function AdminConsole({
       setGuaranteeState('failed');
     } finally {
       setActiveGuaranteeActionId('');
+    }
+  }
+
+  async function runSettlementReminderAction(
+    action: 'dry_run' | 'send' | 'retry_failed',
+    retryRunId?: string,
+  ) {
+    if (reminderState === 'saving') return;
+
+    setReminderState('saving');
+    setReminderMessage('');
+
+    try {
+      const response = await fetchWithSession('/api/admin/reminders', {
+        body: JSON.stringify({
+          action,
+          period: selectedPeriod,
+          retryRunId,
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      });
+      const result = await readJsonResponse<{
+        message?: string;
+        recipients?: ReminderRecipientRow[];
+        runs?: ReminderRunRow[];
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          result.message ?? `Không thể chạy reminder (${response.status}).`,
+        );
+      }
+
+      setReminderRecipients(result.recipients ?? []);
+      setReminderRuns(result.runs ?? []);
+      setReminderMessage(result.message ?? 'Đã chạy reminder.');
+      setReminderState('saved');
+      await refreshAdminSnapshot(selectedPeriod);
+    } catch (error) {
+      setReminderMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể chạy reminder ở thời điểm này.',
+      );
+      setReminderState('failed');
     }
   }
 
@@ -1504,6 +1685,13 @@ export function AdminConsole({
                   >
                     <WalletCards className="size-4" />
                     GM
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
+                    value="reminders"
+                  >
+                    <BellRing className="size-4" />
+                    Nhắc lịch
                   </TabsTrigger>
                   {isSuperAdmin ? (
                     <TabsTrigger
@@ -2773,7 +2961,10 @@ export function AdminConsole({
                       <Music2 className="size-6 text-primary" />
                     </div>
 
-                    <form className="mt-5 space-y-3" onSubmit={createTrackGuarantee}>
+                    <form
+                      className="mt-5 space-y-3"
+                      onSubmit={createTrackGuarantee}
+                    >
                       <div className="space-y-2">
                         <span className="block text-sm font-medium">
                           Khách hàng
@@ -2789,8 +2980,7 @@ export function AdminConsole({
                             className="music-control h-10 w-full"
                           >
                             <span className="flex-1 truncate text-left">
-                              {activeGuaranteeClient?.name ??
-                                'Chọn khách hàng'}
+                              {activeGuaranteeClient?.name ?? 'Chọn khách hàng'}
                             </span>
                           </SelectTrigger>
                           <SelectContent>
@@ -2861,9 +3051,7 @@ export function AdminConsole({
                         type="submit"
                       >
                         <WalletCards className="size-4" />
-                        {guaranteeState === 'saving'
-                          ? 'Đang lưu...'
-                          : 'Tạo GM'}
+                        {guaranteeState === 'saving' ? 'Đang lưu...' : 'Tạo GM'}
                       </Button>
                     </form>
 
@@ -2954,9 +3142,7 @@ export function AdminConsole({
                           className="music-control h-10 w-full bg-white"
                         >
                           <span className="flex-1 truncate text-left">
-                            {guaranteeStatusFilterLabel(
-                              guaranteeStatusFilter,
-                            )}
+                            {guaranteeStatusFilterLabel(guaranteeStatusFilter)}
                           </span>
                         </SelectTrigger>
                         <SelectContent>
@@ -3032,8 +3218,7 @@ export function AdminConsole({
                                     <Button
                                       className="h-9"
                                       disabled={
-                                        activeGuaranteeActionId ===
-                                        guarantee.id
+                                        activeGuaranteeActionId === guarantee.id
                                       }
                                       onClick={() => {
                                         void updateTrackGuarantee(
@@ -3051,8 +3236,7 @@ export function AdminConsole({
                                     <Button
                                       className="h-9"
                                       disabled={
-                                        activeGuaranteeActionId ===
-                                        guarantee.id
+                                        activeGuaranteeActionId === guarantee.id
                                       }
                                       onClick={() => {
                                         void updateTrackGuarantee(
@@ -3086,6 +3270,299 @@ export function AdminConsole({
                       </Table>
                     </div>
                   </section>
+                </section>
+
+                <ActivityLogPanel activityRows={activityRows} />
+              </TabsContent>
+
+              <TabsContent className="space-y-5" value="reminders">
+                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                  <section className="music-card p-4 md:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Settlement reminder
+                        </p>
+                        <h2 className="mt-1 text-lg font-semibold">
+                          Nhắc đối soát ngày 15
+                        </h2>
+                      </div>
+                      <BellRing className="size-6 text-primary" />
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Kỳ
+                        </p>
+                        <p className="font-display mt-2 text-xl font-semibold">
+                          {selectedPeriodLabel}
+                        </p>
+                      </div>
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Có thể gửi
+                        </p>
+                        <p className="font-display mt-2 text-xl font-semibold">
+                          {formatNumber(sendableReminderCount)}
+                        </p>
+                      </div>
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Chưa có statement
+                        </p>
+                        <p className="font-display mt-2 text-xl font-semibold">
+                          {formatNumber(missingReminderCount)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid gap-2">
+                      <Button
+                        className="h-10 justify-center"
+                        disabled={reminderState === 'saving'}
+                        onClick={() => {
+                          void runSettlementReminderAction('dry_run');
+                        }}
+                        type="button"
+                        variant="outline"
+                      >
+                        <EyeOff className="size-4" />
+                        Dry-run
+                      </Button>
+                      <Button
+                        className="h-10 justify-center bg-[#071118] text-white hover:bg-[#111827]"
+                        disabled={
+                          reminderState === 'saving' ||
+                          sendableReminderCount === 0
+                        }
+                        onClick={() => {
+                          void runSettlementReminderAction('send');
+                        }}
+                        type="button"
+                      >
+                        <Send className="size-4" />
+                        Gửi ngay
+                      </Button>
+                      <Button
+                        className="h-10 justify-center"
+                        disabled={
+                          reminderState === 'saving' ||
+                          !latestRetryableReminderRun
+                        }
+                        onClick={() => {
+                          if (latestRetryableReminderRun) {
+                            void runSettlementReminderAction(
+                              'retry_failed',
+                              latestRetryableReminderRun.id,
+                            );
+                          }
+                        }}
+                        type="button"
+                        variant="outline"
+                      >
+                        <RefreshCw className="size-4" />
+                        Retry lỗi
+                      </Button>
+                    </div>
+
+                    {reminderMessage ? (
+                      <p
+                        className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+                          reminderState === 'failed'
+                            ? 'border-[#f0b7b2] bg-[#fff2f0] text-[#a53a30]'
+                            : 'border-[#bce9e4] bg-[#f0fffc] text-[#047a70]'
+                        }`}
+                      >
+                        {reminderMessage}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-5 rounded-lg border border-border bg-white px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">
+                          Cron Cloudflare
+                        </span>
+                        <span className="font-medium">
+                          09:00 ngày 15 hằng tháng
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="music-card p-4 md:p-5">
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Recipient preview
+                        </p>
+                        <h2 className="mt-1 text-lg font-semibold">
+                          Danh sách nhận email
+                        </h2>
+                      </div>
+                      <Badge className="rounded-lg bg-[#e7fbf7] text-[#00796f]">
+                        {formatNumber(reminderRecipients.length)} accounts
+                      </Badge>
+                    </div>
+
+                    <div className="overflow-hidden rounded-lg border border-border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Client</TableHead>
+                            <TableHead>Account</TableHead>
+                            <TableHead>Statement</TableHead>
+                            <TableHead>Payable</TableHead>
+                            <TableHead>Settlement</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {reminderRecipients.length > 0 ? (
+                            reminderRecipients.map((recipient) => (
+                              <TableRow
+                                key={`${recipient.clientId}:${recipient.userId}`}
+                              >
+                                <TableCell className="font-medium">
+                                  <span className="block">
+                                    {recipient.clientName}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {recipient.clientCode}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <span className="block">
+                                    {recipient.email}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {accessLevelLabel(recipient.accessLevel)}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={reminderStatementClass(
+                                      recipient.statementStatus,
+                                    )}
+                                    variant="secondary"
+                                  >
+                                    {reminderStatementLabel(
+                                      recipient.statementStatus,
+                                    )}
+                                  </Badge>
+                                  {recipient.latestPublishedAt ? (
+                                    <span className="mt-1 block text-xs text-muted-foreground">
+                                      {formatAccountDate(
+                                        recipient.latestPublishedAt,
+                                      )}
+                                    </span>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell>
+                                  {formatMoney(recipient.payable)}
+                                </TableCell>
+                                <TableCell>
+                                  <span className="block font-medium">
+                                    {reminderSettlementLabel(
+                                      recipient.settlementStatus,
+                                    )}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {recipient.settlementStatus === 'paid'
+                                      ? formatMoney(recipient.paidAmount)
+                                      : formatMoney(recipient.carryForward)}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell
+                                className="h-24 text-center text-sm text-muted-foreground"
+                                colSpan={5}
+                              >
+                                Chưa có tài khoản client active.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </section>
+                </section>
+
+                <section className="music-card p-4 md:p-5">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        Send log
+                      </p>
+                      <h2 className="mt-1 text-lg font-semibold">
+                        Lịch sử reminder
+                      </h2>
+                    </div>
+                    <Mail className="size-5 text-primary" />
+                  </div>
+
+                  <div className="overflow-hidden rounded-lg border border-border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Thời gian</TableHead>
+                          <TableHead>Loại</TableHead>
+                          <TableHead>Kỳ</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Target</TableHead>
+                          <TableHead>Sent</TableHead>
+                          <TableHead>Failed</TableHead>
+                          <TableHead>Missing config</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {reminderRuns.length > 0 ? (
+                          reminderRuns.map((run) => (
+                            <TableRow key={run.id}>
+                              <TableCell>
+                                {formatAccountDate(run.createdAt)}
+                              </TableCell>
+                              <TableCell>
+                                {reminderRunTypeLabel(run.runType)}
+                              </TableCell>
+                              <TableCell>{run.periodLabel}</TableCell>
+                              <TableCell>
+                                <Badge
+                                  className={reminderRunStatusClass(run.status)}
+                                  variant="secondary"
+                                >
+                                  {reminderRunStatusLabel(run.status)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {formatNumber(run.targetCount)}
+                              </TableCell>
+                              <TableCell>
+                                {formatNumber(run.sentCount)}
+                              </TableCell>
+                              <TableCell>
+                                {formatNumber(run.failedCount)}
+                              </TableCell>
+                              <TableCell>
+                                {formatNumber(run.notConfiguredCount)}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell
+                              className="h-24 text-center text-sm text-muted-foreground"
+                              colSpan={8}
+                            >
+                              Chưa có lịch sử reminder.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </section>
 
                 <ActivityLogPanel activityRows={activityRows} />

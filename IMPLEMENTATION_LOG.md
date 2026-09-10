@@ -39,7 +39,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 ## Admin console
 
-- Co cac tab chinh: Tong quan, Khach hang, Statement, GM, Tai khoan.
+- Co cac tab chinh: Tong quan, Khach hang, Statement, GM, Nhac lich, Tai khoan.
 - Tong quan admin tong hop du lieu tat ca khach hang theo quy: doanh thu, so statement, so track, so artist, trend track, trend artist, top customers.
 - Ky doi soat dung quy lich duong, timezone UTC+7, ap dung dong bo cho admin va client.
 - Trang khach hang ho tro tim kiem, loc trang thai, sua thong tin, archive, xoa.
@@ -48,6 +48,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Tab GM ho tro tao Guaranteed Minimum theo khach hang + bai hat, theo doi tong GM, da recoup, balance con lai, archive/reactivate.
 - Khi upload statement, neu track trong file trung voi GM active thi doanh thu track do duoc tru dan vao balance GM; khoan tru hien thi o cot GM/net costs.
 - Khi replace/xoa statement, recoupment cu cua ky do duoc reverse de balance GM khong bi tru lap.
+- Tab Nhac lich ho tro preview danh sach khach hang active, dry-run, gui reminder doi soat ngay, retry email loi/thieu config va xem send log.
 - Them audit trail cho cac hanh dong quan tri quan trong.
 - Cap nhat UX/UI theo huong giai tri media/music, co sidebar, visual identity, controls gon hon.
 - Da sua loi tab admin bi lech va tranh tran ngang layout.
@@ -75,6 +76,18 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Audit log co nhan: tao GM, archive GM, kich hoat GM.
 - Co guard phong truong hop moi truong nao chua apply migration GM: dashboard van load va upload cu khong bi loi; tao/cap nhat GM se bao can chay migration 0006.
 
+## Phase 4 - Nhac doi soat ngay 15
+
+- Them bang D1 `settlement_reminder_runs` de luu moi lan chay reminder: period, ngay reminder, loai chay, status, so target/sent/skipped/failed/not configured.
+- Them bang D1 `settlement_reminder_deliveries` de luu log tung email theo client/user/status/error.
+- Them API admin `GET/POST /api/admin/reminders` de preview danh sach nguoi nhan, dry-run, gui ngay va retry email loi.
+- Danh sach nguoi nhan lay tu client active + user client active; chi gui email khi period da co statement `published`/`locked`, client chua co statement duoc tinh skipped.
+- Them email template nhac doi soat qua Resend, link ve `https://artistportal.zuongzeroent.com/login` theo default hoac `APP_BASE_URL` neu cau hinh.
+- Them Worker entry `worker.ts` de giu request web qua Vinext va bo sung scheduled event.
+- Them Cloudflare cron `0 2 15 * *`, tuong ung 09:00 ngay 15 hang thang theo gio Viet Nam/Bangkok.
+- Admin console co tab Nhac lich voi summary ky hien tai, so recipient co the gui, so khach chua co statement, nut Dry-run/Gui ngay/Retry loi va bang send log.
+- Audit log co nhan: preview reminder, gui reminder, retry reminder.
+
 ## Bao mat
 
 - Client khong co API upload/sua statement.
@@ -97,6 +110,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Lenh deploy: `npx wrangler deploy --config wrangler.cloudflare.jsonc`.
 - Chinh sach deploy tu 2026-09-09: chi deploy production bang Cloudflare/Wrangler va chi ban giao URL `https://artistportal.zuongzeroent.com`; khong deploy/ban giao qua URL `chatgpt.site`.
 - 2026-09-10: da apply D1 migration Phase 3 `0006_track_guarantees` bang lenh execute SQL truc tiep va deploy Worker Phase 3 len Cloudflare, version `dde0f42e-5d9d-4f20-b605-211fd38a8690`; production `/login` tra `200 OK`.
+- 2026-09-10: da apply D1 migration Phase 4 `0007_settlement_reminders` bang lenh execute SQL truc tiep va deploy Worker Phase 4 len Cloudflare, version `f0df8f03-f149-4fbf-9900-71d9b3337d9b`; cron production `0 2 15 * *`.
 
 ## Kiem thu da chay
 
@@ -109,6 +123,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: verify D1 remote bang `SELECT name FROM sqlite_master ...`; ca hai bang GM da ton tai, `guarantee_count = 0`, `recoupment_count = 0`.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `dde0f42e-5d9d-4f20-b605-211fd38a8690`.
 - 2026-09-10: verify production `https://royalty-dashboard.hung-hq197.workers.dev/login` tra `200 OK`, `https://artistportal.zuongzeroent.com/login` tra `200 OK`, `GET /api/admin/guarantees` khi chua dang nhap tra `401` dung ky vong.
+- 2026-09-10: `npx oxlint db\schema.ts lib\email.ts lib\settlement-reminders.ts app\api\admin\reminders\route.ts worker.ts vite.config.ts lib\admin-activity.ts components\admin-console.tsx env.d.ts`.
+- 2026-09-10: `npm run build` thanh cong voi route moi `/api/admin/reminders`.
+- 2026-09-10: `npx drizzle-kit generate --name settlement_reminders`, tao migration `drizzle/0007_settlement_reminders.sql`.
+- 2026-09-10: `npx wrangler d1 execute royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc --file drizzle/0007_settlement_reminders.sql` thanh cong: 8 queries executed, tao bang `settlement_reminder_runs` va `settlement_reminder_deliveries`.
+- 2026-09-10: verify D1 remote bang `SELECT name FROM sqlite_master ...`; hai bang reminder da ton tai, `run_count = 0`.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `f0df8f03-f149-4fbf-9900-71d9b3337d9b`, schedule `0 2 15 * *`.
+- 2026-09-10: verify production `https://artistportal.zuongzeroent.com/login` tra `200 OK`, `GET https://royalty-dashboard.hung-hq197.workers.dev/api/admin/reminders` khi chua dang nhap tra `401` dung ky vong.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
@@ -120,7 +141,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 1 - Quy + VND-only: DONE. Da chuyen ky bao cao tu thang sang quy `YYYY-Qn` va loai bo USD/ngoai te khoi luong import/dashboard.
 - Phase 2 - File tong + doi soat nguong 1.000.000 VND: DONE. Da ho tro upload Excel gom nhieu ma khach hang, tu SUM theo client va tinh da thanh toan/chua thanh toan + carry forward.
 - Phase 3 - GM/advance theo bai hat: DONE. Source da co migration/API/UI/recoup logic, D1 production da co hai bang GM, va Worker da deploy version `dde0f42e-5d9d-4f20-b605-211fd38a8690`.
-- Phase 4 - Nhac doi soat ngay 15: NOT STARTED. Can thiet ke Cloudflare scheduled trigger/cron ngay 15 hang thang, danh sach nguoi nhan theo client active, noi dung email/thong bao, log da gui, retry khi loi, va che do preview/dry-run cho admin.
+- Phase 4 - Nhac doi soat ngay 15: DONE. Da co Cloudflare scheduled trigger ngay 15 hang thang, danh sach nguoi nhan theo client active, email Resend, send log, retry loi va preview/dry-run trong admin.
 - Phase 5 - Email production: NOT STARTED / PARTIAL. Can verify domain gui email that trong Resend hoac provider duoc chon, cap nhat `EMAIL_FROM`, kiem tra SPF/DKIM/DMARC, test flow kich hoat tai khoan/reset password/thong bao doi soat bang email that.
 - Phase 6 - Test va van hanh production: NOT STARTED. Can bo sung test tu dong cho auth, account invite/reset, upload single/bulk, publish/delete statement, GM recoup/reverse, va regression dashboard client/admin.
 - Phase 7 - Bao cao/export doi soat: NOT STARTED. Chua co export PDF/Excel statement theo quy cho client/admin; neu can van hanh that nen them export statement, lich su thanh toan va download audit.
@@ -138,5 +159,5 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Test flow tao tai khoan client bang email that: tao tai khoan, nhan mail, kich hoat, doi mat khau, vao dashboard.
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
 - Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
-- Thiet ke cron/email ngay 15 hang thang sau khi domain email Resend san sang.
+- Test flow nhac doi soat bang email that voi mot client co statement published, gom dry-run, gui ngay va retry loi.
 - Bo sung test tu dong cho API auth, upload, statement publish/delete neu dua vao van hanh that.

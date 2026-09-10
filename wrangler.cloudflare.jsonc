@@ -12,6 +12,9 @@
   "observability": {
     "enabled": true,
   },
+  "triggers": {
+    "crons": ["0 2 15 * *"],
+  },
   "vars": {
     "AUTH_PROVIDER": "app-session",
   },
