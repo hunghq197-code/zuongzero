@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ChartHoverTooltip } from '@/components/chart-hover-tooltip';
 import {
   Dialog,
   DialogContent,
@@ -76,6 +77,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  TablePagination,
+  usePaginatedRows,
+} from '@/components/table-pagination';
 import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
 import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import { type AdminActivityRow } from '@/lib/admin-activity';
@@ -693,6 +698,12 @@ export function AdminConsole({
       );
     });
   }, [guarantees, guaranteeSearch, guaranteeStatusFilter]);
+  const customerPage = usePaginatedRows(visibleCustomers);
+  const accountPage = usePaginatedRows(managedAccounts);
+  const statementPage = usePaginatedRows(visibleStatementRows);
+  const guaranteePage = usePaginatedRows(visibleGuarantees);
+  const reminderRecipientPage = usePaginatedRows(reminderRecipients);
+  const reminderRunPage = usePaginatedRows(reminderRuns);
   const validation = useMemo(
     () => validateWorkbook(selectedFile, uploadMode),
     [selectedFile, uploadMode],
@@ -2142,7 +2153,7 @@ export function AdminConsole({
                       </TableHeader>
                       <TableBody>
                         {visibleCustomers.length > 0 ? (
-                          visibleCustomers.map((client) => (
+                          customerPage.visibleRows.map((client) => (
                             <TableRow key={client.id}>
                               <TableCell className="font-medium">
                                 <span className="block">{client.name}</span>
@@ -2230,6 +2241,7 @@ export function AdminConsole({
                         )}
                       </TableBody>
                     </Table>
+                    <TablePagination {...customerPage} itemLabel="khách hàng" />
                   </div>
 
                   <Dialog
@@ -2578,7 +2590,7 @@ export function AdminConsole({
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {managedAccounts.map((account) => (
+                              {accountPage.visibleRows.map((account) => (
                                 <TableRow
                                   key={`${account.id}:${account.clientId}`}
                                 >
@@ -2676,6 +2688,10 @@ export function AdminConsole({
                               ))}
                             </TableBody>
                           </Table>
+                          <TablePagination
+                            {...accountPage}
+                            itemLabel="tài khoản"
+                          />
                         </div>
                       ) : (
                         <p className="mt-4 rounded-lg border border-dashed border-border bg-white p-4 text-sm leading-6 text-muted-foreground">
@@ -2961,7 +2977,7 @@ export function AdminConsole({
                       </TableHeader>
                       <TableBody>
                         {visibleStatementRows.length > 0 ? (
-                          visibleStatementRows.map((statement) => (
+                          statementPage.visibleRows.map((statement) => (
                             <TableRow key={statement.reportPeriodId}>
                               <TableCell className="font-medium">
                                 <span className="block">
@@ -3118,6 +3134,7 @@ export function AdminConsole({
                         )}
                       </TableBody>
                     </Table>
+                    <TablePagination {...statementPage} itemLabel="statement" />
                   </section>
                 </section>
                 <ActivityLogPanel activityRows={activityRows} />
@@ -3363,7 +3380,7 @@ export function AdminConsole({
                         </TableHeader>
                         <TableBody>
                           {visibleGuarantees.length > 0 ? (
-                            visibleGuarantees.map((guarantee) => (
+                            guaranteePage.visibleRows.map((guarantee) => (
                               <TableRow key={guarantee.id}>
                                 <TableCell className="font-medium">
                                   <span className="block">
@@ -3467,6 +3484,7 @@ export function AdminConsole({
                           )}
                         </TableBody>
                       </Table>
+                      <TablePagination {...guaranteePage} itemLabel="GM" />
                     </div>
                   </section>
                 </section>
@@ -3617,62 +3635,64 @@ export function AdminConsole({
                         </TableHeader>
                         <TableBody>
                           {reminderRecipients.length > 0 ? (
-                            reminderRecipients.map((recipient) => (
-                              <TableRow
-                                key={`${recipient.clientId}:${recipient.userId}`}
-                              >
-                                <TableCell className="font-medium">
-                                  <span className="block">
-                                    {recipient.clientName}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {recipient.clientCode}
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  <span className="block">
-                                    {recipient.email}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {accessLevelLabel(recipient.accessLevel)}
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge
-                                    className={reminderStatementClass(
-                                      recipient.statementStatus,
-                                    )}
-                                    variant="secondary"
-                                  >
-                                    {reminderStatementLabel(
-                                      recipient.statementStatus,
-                                    )}
-                                  </Badge>
-                                  {recipient.latestPublishedAt ? (
-                                    <span className="mt-1 block text-xs text-muted-foreground">
-                                      {formatAccountDate(
-                                        recipient.latestPublishedAt,
+                            reminderRecipientPage.visibleRows.map(
+                              (recipient) => (
+                                <TableRow
+                                  key={`${recipient.clientId}:${recipient.userId}`}
+                                >
+                                  <TableCell className="font-medium">
+                                    <span className="block">
+                                      {recipient.clientName}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {recipient.clientCode}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="block">
+                                      {recipient.email}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {accessLevelLabel(recipient.accessLevel)}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      className={reminderStatementClass(
+                                        recipient.statementStatus,
+                                      )}
+                                      variant="secondary"
+                                    >
+                                      {reminderStatementLabel(
+                                        recipient.statementStatus,
+                                      )}
+                                    </Badge>
+                                    {recipient.latestPublishedAt ? (
+                                      <span className="mt-1 block text-xs text-muted-foreground">
+                                        {formatAccountDate(
+                                          recipient.latestPublishedAt,
+                                        )}
+                                      </span>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell>
+                                    {formatMoney(recipient.payable)}
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="block font-medium">
+                                      {reminderSettlementLabel(
+                                        recipient.settlementStatus,
                                       )}
                                     </span>
-                                  ) : null}
-                                </TableCell>
-                                <TableCell>
-                                  {formatMoney(recipient.payable)}
-                                </TableCell>
-                                <TableCell>
-                                  <span className="block font-medium">
-                                    {reminderSettlementLabel(
-                                      recipient.settlementStatus,
-                                    )}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {recipient.settlementStatus === 'paid'
-                                      ? formatMoney(recipient.paidAmount)
-                                      : formatMoney(recipient.carryForward)}
-                                  </span>
-                                </TableCell>
-                              </TableRow>
-                            ))
+                                    <span className="text-xs text-muted-foreground">
+                                      {recipient.settlementStatus === 'paid'
+                                        ? formatMoney(recipient.paidAmount)
+                                        : formatMoney(recipient.carryForward)}
+                                    </span>
+                                  </TableCell>
+                                </TableRow>
+                              ),
+                            )
                           ) : (
                             <TableRow>
                               <TableCell
@@ -3685,6 +3705,10 @@ export function AdminConsole({
                           )}
                         </TableBody>
                       </Table>
+                      <TablePagination
+                        {...reminderRecipientPage}
+                        itemLabel="tài khoản"
+                      />
                     </div>
                   </section>
                 </section>
@@ -3718,7 +3742,7 @@ export function AdminConsole({
                       </TableHeader>
                       <TableBody>
                         {reminderRuns.length > 0 ? (
-                          reminderRuns.map((run) => (
+                          reminderRunPage.visibleRows.map((run) => (
                             <TableRow key={run.id}>
                               <TableCell>
                                 {formatAccountDate(run.createdAt)}
@@ -3761,6 +3785,7 @@ export function AdminConsole({
                         )}
                       </TableBody>
                     </Table>
+                    <TablePagination {...reminderRunPage} itemLabel="lần gửi" />
                   </div>
                 </section>
 
@@ -4093,6 +4118,8 @@ function ActivityLogPanel({
 }: {
   activityRows: AdminActivityRow[];
 }) {
+  const activityPage = usePaginatedRows(activityRows);
+
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -4118,7 +4145,7 @@ function ActivityLogPanel({
           </TableHeader>
           <TableBody>
             {activityRows.length > 0 ? (
-              activityRows.map((row) => (
+              activityPage.visibleRows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>{formatAccountDate(row.createdAt)}</TableCell>
                   <TableCell className="font-medium">
@@ -4157,6 +4184,7 @@ function ActivityLogPanel({
             )}
           </TableBody>
         </Table>
+        <TablePagination {...activityPage} itemLabel="hoạt động" />
       </div>
     </section>
   );
@@ -4187,27 +4215,42 @@ function AdminRevenueTrendChart({
           <span key={tick}>{tick}%</span>
         ))}
       </div>
-      <div className="flex min-w-0 items-end gap-3 overflow-hidden pb-3">
-        {data.map((point, index) => (
-          <div
-            className="flex min-w-0 flex-1 flex-col items-center gap-2"
-            key={point.period}
-          >
-            <div className="flex h-[230px] w-full items-end border-b border-border">
-              <div
-                aria-label={`${point.label}: ${formatMoney(point.vnd)}`}
-                className="w-full rounded-t-md"
-                style={{
-                  backgroundColor: adminPalette[index % adminPalette.length],
-                  height: `${Math.max(4, (point.vnd / maxRevenue) * 100)}%`,
-                }}
-              />
+      <div className="flex min-w-0 items-end gap-3 overflow-visible pb-3">
+        {data.map((point, index) => {
+          const tooltip = `${point.label}: ${formatMoney(point.vnd)} / ${formatNumber(point.units)} units`;
+
+          return (
+            <div
+              className="flex min-w-0 flex-1 flex-col items-center gap-2"
+              key={point.period}
+            >
+              <div className="flex h-[230px] w-full items-end border-b border-border">
+                <div
+                  aria-label={`${point.label}: ${formatMoney(point.vnd)}`}
+                  className="group relative flex h-full w-full items-end"
+                  title={tooltip}
+                >
+                  <ChartHoverTooltip
+                    label={point.label}
+                    meta={`${formatNumber(point.units)} units`}
+                    value={formatMoney(point.vnd)}
+                  />
+                  <div
+                    className="w-full rounded-t-md transition-opacity group-hover:opacity-85"
+                    style={{
+                      backgroundColor:
+                        adminPalette[index % adminPalette.length],
+                      height: `${Math.max(4, (point.vnd / maxRevenue) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <span className="w-full truncate text-center text-xs text-muted-foreground">
+                {point.label.replace('202', "'2")}
+              </span>
             </div>
-            <span className="w-full truncate text-center text-xs text-muted-foreground">
-              {point.label.replace('202', "'2")}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -4218,6 +4261,8 @@ function TopCustomerList({
 }: {
   customers: AdminOverviewData['topCustomers'];
 }) {
+  const customerPage = usePaginatedRows(customers);
+
   if (customers.length === 0) {
     return (
       <div className="flex min-h-[310px] items-center justify-center rounded-lg border border-dashed border-border bg-white text-center">
@@ -4233,7 +4278,7 @@ function TopCustomerList({
 
   return (
     <div className="grid gap-3">
-      {customers.map((customer, index) => (
+      {customerPage.visibleRows.map((customer, index) => (
         <div
           className="rounded-lg border border-border bg-white p-3"
           key={customer.clientId}
@@ -4248,10 +4293,18 @@ function TopCustomerList({
               </p>
             </div>
             <Badge className="rounded-lg" variant="outline">
-              #{index + 1}
+              #{(customerPage.page - 1) * customerPage.pageSize + index + 1}
             </Badge>
           </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="group relative mt-3 h-2 rounded-full bg-muted"
+            title={`${customer.clientName}: ${formatMoney(customer.vnd)} / ${formatNumber(customer.units)} units`}
+          >
+            <ChartHoverTooltip
+              label={customer.clientName}
+              meta={`${formatNumber(customer.units)} units / ${formatNumber(customer.rowCount)} rows`}
+              value={formatMoney(customer.vnd)}
+            />
             <div
               className="h-full rounded-full bg-[#00b8a9]"
               style={{
@@ -4267,6 +4320,7 @@ function TopCustomerList({
           </div>
         </div>
       ))}
+      <TablePagination {...customerPage} itemLabel="khách hàng" />
     </div>
   );
 }
@@ -4280,6 +4334,8 @@ function TrendList({
   items: AdminTrendItem[];
   title: string;
 }) {
+  const itemPage = usePaginatedRows(items);
+
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -4288,7 +4344,7 @@ function TrendList({
       </div>
       {items.length > 0 ? (
         <div className="grid gap-3">
-          {items.slice(0, 6).map((item, index) => (
+          {itemPage.visibleRows.map((item, index) => (
             <div
               className="rounded-lg border border-border bg-white p-3"
               key={`${item.label}:${index}`}
@@ -4313,6 +4369,7 @@ function TrendList({
               </p>
             </div>
           ))}
+          <TablePagination {...itemPage} itemLabel="dòng" />
         </div>
       ) : (
         <div className="flex min-h-[190px] items-center justify-center rounded-lg border border-dashed border-border bg-white text-center">

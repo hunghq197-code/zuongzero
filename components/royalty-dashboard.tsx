@@ -22,6 +22,7 @@ import {
   EqualizerBars,
   BrandMark,
 } from '@/components/music-brand';
+import { ChartHoverTooltip } from '@/components/chart-hover-tooltip';
 import {
   Select,
   SelectContent,
@@ -38,6 +39,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  TablePagination,
+  usePaginatedRows,
+} from '@/components/table-pagination';
 import {
   breakdownSections,
   breakdownsByCurrency,
@@ -323,9 +328,13 @@ export function RoyaltyDashboard({
     (usesProvidedData ? emptyBreakdowns : breakdownsByCurrency.VND);
   const activeBreakdown = hasStatements ? activeBreakdownData[activeTab] : [];
   const trendData = hasStatements ? dashboardTrend : [];
-  const activeGuarantees = guarantees.filter(
-    (guarantee) => guarantee.status !== 'archived',
+  const activeGuarantees = useMemo(
+    () => guarantees.filter((guarantee) => guarantee.status !== 'archived'),
+    [guarantees],
   );
+  const statementPreviewPage = usePaginatedRows(clientPeriods);
+  const guaranteePage = usePaginatedRows(activeGuarantees);
+  const ledgerPage = usePaginatedRows(clientPeriods);
 
   useEffect(() => {
     const context =
@@ -587,7 +596,7 @@ export function RoyaltyDashboard({
                 </div>
                 <div className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border">
                   {clientPeriods.length > 0 ? (
-                    clientPeriods.slice(0, 6).map((period) => (
+                    statementPreviewPage.visibleRows.map((period) => (
                       <div className="bg-white px-3 py-3" key={period.id}>
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-sm font-medium">{period.label}</p>
@@ -613,6 +622,10 @@ export function RoyaltyDashboard({
                       </div>
                     </div>
                   )}
+                  <TablePagination
+                    {...statementPreviewPage}
+                    itemLabel="statement"
+                  />
                 </div>
               </section>
             </section>
@@ -642,7 +655,7 @@ export function RoyaltyDashboard({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {activeGuarantees.slice(0, 8).map((guarantee) => (
+                      {guaranteePage.visibleRows.map((guarantee) => (
                         <TableRow key={guarantee.id}>
                           <TableCell className="font-medium">
                             <span className="block">
@@ -672,6 +685,7 @@ export function RoyaltyDashboard({
                       ))}
                     </TableBody>
                   </Table>
+                  <TablePagination {...guaranteePage} itemLabel="GM" />
                 </div>
               </section>
             ) : null}
@@ -737,7 +751,7 @@ export function RoyaltyDashboard({
                   </TableHeader>
                   <TableBody>
                     {clientPeriods.length > 0 ? (
-                      clientPeriods.map((period) => (
+                      ledgerPage.visibleRows.map((period) => (
                         <TableRow key={period.id}>
                           <TableCell className="font-medium">
                             {period.label}: {period.clientName}
@@ -781,6 +795,7 @@ export function RoyaltyDashboard({
                     )}
                   </TableBody>
                 </Table>
+                <TablePagination {...ledgerPage} itemLabel="statement" />
               </div>
             </section>
           </div>
@@ -819,6 +834,8 @@ function BreakdownChart({
   chartType: BreakdownSection['chartType'];
   section: BreakdownSection;
 }) {
+  const breakdownPage = usePaginatedRows(data);
+
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_430px]">
       <div className="min-h-[360px] min-w-0 rounded-lg border border-border bg-white p-3">
@@ -845,7 +862,7 @@ function BreakdownChart({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((item) => (
+            {breakdownPage.visibleRows.map((item) => (
               <TableRow key={item.name}>
                 <TableCell className="font-medium">{item.name}</TableCell>
                 <TableCell>{formatMoney(item.value)}</TableCell>
@@ -855,6 +872,7 @@ function BreakdownChart({
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...breakdownPage} itemLabel="dòng" />
       </div>
     </div>
   );
@@ -871,9 +889,10 @@ function RevenueTrendChart({ data }: { data: typeof revenueTrend }) {
           <span key={tick}>{tick}%</span>
         ))}
       </div>
-      <div className="flex min-w-0 items-end gap-3 overflow-hidden pb-3">
+      <div className="flex min-w-0 items-end gap-3 overflow-visible pb-3">
         {data.map((item, index) => {
           const value = item.vnd;
+          const tooltip = `${item.label}: ${formatMoney(value)} / ${formatNumber(item.units)} units`;
           return (
             <div
               className="flex min-w-0 flex-1 flex-col items-center gap-2"
@@ -882,12 +901,22 @@ function RevenueTrendChart({ data }: { data: typeof revenueTrend }) {
               <div className="flex h-[250px] w-full items-end border-b border-border">
                 <div
                   aria-label={`${item.label}: ${formatMoney(value)}`}
-                  className="w-full rounded-t-md"
-                  style={{
-                    backgroundColor: palette[index % palette.length],
-                    height: `${Math.max(4, (value / maxValue) * 100)}%`,
-                  }}
-                />
+                  className="group relative flex h-full w-full items-end"
+                  title={tooltip}
+                >
+                  <ChartHoverTooltip
+                    label={item.label}
+                    meta={`${formatNumber(item.units)} units`}
+                    value={formatMoney(value)}
+                  />
+                  <div
+                    className="w-full rounded-t-md transition-opacity group-hover:opacity-85"
+                    style={{
+                      backgroundColor: palette[index % palette.length],
+                      height: `${Math.max(4, (value / maxValue) * 100)}%`,
+                    }}
+                  />
+                </div>
               </div>
               <span className="w-full truncate text-center text-xs text-muted-foreground">
                 {item.label.replace('202', "'2")}
@@ -910,7 +939,7 @@ function BarBreakdown({ data }: { data: BreakdownItem[] }) {
           <span key={tick}>{tick}%</span>
         ))}
       </div>
-      <div className="flex min-w-0 items-end gap-2 overflow-hidden pb-3">
+      <div className="flex min-w-0 items-end gap-2 overflow-visible pb-3">
         {data.map((item, index) => (
           <div
             className="flex min-w-0 flex-1 flex-col items-center gap-2"
@@ -919,12 +948,22 @@ function BarBreakdown({ data }: { data: BreakdownItem[] }) {
             <div className="flex h-[250px] w-full items-end border-b border-border">
               <div
                 aria-label={`${item.name}: ${formatMoney(item.value)}`}
-                className="w-full rounded-t-md"
-                style={{
-                  backgroundColor: palette[index % palette.length],
-                  height: `${Math.max(4, (item.value / maxValue) * 100)}%`,
-                }}
-              />
+                className="group relative flex h-full w-full items-end"
+                title={`${item.name}: ${formatMoney(item.value)} / ${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+              >
+                <ChartHoverTooltip
+                  label={item.name}
+                  meta={`${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+                  value={formatMoney(item.value)}
+                />
+                <div
+                  className="w-full rounded-t-md transition-opacity group-hover:opacity-85"
+                  style={{
+                    backgroundColor: palette[index % palette.length],
+                    height: `${Math.max(4, (item.value / maxValue) * 100)}%`,
+                  }}
+                />
+              </div>
             </div>
             <span className="w-full truncate text-center text-xs text-muted-foreground">
               {item.name}
@@ -951,7 +990,15 @@ function RankedBreakdown({ data }: { data: BreakdownItem[] }) {
               {formatMoney(item.value)}
             </span>
           </div>
-          <div className="h-3 overflow-hidden rounded-full bg-muted">
+          <div
+            className="group relative h-3 rounded-full bg-muted"
+            title={`${item.name}: ${formatMoney(item.value)} / ${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+          >
+            <ChartHoverTooltip
+              label={item.name}
+              meta={`${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+              value={formatMoney(item.value)}
+            />
             <div
               aria-label={`${item.name}: ${item.percentage.toFixed(2)}%`}
               className="h-full rounded-full"
@@ -968,6 +1015,8 @@ function RankedBreakdown({ data }: { data: BreakdownItem[] }) {
 }
 
 function DonutChart({ data }: { data: BreakdownItem[] }) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
   if (data.length === 0) {
     return (
       <div className="flex h-full min-h-[330px] items-center justify-center">
@@ -981,29 +1030,108 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
     );
   }
 
-  const stops = data
-    .map((item, index) => {
-      const start = data
-        .slice(0, index)
-        .reduce((total, entry) => total + entry.percentage, 0);
-      const end = start + item.percentage;
-      const color = palette[index % palette.length];
-      return `${color} ${start}% ${end}%`;
-    })
-    .join(', ');
+  const circumference = 2 * Math.PI * 88;
+  const donutSegments = data.reduce(
+    (state, item, index) => {
+      const segment = (item.percentage / 100) * circumference;
+      const dash = Math.max(0, segment - (data.length > 1 ? 2 : 0));
+
+      return {
+        offset: state.offset + segment,
+        segments: [
+          ...state.segments,
+          {
+            dash,
+            dashOffset: -state.offset,
+            index,
+            item,
+          },
+        ],
+      };
+    },
+    {
+      offset: 0,
+      segments: [] as Array<{
+        dash: number;
+        dashOffset: number;
+        index: number;
+        item: BreakdownItem;
+      }>,
+    },
+  ).segments;
+  const activeItem = activeIndex === null ? null : (data[activeIndex] ?? null);
 
   return (
     <div className="flex h-full min-h-[330px] flex-col items-center justify-center gap-4">
-      <div
-        aria-label="Revenue share"
-        className="relative size-[230px] rounded-full"
-        style={{ background: `conic-gradient(${stops})` }}
-      >
-        <div className="absolute inset-[64px] rounded-full border border-border bg-white" />
+      <div className="relative size-[240px]">
+        <svg
+          aria-label="Revenue share"
+          className="size-full -rotate-90 overflow-visible"
+          viewBox="0 0 240 240"
+        >
+          <circle
+            className="stroke-muted"
+            cx="120"
+            cy="120"
+            fill="none"
+            r="88"
+            strokeWidth="48"
+          />
+          {donutSegments.map(({ dash, dashOffset, index, item }) => (
+            <circle
+              aria-label={`${item.name}: ${formatMoney(item.value)}, ${item.percentage.toFixed(2)}%`}
+              className="cursor-pointer transition-opacity hover:opacity-80"
+              cx="120"
+              cy="120"
+              fill="none"
+              key={item.name}
+              onMouseEnter={() => setActiveIndex(index)}
+              onMouseLeave={() => setActiveIndex(null)}
+              r="88"
+              stroke={palette[index % palette.length]}
+              strokeDasharray={`${dash} ${circumference}`}
+              strokeDashoffset={dashOffset}
+              strokeLinecap="butt"
+              strokeWidth="48"
+            >
+              <title>
+                {item.name}: {formatMoney(item.value)} /{' '}
+                {formatNumber(item.units)} units / {item.percentage.toFixed(2)}%
+              </title>
+            </circle>
+          ))}
+        </svg>
+        <div className="absolute inset-[64px] flex flex-col items-center justify-center rounded-full border border-border bg-white px-3 text-center">
+          {activeItem ? (
+            <>
+              <p className="w-full truncate text-xs font-medium text-muted-foreground">
+                {activeItem.name}
+              </p>
+              <p className="font-display mt-1 text-lg font-semibold">
+                {activeItem.percentage.toFixed(2)}%
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatMoney(activeItem.value)}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-medium text-muted-foreground">
+                Total share
+              </p>
+              <p className="font-display mt-1 text-lg font-semibold">100%</p>
+            </>
+          )}
+        </div>
       </div>
       <div className="grid w-full gap-2 sm:grid-cols-2">
         {data.map((item, index) => (
-          <div className="flex min-w-0 items-center gap-2" key={item.name}>
+          <div
+            className="flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 transition hover:bg-muted/60"
+            key={item.name}
+            onMouseEnter={() => setActiveIndex(index)}
+            onMouseLeave={() => setActiveIndex(null)}
+          >
             <span
               className="size-3 shrink-0 rounded-sm"
               style={{ backgroundColor: palette[index % palette.length] }}

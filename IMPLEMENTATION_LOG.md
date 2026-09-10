@@ -193,6 +193,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npm run build` thanh cong sau fix admin dashboard initial loading.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `09e2ca81-8131-4475-88c3-774b5ca43abc`.
 - 2026-09-10: `npm run test:production` thanh cong sau deploy; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
+- 2026-09-10: them hover tooltip cho chart client/admin: revenue bars, breakdown bars/ranked/donut va top customer bars hien value/units/percentage khi hover.
+- 2026-09-10: them pagination 10 dong/trang cho cac bang/list dai: client statements, client GM, breakdown table, admin customers, accounts, statements, GM, reminder recipients/runs va audit trail.
+- 2026-09-10: `npx oxlint components\admin-console.tsx components\royalty-dashboard.tsx components\table-pagination.tsx components\chart-hover-tooltip.tsx tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 16 unit tests + 9 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau khi them chart tooltip va pagination.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `af9b19ea-334d-4c52-850b-8f71180aaa0f`.
+- 2026-09-10: `npm run test:production` thanh cong sau deploy chart tooltip/pagination; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`

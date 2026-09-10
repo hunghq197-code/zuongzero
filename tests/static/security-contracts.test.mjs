@@ -87,6 +87,10 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(adminConsole, /isInitialLoading/);
   assert.match(adminConsole, /emptyAdminOverviewData\(initialPeriod\)/);
   assert.doesNotMatch(adminConsole, /fallbackCustomers/);
+  assert.match(adminConsole, /ChartHoverTooltip/);
+  assert.match(adminConsole, /TablePagination/);
+  assert.match(clientDashboard, /ChartHoverTooltip/);
+  assert.match(clientDashboard, /TablePagination/);
 });
 
 test('production email and reminder surfaces stay auditable', () => {
