@@ -16,6 +16,11 @@ const checks = [
     path: '/forgot-password',
   },
   {
+    expected: [200],
+    label: 'login OTP page',
+    path: '/login/verify',
+  },
+  {
     expected: [401],
     label: 'admin overview requires auth',
     path: '/api/admin/overview',

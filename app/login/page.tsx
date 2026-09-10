@@ -231,6 +231,9 @@ function resolveErrorMessage(error: string | null) {
   if (error === 'invalid') {
     return 'Email hoặc mật khẩu không đúng.';
   }
+  if (error === 'otp_delivery') {
+    return 'Không thể gửi mã OTP lúc này. Vui lòng thử lại sau ít phút.';
+  }
 
   return null;
 }

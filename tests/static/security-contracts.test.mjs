@@ -112,3 +112,22 @@ test('forgot password sends the right recovery email for activated and pending a
   assert.match(forgotPasswordRoute, /sendAccountInviteEmail/);
   assert.match(forgotPasswordRoute, /genericForgotPasswordResponse/);
 });
+
+test('login requires an email OTP before creating a session', () => {
+  const loginRoute = readSource('app/api/auth/login/route.ts');
+  const verifyRoute = readSource('app/api/auth/verify-login/route.ts');
+  const verifyPage = readSource('app/login/verify/page.tsx');
+  const schema = readSource('db/schema.ts');
+
+  assert.match(schema, /auth_login_otps/);
+  assert.match(loginRoute, /createLoginOtpChallenge/);
+  assert.match(loginRoute, /sendLoginOtpEmail/);
+  assert.doesNotMatch(loginRoute, /buildSessionCookie/);
+  assert.doesNotMatch(loginRoute, /INSERT INTO auth_sessions/);
+  assert.match(verifyRoute, /auth_login_otps/);
+  assert.match(verifyRoute, /LOGIN_OTP_MAX_ATTEMPTS/);
+  assert.match(verifyRoute, /buildSessionCookie/);
+  assert.match(verifyRoute, /INSERT INTO auth_sessions/);
+  assert.match(verifyPage, /InputOTP/);
+  assert.match(verifyPage, /\/api\/auth\/verify-login/);
+});

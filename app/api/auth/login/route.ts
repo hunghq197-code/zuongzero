@@ -1,22 +1,20 @@
 import { env } from 'cloudflare:workers';
 
 import {
-  buildSessionCookie,
-  createSessionToken,
-  hashOptionalRequestValue,
   hashSessionToken,
   safeRelativeReturnPath,
-  SESSION_MAX_AGE_SECONDS,
   verifyPassword,
   verifyPlainSecret,
 } from '@/lib/app-auth';
 import { getConfiguredSuperAdminEmails } from '@/lib/admin-auth';
+import { loginOtpDeliveryMessage, sendLoginOtpEmail } from '@/lib/email';
 import {
   accountUserIdForEmail,
   cleanText,
   isValidEmail,
   normalizeEmail,
 } from '@/lib/identity';
+import { createLoginOtpChallenge } from '@/lib/login-otp';
 import { ensureUserRecord, type AppUserRole } from '@/lib/user-records';
 
 type StoredCredentialRow = {
@@ -58,51 +56,37 @@ export async function POST(request: Request) {
     return redirectToLogin(request, 'invalid', email, returnTo);
   }
 
-  const now = new Date();
-  const token = createSessionToken();
-  const tokenHash = await hashSessionToken(token);
-  const sessionId = crypto.randomUUID();
-  const expiresAt = new Date(
-    now.getTime() + SESSION_MAX_AGE_SECONDS * 1000,
-  ).toISOString();
+  const challenge = await createLoginOtpChallenge(env.DB, {
+    email: authenticatedUser.email,
+    ip: request.headers.get('cf-connecting-ip'),
+    returnTo,
+    userAgent: request.headers.get('user-agent'),
+    userId: authenticatedUser.id,
+  });
+  const delivery = await sendLoginOtpEmail({
+    code: challenge.code,
+    displayName: authenticatedUser.displayName,
+    email: authenticatedUser.email,
+    expiresAt: challenge.expiresAt,
+  });
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO auth_sessions (
-         id,
-         user_id,
-         token_hash,
-         user_agent_hash,
-         ip_hash,
-         created_at,
-         last_seen_at,
-         expires_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      sessionId,
-      authenticatedUser.id,
-      tokenHash,
-      await hashOptionalRequestValue(request.headers.get('user-agent')),
-      await hashOptionalRequestValue(request.headers.get('cf-connecting-ip')),
-      now.toISOString(),
-      now.toISOString(),
-      expiresAt,
-    ),
-    env.DB.prepare(
-      `UPDATE users
-       SET last_seen_at = ?
-       WHERE id = ?`,
-    ).bind(now.toISOString(), authenticatedUser.id),
-  ]);
+  if (delivery.status !== 'sent') {
+    await revokeLoginOtpChallenge(challenge.challengeToken);
+    console.error('[login-otp] delivery failed', {
+      delivery: loginOtpDeliveryMessage(delivery),
+      userId: authenticatedUser.id,
+    });
+    return redirectToLogin(request, 'otp_delivery', email, returnTo);
+  }
 
-  await pruneExpiredSessions(now.toISOString());
+  console.info('[login-otp] challenge sent', {
+    userId: authenticatedUser.id,
+  });
 
-  const destination = resolveDestination(returnTo, authenticatedUser.role);
-  const response = navigationResponse(new URL(destination, request.url));
-  response.headers.append('Set-Cookie', buildSessionCookie(token, request.url));
+  const verifyUrl = new URL('/login/verify', request.url);
+  verifyUrl.searchParams.set('challenge', challenge.challengeToken);
 
-  return response;
+  return navigationResponse(verifyUrl);
 }
 
 async function authenticateUser(email: string, password: string) {
@@ -117,13 +101,18 @@ async function authenticateUser(email: string, password: string) {
       return null;
     }
 
-    return ensureUserRecord(env.DB, {
+    const user = await ensureUserRecord(env.DB, {
       displayName: 'Super admin',
       email,
       lastSeenAt: new Date().toISOString(),
       role: 'super_admin',
       userId: accountUserIdForEmail(email),
     });
+
+    return {
+      ...user,
+      displayName: 'Super admin',
+    };
   }
 
   const storedUser = await env.DB.prepare(
@@ -149,25 +138,9 @@ async function authenticateUser(email: string, password: string) {
   return storedUser;
 }
 
-async function pruneExpiredSessions(now: string) {
-  await env.DB.prepare(
-    `DELETE FROM auth_sessions
-     WHERE expires_at <= ?`,
-  )
-    .bind(now)
-    .run();
-}
-
-function resolveDestination(returnTo: string, role: AppUserRole) {
-  if (returnTo !== '/') return returnTo;
-  if (role === 'super_admin' || role === 'admin') return '/admin';
-
-  return '/';
-}
-
 function redirectToLogin(
   request: Request,
-  error: 'config' | 'invalid',
+  error: 'config' | 'invalid' | 'otp_delivery',
   email: string,
   returnTo: string,
 ) {
@@ -177,6 +150,17 @@ function redirectToLogin(
   if (returnTo !== '/') url.searchParams.set('return_to', returnTo);
 
   return navigationResponse(url);
+}
+
+async function revokeLoginOtpChallenge(challengeToken: string) {
+  await env.DB.prepare(
+    `UPDATE auth_login_otps
+     SET status = 'revoked'
+     WHERE challenge_token_hash = ?
+       AND status = 'pending'`,
+  )
+    .bind(await hashSessionToken(challengeToken))
+    .run();
 }
 
 function readText(value: FormDataEntryValue | null) {

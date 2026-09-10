@@ -4,6 +4,7 @@ import {
   ACCOUNT_INVITE_MAX_AGE_DAYS,
   PASSWORD_RESET_MAX_AGE_MINUTES,
 } from '@/lib/account-invites';
+import { LOGIN_OTP_MAX_AGE_MINUTES } from '@/lib/login-otp';
 
 export type EmailDelivery =
   | { status: 'sent' }
@@ -166,6 +167,74 @@ export async function sendPasswordResetEmail(input: {
     return {
       message:
         'Email chưa gửi được. Link đặt lại mật khẩu đã được tạo để gửi thủ công.',
+      status: 'failed',
+    };
+  }
+}
+
+export async function sendLoginOtpEmail(input: {
+  code: string;
+  displayName: string | null;
+  email: string;
+  expiresAt: string;
+}): Promise<EmailDelivery> {
+  const config = emailConfig();
+  if (!config) {
+    return { status: 'not_configured' };
+  }
+
+  const expiresLabel = formatInviteExpiry(input.expiresAt);
+  const recipientName = input.displayName || input.email;
+  const subject = 'Mã OTP đăng nhập Zuong Zero Artist Portal';
+  const text = [
+    `Xin chào ${recipientName},`,
+    '',
+    `Mã OTP đăng nhập của bạn là: ${input.code}`,
+    '',
+    `Mã có hiệu lực đến ${expiresLabel} và chỉ dùng một lần.`,
+    'Nếu bạn không yêu cầu đăng nhập, hãy bỏ qua email này.',
+  ].join('\n');
+  const html = [
+    `<p>Xin chào ${escapeHtml(recipientName)},</p>`,
+    '<p>Mã OTP đăng nhập Zuong Zero Artist Portal của bạn là:</p>',
+    `<p style="font-size:28px;letter-spacing:6px;font-weight:700">${escapeHtml(input.code)}</p>`,
+    `<p>Mã có hiệu lực đến ${escapeHtml(expiresLabel)} và chỉ dùng một lần.</p>`,
+    '<p>Nếu bạn không yêu cầu đăng nhập, hãy bỏ qua email này.</p>',
+  ].join('');
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      body: JSON.stringify({
+        from: config.from,
+        html,
+        subject,
+        text,
+        to: input.email,
+      }),
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `login-otp:${crypto.randomUUID()}`,
+      },
+      method: 'POST',
+    });
+
+    if (response.ok) return { status: 'sent' };
+
+    const detail = await response.text().catch(() => '');
+    console.error('[email:login-otp] resend rejected request', {
+      detail: detail.slice(0, 500),
+      status: response.status,
+    });
+
+    return {
+      message: 'Email OTP chưa gửi được. Hãy thử lại sau ít phút.',
+      status: 'failed',
+    };
+  } catch (error) {
+    console.error('[email:login-otp] delivery failed', error);
+    return {
+      message: 'Email OTP chưa gửi được. Hãy thử lại sau ít phút.',
       status: 'failed',
     };
   }
@@ -336,6 +405,17 @@ export function passwordResetDeliveryMessage(delivery: EmailDelivery) {
   }
   if (delivery.status === 'not_configured') {
     return 'Đã tạo link đặt lại mật khẩu. Chưa cấu hình email tự động nên hãy gửi link thủ công.';
+  }
+
+  return delivery.message;
+}
+
+export function loginOtpDeliveryMessage(delivery: EmailDelivery) {
+  if (delivery.status === 'sent') {
+    return `Đã gửi mã OTP đăng nhập. Mã có hiệu lực ${LOGIN_OTP_MAX_AGE_MINUTES} phút.`;
+  }
+  if (delivery.status === 'not_configured') {
+    return 'Chưa cấu hình email tự động nên chưa thể gửi mã OTP.';
   }
 
   return delivery.message;

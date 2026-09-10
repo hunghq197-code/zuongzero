@@ -115,6 +115,34 @@ export const authSessions = sqliteTable(
   ],
 );
 
+export const authLoginOtps = sqliteTable(
+  'auth_login_otps',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    email: text('email').notNull(),
+    challengeTokenHash: text('challenge_token_hash').notNull(),
+    codeHash: text('code_hash').notNull(),
+    returnTo: text('return_to').notNull(),
+    status: text('status', {
+      enum: ['pending', 'used', 'revoked'],
+    }).notNull(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    userAgentHash: text('user_agent_hash'),
+    ipHash: text('ip_hash'),
+    expiresAt: text('expires_at').notNull(),
+    usedAt: text('used_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_auth_login_otps_challenge').on(table.challengeTokenHash),
+    index('idx_auth_login_otps_user_status').on(table.userId, table.status),
+    index('idx_auth_login_otps_expires').on(table.expiresAt),
+  ],
+);
+
 export const accountInvites = sqliteTable(
   'account_invites',
   {
