@@ -82,7 +82,11 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(clientDashboard, /Chưa có statement/);
   assert.match(adminDashboard, /trendingTracks/);
   assert.match(adminDashboard, /trendingArtists/);
+  assert.match(adminDashboard, /emptyAdminOverviewData/);
   assert.match(adminConsole, /Admin dashboard tổng/);
+  assert.match(adminConsole, /isInitialLoading/);
+  assert.match(adminConsole, /emptyAdminOverviewData\(initialPeriod\)/);
+  assert.doesNotMatch(adminConsole, /fallbackCustomers/);
 });
 
 test('production email and reminder surfaces stay auditable', () => {

@@ -187,6 +187,12 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: verify D1 remote bang `PRAGMA table_info(track_guarantees)`; cot `track_external_id` da ton tai.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `18dfb848-a3a1-4eb8-bb5c-228ec7fe2dd8`.
 - 2026-09-10: `npm run test:production` thanh cong sau deploy ID bai hat cho GM.
+- 2026-09-10: fix admin dashboard reload flash: bo fallback demo customers/statements khoi initial state, them empty admin overview/loading state de khong hien layout cu 2 khach truoc khi API tra ve du lieu that.
+- 2026-09-10: cap nhat contract test de chan regression admin console dung `fallbackCustomers` khi khoi tao.
+- 2026-09-10: `npm run test` thanh cong: 16 unit tests + 9 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau fix admin dashboard initial loading.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `09e2ca81-8131-4475-88c3-774b5ca43abc`.
+- 2026-09-10: `npm run test:production` thanh cong sau deploy; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`

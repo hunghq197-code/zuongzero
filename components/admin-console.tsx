@@ -76,13 +76,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { clients } from '@/lib/dashboard-data';
 import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
 import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import { type AdminActivityRow } from '@/lib/admin-activity';
 import {
-  fallbackAdminOverviewData,
-  fallbackAdminStatements,
+  emptyAdminOverviewData,
   type AdminOverviewData,
   type AdminStatementRow,
   type AdminTrendItem,
@@ -207,17 +205,6 @@ const adminPalette = [
   '#2563eb',
   '#111827',
 ];
-
-const fallbackCustomers: ManagedCustomerRow[] = clients.map((client) => ({
-  code: client.code,
-  id: client.id,
-  latestPeriod: client.latestPeriod,
-  name: client.name,
-  status: client.status as CustomerStatus,
-  totalRevenue: client.totalRevenue,
-  uploadedQuarters: client.uploadedQuarters,
-  viewerEmail: client.viewerEmail,
-}));
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat('vi-VN', {
@@ -541,18 +528,13 @@ export function AdminConsole({
   const isSuperAdmin = adminRole === 'super_admin';
   const adminQuarterOptions = useMemo(() => buildCalendarQuarterOptions(), []);
   const initialPeriod = adminQuarterOptions[0]?.value ?? '';
-  const [customers, setCustomers] =
-    useState<ManagedCustomerRow[]>(fallbackCustomers);
-  const [selectedClient, setSelectedClient] = useState(
-    fallbackCustomers[0]?.id ?? '',
-  );
+  const [customers, setCustomers] = useState<ManagedCustomerRow[]>([]);
+  const [selectedClient, setSelectedClient] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState(initialPeriod);
   const [overview, setOverview] = useState<AdminOverviewData>(() =>
-    fallbackAdminOverviewData(initialPeriod),
+    emptyAdminOverviewData(initialPeriod),
   );
-  const [statementRows, setStatementRows] = useState<AdminStatementRow[]>(
-    fallbackAdminStatements(),
-  );
+  const [statementRows, setStatementRows] = useState<AdminStatementRow[]>([]);
   const [activityRows, setActivityRows] = useState<AdminActivityRow[]>([]);
   const [operationsState, setOperationsState] = useState<
     'loading' | 'ready' | 'failed'
@@ -613,9 +595,7 @@ export function AdminConsole({
   const [resetCopyMessage, setResetCopyMessage] = useState('');
   const [activeAccountActionId, setActiveAccountActionId] = useState('');
   const [guarantees, setGuarantees] = useState<TrackGuaranteeRow[]>([]);
-  const [guaranteeClientId, setGuaranteeClientId] = useState(
-    fallbackCustomers[0]?.id ?? '',
-  );
+  const [guaranteeClientId, setGuaranteeClientId] = useState('');
   const [guaranteeTrackExternalId, setGuaranteeTrackExternalId] = useState('');
   const [guaranteeTrackTitle, setGuaranteeTrackTitle] = useState('');
   const [guaranteeAmount, setGuaranteeAmount] = useState('');
@@ -739,6 +719,12 @@ export function AdminConsole({
     (run) => run.failedCount + run.notConfiguredCount > 0,
   );
   const emailDnsRecords = emailStatus?.resendDomain?.records ?? [];
+  const isInitialLoading =
+    operationsState === 'loading' &&
+    customers.length === 0 &&
+    statementRows.length === 0 &&
+    guarantees.length === 0 &&
+    !emailStatus;
 
   useEffect(() => {
     let cancelled = false;
@@ -746,6 +732,12 @@ export function AdminConsole({
     async function loadAdminData() {
       try {
         setOperationsState('loading');
+        setOverview(emptyAdminOverviewData(selectedPeriod));
+        setStatementRows([]);
+        setActivityRows([]);
+        setGuarantees([]);
+        setReminderRecipients([]);
+        setReminderRuns([]);
         const [
           accountsResponse,
           overviewResponse,
@@ -843,7 +835,7 @@ export function AdminConsole({
             setAccountMessage('');
             setAccountState('idle');
           }
-          const nextCustomers = result.customers ?? fallbackCustomers;
+          const nextCustomers = result.customers ?? [];
           setCustomers(nextCustomers);
           setSelectedClient((currentClient) =>
             nextCustomers.some((client) => client.id === currentClient)
@@ -856,8 +848,7 @@ export function AdminConsole({
               : (nextCustomers[0]?.id ?? ''),
           );
           setOverview(
-            overviewResult.overview ??
-              fallbackAdminOverviewData(selectedPeriod),
+            overviewResult.overview ?? emptyAdminOverviewData(selectedPeriod),
           );
           setStatementRows(statementsResult.statements ?? []);
           setActivityRows(activityResult.activity ?? []);
@@ -992,7 +983,7 @@ export function AdminConsole({
       );
     }
 
-    const nextCustomers = customersResult.customers ?? fallbackCustomers;
+    const nextCustomers = customersResult.customers ?? [];
     setCustomers(nextCustomers);
     setSelectedClient((currentClient) =>
       nextCustomers.some((client) => client.id === currentClient)
@@ -1004,7 +995,7 @@ export function AdminConsole({
         ? currentClient
         : (nextCustomers[0]?.id ?? ''),
     );
-    setOverview(overviewResult.overview ?? fallbackAdminOverviewData(period));
+    setOverview(overviewResult.overview ?? emptyAdminOverviewData(period));
     setStatementRows(statementsResult.statements ?? []);
     setActivityRows(activityResult.activity ?? []);
     setGuarantees(guaranteesResult.guarantees ?? []);
@@ -1818,7 +1809,23 @@ export function AdminConsole({
           </header>
 
           <div className="min-w-0 space-y-5 px-5 py-5 md:px-8 md:py-7">
-            <Tabs className="min-w-0 space-y-5" defaultValue="overview">
+            {isInitialLoading ? (
+              <section className="music-card flex min-h-[420px] items-center justify-center p-6 text-center">
+                <div>
+                  <RefreshCw className="mx-auto size-8 animate-spin text-primary" />
+                  <p className="mt-4 text-sm font-semibold">
+                    Đang tải dashboard admin
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Hệ thống đang đọc dữ liệu khách hàng, statement và GM.
+                  </p>
+                </div>
+              </section>
+            ) : null}
+            <Tabs
+              className={isInitialLoading ? 'hidden' : 'min-w-0 space-y-5'}
+              defaultValue="overview"
+            >
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                 <TabsList className="min-h-11 w-full max-w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-lg border border-border/80 bg-white p-1 shadow-sm sm:w-fit">
                   <TabsTrigger

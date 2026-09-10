@@ -270,6 +270,34 @@ export async function listAdminStatements(
   });
 }
 
+export function emptyAdminOverviewData(
+  period = currentCalendarQuarter(),
+): AdminOverviewData {
+  return {
+    period,
+    periodLabel: periodDisplayLabel(period),
+    previousPeriod: previousCalendarQuarter(period),
+    quarterlyTrend: [],
+    summary: {
+      activeCustomers: 0,
+      artistCount: 0,
+      missingCustomers: 0,
+      reportingCustomers: 0,
+      revenueVnd: 0,
+      sourceRows: 0,
+      statementCount: 0,
+      totalCustomers: 0,
+      trackCount: 0,
+      units: 0,
+    },
+    topCustomers: [],
+    topSources: [],
+    topTerritories: [],
+    trendingArtists: [],
+    trendingTracks: [],
+  };
+}
+
 export function fallbackAdminOverviewData(
   period = currentCalendarQuarter(),
 ): AdminOverviewData {
