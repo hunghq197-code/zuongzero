@@ -113,6 +113,23 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Kiem tra local demo `http://localhost:3000/admin`.
 - Kiem tra production `/login` tra `200 OK`.
 
+## Roadmap cac phase
+
+- Phase 1 - Quy + VND-only: DONE. Da chuyen ky bao cao tu thang sang quy `YYYY-Qn` va loai bo USD/ngoai te khoi luong import/dashboard.
+- Phase 2 - File tong + doi soat nguong 1.000.000 VND: DONE. Da ho tro upload Excel gom nhieu ma khach hang, tu SUM theo client va tinh da thanh toan/chua thanh toan + carry forward.
+- Phase 3 - GM/advance theo bai hat: CODE DONE, DEPLOYED WITH GUARD. Source da co migration/API/UI/recoup logic va da deploy Worker version `de5d2f11-a19b-4212-beeb-9b3069e833cf`. Production van can apply D1 migration `0006_track_guarantees` sau khi token Cloudflare co quyen D1 remote; hien bi chan boi loi Cloudflare `7403`.
+- Phase 4 - Nhac doi soat ngay 15: NOT STARTED. Can thiet ke Cloudflare scheduled trigger/cron ngay 15 hang thang, danh sach nguoi nhan theo client active, noi dung email/thong bao, log da gui, retry khi loi, va che do preview/dry-run cho admin.
+- Phase 5 - Email production: NOT STARTED / PARTIAL. Can verify domain gui email that trong Resend hoac provider duoc chon, cap nhat `EMAIL_FROM`, kiem tra SPF/DKIM/DMARC, test flow kich hoat tai khoan/reset password/thong bao doi soat bang email that.
+- Phase 6 - Test va van hanh production: NOT STARTED. Can bo sung test tu dong cho auth, account invite/reset, upload single/bulk, publish/delete statement, GM recoup/reverse, va regression dashboard client/admin.
+- Phase 7 - Bao cao/export doi soat: NOT STARTED. Chua co export PDF/Excel statement theo quy cho client/admin; neu can van hanh that nen them export statement, lich su thanh toan va download audit.
+
+## Nguyen tac ghi log cho cac lan tiep theo
+
+- Moi phase moi hoac viec dang lam phai cap nhat file nay truoc khi ket thuc task.
+- Ghi ro trang thai: `DONE`, `CODE DONE`, `DEPLOYED`, `BLOCKED`, `NOT STARTED`.
+- Neu bi chan, ghi ro lenh da chay, loi tra ve, va buoc tiep theo can lam.
+- Neu deploy, ghi ro domain production, Worker version ID, commit hash va lenh verify da chay.
+
 ## Viec tiep theo nen lam
 
 - Cau hinh domain gui email that trong Resend va cap nhat `EMAIL_FROM` bang domain da verify.
