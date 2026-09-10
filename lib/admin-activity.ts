@@ -93,6 +93,7 @@ function activityActionLabel(action: string) {
     client_archived: 'Lưu trữ khách hàng',
     client_deleted: 'Xoá khách hàng',
     client_profile_updated: 'Sửa khách hàng',
+    email_test_sent: 'Gửi email test',
     managed_account_created: 'Tạo tài khoản',
     managed_account_status_updated: 'Cập nhật tài khoản',
     password_reset_requested: 'Gửi link đổi mật khẩu',
@@ -153,6 +154,14 @@ function activitySummary(
 
   if (action === 'client_archived' || action === 'client_deleted') {
     return compactParts([readString(metadata.name), readString(metadata.code)]);
+  }
+
+  if (action === 'email_test_sent') {
+    return compactParts([
+      readString(metadata.recipientEmail),
+      readString(metadata.domain),
+      readString(metadata.emailStatus),
+    ]);
   }
 
   if (

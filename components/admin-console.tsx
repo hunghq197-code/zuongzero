@@ -4,8 +4,10 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Archive,
+  AlertTriangle,
   BarChart3,
   BellRing,
+  CheckCircle2,
   Copy,
   Disc3,
   Edit3,
@@ -123,6 +125,43 @@ type StatementStatusFilter = 'all' | AdminStatementRow['status'];
 type GuaranteeStatusFilter = 'all' | TrackGuaranteeStatus;
 type UploadMode = 'single' | 'bulk';
 type ReminderActionState = 'idle' | 'saving' | 'saved' | 'failed';
+type EmailActionState = 'idle' | 'loading' | 'saving' | 'saved' | 'failed';
+
+type EmailProductionStatusRow = {
+  apiKeyConfigured: boolean;
+  checkedAt: string;
+  dmarc: {
+    records: string[];
+    status: 'present' | 'missing' | 'unknown';
+  };
+  fromAddress: string | null;
+  fromConfigured: boolean;
+  fromDomain: string | null;
+  issues: string[];
+  portalUrl: string;
+  productionReady: boolean;
+  resendDomain: {
+    id: string;
+    name: string;
+    records: Array<{
+      name: string;
+      record: string;
+      status:
+        | 'not_started'
+        | 'pending'
+        | 'verified'
+        | 'failed'
+        | 'temporary_failure'
+        | 'unknown';
+      type: string;
+      value: string;
+    }>;
+    sending: string | null;
+    status: string;
+  } | null;
+  resendReachable: boolean;
+  sendingReady: boolean;
+};
 
 type ReminderRecipientRow = {
   accessLevel: ClientAccessLevel;
@@ -352,6 +391,43 @@ function reminderRunStatusClass(status: ReminderRunRow['status']) {
   return 'rounded-lg bg-muted text-muted-foreground';
 }
 
+function emailReadyLabel(value: boolean) {
+  return value ? 'Ready' : 'Action needed';
+}
+
+function emailReadyClass(value: boolean) {
+  return value
+    ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
+    : 'rounded-lg bg-[#fff8e7] text-[#986200]';
+}
+
+function emailRecordStatusLabel(status: string) {
+  if (status === 'verified') return 'Verified';
+  if (status === 'pending') return 'Pending';
+  if (status === 'failed') return 'Failed';
+  if (status === 'temporary_failure') return 'Temporary failure';
+  if (status === 'not_started') return 'Not started';
+  return 'Unknown';
+}
+
+function emailRecordStatusClass(status: string) {
+  if (status === 'verified') return 'rounded-lg bg-[#e7fbf7] text-[#00796f]';
+  if (status === 'failed' || status === 'temporary_failure') {
+    return 'rounded-lg bg-[#fff2f0] text-[#a53a30]';
+  }
+  if (status === 'pending' || status === 'not_started') {
+    return 'rounded-lg bg-[#fff8e7] text-[#986200]';
+  }
+
+  return 'rounded-lg bg-muted text-muted-foreground';
+}
+
+function dmarcStatusLabel(status: EmailProductionStatusRow['dmarc']['status']) {
+  if (status === 'present') return 'Present';
+  if (status === 'missing') return 'Missing';
+  return 'Unknown';
+}
+
 function parseVndInput(value: string) {
   const digits = value.replace(/[^\d]/g, '');
   if (!digits) return 0;
@@ -558,6 +634,11 @@ export function AdminConsole({
   const [reminderState, setReminderState] =
     useState<ReminderActionState>('idle');
   const [reminderMessage, setReminderMessage] = useState('');
+  const [emailStatus, setEmailStatus] =
+    useState<EmailProductionStatusRow | null>(null);
+  const [emailTestTo, setEmailTestTo] = useState(userEmail);
+  const [emailState, setEmailState] = useState<EmailActionState>('loading');
+  const [emailMessage, setEmailMessage] = useState('');
 
   const activeClient =
     customers.find((client) => client.id === selectedClient) ??
@@ -655,6 +736,7 @@ export function AdminConsole({
   const latestRetryableReminderRun = reminderRuns.find(
     (run) => run.failedCount + run.notConfiguredCount > 0,
   );
+  const emailDnsRecords = emailStatus?.resendDomain?.records ?? [];
 
   useEffect(() => {
     let cancelled = false;
@@ -669,6 +751,7 @@ export function AdminConsole({
           activityResponse,
           guaranteesResponse,
           remindersResponse,
+          emailResponse,
         ] = await Promise.all([
           fetchWithSession(
             isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers',
@@ -684,6 +767,7 @@ export function AdminConsole({
           fetchWithSession(
             `/api/admin/reminders?period=${encodeURIComponent(selectedPeriod)}`,
           ),
+          fetchWithSession('/api/admin/email'),
         ]);
         const result = await readJsonResponse<{
           accounts?: ManagedAccountRow[];
@@ -711,6 +795,11 @@ export function AdminConsole({
           recipients?: ReminderRecipientRow[];
           runs?: ReminderRunRow[];
         }>(remindersResponse);
+        const emailResult = await readJsonResponse<{
+          message?: string;
+          status?: EmailProductionStatusRow;
+          testRecipient?: string;
+        }>(emailResponse);
 
         if (!accountsResponse.ok) {
           throw new Error(result.message ?? 'Không thể tải dữ liệu admin.');
@@ -738,6 +827,11 @@ export function AdminConsole({
         if (!remindersResponse.ok) {
           throw new Error(
             remindersResult.message ?? 'Không thể tải lịch nhắc đối soát.',
+          );
+        }
+        if (!emailResponse.ok) {
+          throw new Error(
+            emailResult.message ?? 'Không thể tải cấu hình email.',
           );
         }
 
@@ -768,6 +862,13 @@ export function AdminConsole({
           setGuarantees(guaranteesResult.guarantees ?? []);
           setReminderRecipients(remindersResult.recipients ?? []);
           setReminderRuns(remindersResult.runs ?? []);
+          setEmailStatus(emailResult.status ?? null);
+          setEmailTestTo(
+            (currentValue) =>
+              currentValue || emailResult.testRecipient || userEmail,
+          );
+          setEmailState('idle');
+          setEmailMessage('');
           setOperationsMessage('');
           setOperationsState('ready');
         }
@@ -796,7 +897,7 @@ export function AdminConsole({
     return () => {
       cancelled = true;
     };
-  }, [isSuperAdmin, selectedPeriod]);
+  }, [isSuperAdmin, selectedPeriod, userEmail]);
 
   async function refreshAdminSnapshot(period = selectedPeriod) {
     const [
@@ -806,6 +907,7 @@ export function AdminConsole({
       activityResponse,
       guaranteesResponse,
       remindersResponse,
+      emailResponse,
     ] = await Promise.all([
       fetchWithSession('/api/admin/customers'),
       fetchWithSession(
@@ -819,6 +921,7 @@ export function AdminConsole({
       fetchWithSession(
         `/api/admin/reminders?period=${encodeURIComponent(period)}`,
       ),
+      fetchWithSession('/api/admin/email'),
     ]);
     const customersResult = await readJsonResponse<{
       customers?: ManagedCustomerRow[];
@@ -845,6 +948,11 @@ export function AdminConsole({
       recipients?: ReminderRecipientRow[];
       runs?: ReminderRunRow[];
     }>(remindersResponse);
+    const emailResult = await readJsonResponse<{
+      message?: string;
+      status?: EmailProductionStatusRow;
+      testRecipient?: string;
+    }>(emailResponse);
 
     if (!customersResponse.ok) {
       throw new Error(
@@ -876,6 +984,11 @@ export function AdminConsole({
         remindersResult.message ?? 'Không thể tải lại lịch nhắc đối soát.',
       );
     }
+    if (!emailResponse.ok) {
+      throw new Error(
+        emailResult.message ?? 'Không thể tải lại cấu hình email.',
+      );
+    }
 
     const nextCustomers = customersResult.customers ?? fallbackCustomers;
     setCustomers(nextCustomers);
@@ -895,6 +1008,10 @@ export function AdminConsole({
     setGuarantees(guaranteesResult.guarantees ?? []);
     setReminderRecipients(remindersResult.recipients ?? []);
     setReminderRuns(remindersResult.runs ?? []);
+    setEmailStatus(emailResult.status ?? null);
+    setEmailTestTo(
+      (currentValue) => currentValue || emailResult.testRecipient || userEmail,
+    );
   }
 
   async function createManagedAccount(event: { preventDefault: () => void }) {
@@ -1331,6 +1448,48 @@ export function AdminConsole({
     }
   }
 
+  async function sendEmailProductionTest() {
+    if (emailState === 'saving') return;
+
+    setEmailState('saving');
+    setEmailMessage('');
+
+    try {
+      const response = await fetchWithSession('/api/admin/email', {
+        body: JSON.stringify({
+          action: 'send_test',
+          to: emailTestTo,
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      });
+      const result = await readJsonResponse<{
+        message?: string;
+        status?: EmailProductionStatusRow;
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          result.message ?? `Không thể gửi email test (${response.status}).`,
+        );
+      }
+
+      setEmailStatus(result.status ?? null);
+      setEmailMessage(result.message ?? 'Đã gửi email test.');
+      setEmailState('saved');
+      await refreshAdminSnapshot(selectedPeriod);
+    } catch (error) {
+      setEmailMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể gửi email test ở thời điểm này.',
+      );
+      setEmailState('failed');
+    }
+  }
+
   function startCustomerEdit(customer: ManagedCustomerRow) {
     setEditingCustomerId(customer.id);
     setEditingCustomerName(customer.name);
@@ -1692,6 +1851,13 @@ export function AdminConsole({
                   >
                     <BellRing className="size-4" />
                     Nhắc lịch
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
+                    value="email"
+                  >
+                    <Mail className="size-4" />
+                    Email
                   </TabsTrigger>
                   {isSuperAdmin ? (
                     <TabsTrigger
@@ -3563,6 +3729,252 @@ export function AdminConsole({
                       </TableBody>
                     </Table>
                   </div>
+                </section>
+
+                <ActivityLogPanel activityRows={activityRows} />
+              </TabsContent>
+
+              <TabsContent className="space-y-5" value="email">
+                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                  <section className="music-card p-4 md:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Email production
+                        </p>
+                        <h2 className="mt-1 text-lg font-semibold">
+                          Trạng thái gửi mail
+                        </h2>
+                      </div>
+                      {emailStatus?.productionReady ? (
+                        <CheckCircle2 className="size-6 text-[#00796f]" />
+                      ) : (
+                        <AlertTriangle className="size-6 text-[#986200]" />
+                      )}
+                    </div>
+
+                    <div className="mt-5 grid gap-3">
+                      <div className="border-t border-border pt-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            Production
+                          </span>
+                          <Badge
+                            className={emailReadyClass(
+                              Boolean(emailStatus?.productionReady),
+                            )}
+                            variant="secondary"
+                          >
+                            {emailReadyLabel(
+                              Boolean(emailStatus?.productionReady),
+                            )}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {emailStatus?.portalUrl ??
+                            'https://artistportal.zuongzeroent.com'}
+                        </p>
+                      </div>
+
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          From
+                        </p>
+                        <p className="mt-2 truncate text-sm font-medium">
+                          {emailStatus?.fromAddress ?? 'Chưa cấu hình'}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {emailStatus?.fromDomain ?? '-'}
+                        </p>
+                      </div>
+
+                      <div className="border-t border-border pt-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                            Resend API
+                          </span>
+                          <Badge
+                            className={emailReadyClass(
+                              Boolean(emailStatus?.apiKeyConfigured),
+                            )}
+                            variant="secondary"
+                          >
+                            {emailStatus?.apiKeyConfigured
+                              ? 'Configured'
+                              : 'Missing'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 space-y-2">
+                      <span className="block text-sm font-medium">
+                        Gửi email test
+                      </span>
+                      <Input
+                        onChange={(event) => setEmailTestTo(event.target.value)}
+                        placeholder="name@company.com"
+                        type="email"
+                        value={emailTestTo}
+                      />
+                      <Button
+                        className="h-10 w-full bg-[#071118] text-white hover:bg-[#111827]"
+                        disabled={emailState === 'saving'}
+                        onClick={() => {
+                          void sendEmailProductionTest();
+                        }}
+                        type="button"
+                      >
+                        <Mail className="size-4" />
+                        {emailState === 'saving' ? 'Đang gửi...' : 'Gửi test'}
+                      </Button>
+                    </div>
+
+                    {emailMessage ? (
+                      <p
+                        className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+                          emailState === 'failed'
+                            ? 'border-[#f0b7b2] bg-[#fff2f0] text-[#a53a30]'
+                            : 'border-[#bce9e4] bg-[#f0fffc] text-[#047a70]'
+                        }`}
+                      >
+                        {emailMessage}
+                      </p>
+                    ) : null}
+                  </section>
+
+                  <section className="music-card p-4 md:p-5">
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Domain health
+                        </p>
+                        <h2 className="mt-1 text-lg font-semibold">
+                          Resend, SPF/DKIM/DMARC
+                        </h2>
+                      </div>
+                      <Badge
+                        className={emailReadyClass(
+                          Boolean(emailStatus?.sendingReady),
+                        )}
+                        variant="secondary"
+                      >
+                        {emailStatus?.sendingReady
+                          ? 'Sending ready'
+                          : 'Check needed'}
+                      </Badge>
+                    </div>
+
+                    <div className="mb-4 grid gap-3 md:grid-cols-3">
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Resend domain
+                        </p>
+                        <p className="mt-2 truncate text-sm font-medium">
+                          {emailStatus?.resendDomain?.name ?? '-'}
+                        </p>
+                        <Badge
+                          className={emailRecordStatusClass(
+                            emailStatus?.resendDomain?.status ?? 'unknown',
+                          )}
+                          variant="secondary"
+                        >
+                          {emailRecordStatusLabel(
+                            emailStatus?.resendDomain?.status ?? 'unknown',
+                          )}
+                        </Badge>
+                      </div>
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          Sending
+                        </p>
+                        <p className="mt-2 text-sm font-medium">
+                          {emailStatus?.resendDomain?.sending ?? '-'}
+                        </p>
+                      </div>
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                          DMARC
+                        </p>
+                        <Badge
+                          className={emailRecordStatusClass(
+                            emailStatus?.dmarc.status === 'present'
+                              ? 'verified'
+                              : emailStatus?.dmarc.status === 'missing'
+                                ? 'failed'
+                                : 'unknown',
+                          )}
+                          variant="secondary"
+                        >
+                          {dmarcStatusLabel(
+                            emailStatus?.dmarc.status ?? 'unknown',
+                          )}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {emailStatus?.issues.length ? (
+                      <div className="mb-4 grid gap-2">
+                        {emailStatus.issues.map((issue) => (
+                          <div
+                            className="rounded-lg border border-[#f4ddb1] bg-[#fffaf0] px-3 py-2 text-sm text-[#7a5200]"
+                            key={issue}
+                          >
+                            {issue}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="overflow-hidden rounded-lg border border-border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Record</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {emailDnsRecords.length > 0 ? (
+                            emailDnsRecords.map((record, index) => (
+                              <TableRow
+                                key={`${record.record}:${record.name}:${index}`}
+                              >
+                                <TableCell className="font-medium">
+                                  {record.record || '-'}
+                                </TableCell>
+                                <TableCell className="max-w-[280px] truncate">
+                                  {record.name || '-'}
+                                </TableCell>
+                                <TableCell>{record.type || '-'}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={emailRecordStatusClass(
+                                      record.status,
+                                    )}
+                                    variant="secondary"
+                                  >
+                                    {emailRecordStatusLabel(record.status)}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell
+                                className="h-24 text-center text-sm text-muted-foreground"
+                                colSpan={4}
+                              >
+                                Chưa đọc được DNS records từ Resend.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </section>
                 </section>
 
                 <ActivityLogPanel activityRows={activityRows} />

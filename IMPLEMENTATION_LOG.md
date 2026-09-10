@@ -39,7 +39,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 ## Admin console
 
-- Co cac tab chinh: Tong quan, Khach hang, Statement, GM, Nhac lich, Tai khoan.
+- Co cac tab chinh: Tong quan, Khach hang, Statement, GM, Nhac lich, Email, Tai khoan.
 - Tong quan admin tong hop du lieu tat ca khach hang theo quy: doanh thu, so statement, so track, so artist, trend track, trend artist, top customers.
 - Ky doi soat dung quy lich duong, timezone UTC+7, ap dung dong bo cho admin va client.
 - Trang khach hang ho tro tim kiem, loc trang thai, sua thong tin, archive, xoa.
@@ -49,6 +49,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Khi upload statement, neu track trong file trung voi GM active thi doanh thu track do duoc tru dan vao balance GM; khoan tru hien thi o cot GM/net costs.
 - Khi replace/xoa statement, recoupment cu cua ky do duoc reverse de balance GM khong bi tru lap.
 - Tab Nhac lich ho tro preview danh sach khach hang active, dry-run, gui reminder doi soat ngay, retry email loi/thieu config va xem send log.
+- Tab Email ho tro kiem tra cau hinh gui mail production: `RESEND_API_KEY`, `EMAIL_FROM`, domain Resend, SPF/DKIM records, DMARC va gui email test.
 - Them audit trail cho cac hanh dong quan tri quan trong.
 - Cap nhat UX/UI theo huong giai tri media/music, co sidebar, visual identity, controls gon hon.
 - Da sua loi tab admin bi lech va tranh tran ngang layout.
@@ -88,6 +89,16 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Admin console co tab Nhac lich voi summary ky hien tai, so recipient co the gui, so khach chua co statement, nut Dry-run/Gui ngay/Retry loi va bang send log.
 - Audit log co nhan: preview reminder, gui reminder, retry reminder.
 
+## Phase 5 - Email production
+
+- Them API admin `GET/POST /api/admin/email`.
+- `GET /api/admin/email` kiem tra trang thai `RESEND_API_KEY`, `EMAIL_FROM`, domain gui, Resend domain status/capability, DNS records tu Resend va DMARC `_dmarc.<domain>`.
+- `POST /api/admin/email` voi action `send_test` gui email test that qua Resend toi dia chi admin nhap.
+- Them email template test production va idempotency key cho request test email.
+- Them tab Email trong admin console de hien thi readiness, from address, portal URL, Resend domain, sending status, DMARC, DNS records va nut gui test.
+- Them audit log `email_test_sent` cho moi lan gui email test, khong luu secret.
+- Worker production da co secret names `RESEND_API_KEY` va `EMAIL_FROM`.
+
 ## Bao mat
 
 - Client khong co API upload/sua statement.
@@ -111,6 +122,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Chinh sach deploy tu 2026-09-09: chi deploy production bang Cloudflare/Wrangler va chi ban giao URL `https://artistportal.zuongzeroent.com`; khong deploy/ban giao qua URL `chatgpt.site`.
 - 2026-09-10: da apply D1 migration Phase 3 `0006_track_guarantees` bang lenh execute SQL truc tiep va deploy Worker Phase 3 len Cloudflare, version `dde0f42e-5d9d-4f20-b605-211fd38a8690`; production `/login` tra `200 OK`.
 - 2026-09-10: da apply D1 migration Phase 4 `0007_settlement_reminders` bang lenh execute SQL truc tiep va deploy Worker Phase 4 len Cloudflare, version `f0df8f03-f149-4fbf-9900-71d9b3337d9b`; cron production `0 2 15 * *`.
+- 2026-09-10: da deploy Worker Phase 5 len Cloudflare, version `8900420f-75ec-4e0a-86b7-5f57de0d0da1`; production co tab Email va API `/api/admin/email`.
 
 ## Kiem thu da chay
 
@@ -130,6 +142,11 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: verify D1 remote bang `SELECT name FROM sqlite_master ...`; hai bang reminder da ton tai, `run_count = 0`.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `f0df8f03-f149-4fbf-9900-71d9b3337d9b`, schedule `0 2 15 * *`.
 - 2026-09-10: verify production `https://artistportal.zuongzeroent.com/login` tra `200 OK`, `GET https://royalty-dashboard.hung-hq197.workers.dev/api/admin/reminders` khi chua dang nhap tra `401` dung ky vong.
+- 2026-09-10: `npx oxlint lib\email.ts lib\email-production.ts app\api\admin\email\route.ts lib\admin-activity.ts components\admin-console.tsx`.
+- 2026-09-10: `npm run build` thanh cong voi route moi `/api/admin/email`.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `8900420f-75ec-4e0a-86b7-5f57de0d0da1`, schedule `0 2 15 * *`.
+- 2026-09-10: verify production `https://artistportal.zuongzeroent.com/login` tra `200 OK`, `GET https://royalty-dashboard.hung-hq197.workers.dev/api/admin/email` khi chua dang nhap tra `401` dung ky vong.
+- 2026-09-10: `npx wrangler secret list --config wrangler.cloudflare.jsonc` xac nhan Worker co secret names `EMAIL_FROM` va `RESEND_API_KEY`.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
@@ -142,7 +159,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 2 - File tong + doi soat nguong 1.000.000 VND: DONE. Da ho tro upload Excel gom nhieu ma khach hang, tu SUM theo client va tinh da thanh toan/chua thanh toan + carry forward.
 - Phase 3 - GM/advance theo bai hat: DONE. Source da co migration/API/UI/recoup logic, D1 production da co hai bang GM, va Worker da deploy version `dde0f42e-5d9d-4f20-b605-211fd38a8690`.
 - Phase 4 - Nhac doi soat ngay 15: DONE. Da co Cloudflare scheduled trigger ngay 15 hang thang, danh sach nguoi nhan theo client active, email Resend, send log, retry loi va preview/dry-run trong admin.
-- Phase 5 - Email production: NOT STARTED / PARTIAL. Can verify domain gui email that trong Resend hoac provider duoc chon, cap nhat `EMAIL_FROM`, kiem tra SPF/DKIM/DMARC, test flow kich hoat tai khoan/reset password/thong bao doi soat bang email that.
+- Phase 5 - Email production: DEPLOYED. Da co tab Email/API de verify Resend domain, SPF/DKIM, DMARC va gui email test that; can admin dang nhap va bam gui test de xac nhan mailbox nhan mail.
 - Phase 6 - Test va van hanh production: NOT STARTED. Can bo sung test tu dong cho auth, account invite/reset, upload single/bulk, publish/delete statement, GM recoup/reverse, va regression dashboard client/admin.
 - Phase 7 - Bao cao/export doi soat: NOT STARTED. Chua co export PDF/Excel statement theo quy cho client/admin; neu can van hanh that nen them export statement, lich su thanh toan va download audit.
 
@@ -155,7 +172,8 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 ## Viec tiep theo nen lam
 
-- Cau hinh domain gui email that trong Resend va cap nhat `EMAIL_FROM` bang domain da verify.
+- Dang nhap admin, vao tab Email, bam `Gửi test` toi email that va xac nhan mailbox nhan duoc.
+- Neu tab Email bao DMARC missing, them TXT `_dmarc.<domain>` trong DNS domain gui mail.
 - Test flow tao tai khoan client bang email that: tao tai khoan, nhan mail, kich hoat, doi mat khau, vao dashboard.
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
 - Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.

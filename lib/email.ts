@@ -15,6 +15,24 @@ export type EmailRuntimeEnv = {
   RESEND_API_KEY?: string;
 };
 
+export type EmailConfigStatus = {
+  apiKeyConfigured: boolean;
+  fromAddress: string | null;
+  fromConfigured: boolean;
+};
+
+export function getEmailConfigStatus(
+  runtimeEnv?: EmailRuntimeEnv,
+): EmailConfigStatus {
+  const from = runtimeEnv?.EMAIL_FROM ?? env.EMAIL_FROM;
+
+  return {
+    apiKeyConfigured: Boolean(runtimeEnv?.RESEND_API_KEY ?? env.RESEND_API_KEY),
+    fromAddress: from ? parseSenderEmail(from) : null,
+    fromConfigured: Boolean(from),
+  };
+}
+
 export async function sendAccountInviteEmail(input: {
   displayName: string | null;
   email: string;
@@ -234,6 +252,73 @@ export async function sendSettlementReminderEmail(
   }
 }
 
+export async function sendProductionTestEmail(
+  input: {
+    portalUrl: string;
+    recipientEmail: string;
+    requestedByEmail: string;
+  },
+  runtimeEnv?: EmailRuntimeEnv,
+): Promise<EmailDelivery> {
+  const config = emailConfig(runtimeEnv);
+  if (!config) {
+    return { status: 'not_configured' };
+  }
+
+  const subject = 'Test email - Zuong Zero Artist Portal';
+  const text = [
+    'Email production test',
+    '',
+    `Nguoi yeu cau: ${input.requestedByEmail}`,
+    `Portal: ${input.portalUrl}`,
+    '',
+    'Neu ban nhan duoc email nay, cau hinh gui mail production dang hoat dong.',
+  ].join('\n');
+  const html = [
+    '<p><strong>Email production test</strong></p>',
+    `<p>Nguoi yeu cau: ${escapeHtml(input.requestedByEmail)}</p>`,
+    `<p>Portal: <a href="${escapeHtml(input.portalUrl)}">${escapeHtml(input.portalUrl)}</a></p>`,
+    '<p>Neu ban nhan duoc email nay, cau hinh gui mail production dang hoat dong.</p>',
+  ].join('');
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      body: JSON.stringify({
+        from: config.from,
+        html,
+        subject,
+        text,
+        to: input.recipientEmail,
+      }),
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `email-test:${crypto.randomUUID()}`,
+      },
+      method: 'POST',
+    });
+
+    if (response.ok) return { status: 'sent' };
+
+    const detail = await response.text().catch(() => '');
+    console.error('[email:test] resend rejected request', {
+      detail: detail.slice(0, 500),
+      status: response.status,
+    });
+
+    return {
+      message: 'Email test chưa gửi được. Hãy kiểm tra Resend/API key/domain.',
+      status: 'failed',
+    };
+  } catch (error) {
+    console.error('[email:test] delivery failed', error);
+    return {
+      message: 'Email test chưa gửi được. Hãy kiểm tra Resend/API key/domain.',
+      status: 'failed',
+    };
+  }
+}
+
 export function accountInviteDeliveryMessage(delivery: EmailDelivery) {
   if (delivery.status === 'sent') {
     return `Đã gửi email kích hoạt. Link có hiệu lực ${ACCOUNT_INVITE_MAX_AGE_DAYS} ngày.`;
@@ -270,6 +355,14 @@ function emailConfig(runtimeEnv?: EmailRuntimeEnv) {
 
   if (!apiKey || !from) return null;
   return { apiKey, from };
+}
+
+function parseSenderEmail(value: string) {
+  const match = value.match(/<([^<>@\s]+@[^<>@\s]+)>/);
+  if (match) return match[1].trim().toLowerCase();
+
+  const trimmed = value.trim().toLowerCase();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed) ? trimmed : null;
 }
 
 function formatVnd(value: number) {
