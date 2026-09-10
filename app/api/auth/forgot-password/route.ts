@@ -3,14 +3,19 @@ import { env } from 'cloudflare:workers';
 import { createAccountInvite } from '@/lib/account-invites';
 import { cleanText, isValidEmail, normalizeEmail } from '@/lib/identity';
 import {
+  accountInviteDeliveryMessage,
   passwordResetDeliveryMessage,
+  sendAccountInviteEmail,
   sendPasswordResetEmail,
 } from '@/lib/email';
 
-type PasswordResetCandidate = {
+type PasswordRecoveryCandidate = {
+  credentialId: string | null;
   displayName: string | null;
   email: string;
   id: string;
+  role: 'admin' | 'client';
+  status: 'active' | 'disabled';
 };
 
 export const dynamic = 'force-dynamic';
@@ -27,27 +32,45 @@ export async function POST(request: Request) {
       return genericForgotPasswordResponse(request);
     }
 
-    const user = await findPasswordResetCandidate(email);
+    const user = await findPasswordRecoveryCandidate(email);
     if (!user) {
       return genericForgotPasswordResponse(request);
     }
 
-    const reset = await createAccountInvite(env.DB, {
+    if (user.status === 'disabled' && user.credentialId) {
+      return genericForgotPasswordResponse(request);
+    }
+
+    const purpose = user.credentialId ? 'password_reset' : 'account_activation';
+    const recovery = await createAccountInvite(env.DB, {
       createdByUserId: user.id,
       email: user.email,
-      purpose: 'password_reset',
+      purpose,
       requestUrl: request.url,
       userId: user.id,
     });
-    const delivery = await sendPasswordResetEmail({
-      displayName: user.displayName,
-      email: user.email,
-      expiresAt: reset.expiresAt,
-      resetUrl: reset.inviteUrl,
-    });
+    const delivery =
+      purpose === 'password_reset'
+        ? await sendPasswordResetEmail({
+            displayName: user.displayName,
+            email: user.email,
+            expiresAt: recovery.expiresAt,
+            resetUrl: recovery.inviteUrl,
+          })
+        : await sendAccountInviteEmail({
+            displayName: user.displayName,
+            email: user.email,
+            expiresAt: recovery.expiresAt,
+            inviteUrl: recovery.inviteUrl,
+            role: user.role,
+          });
 
-    console.info('[password-reset] request processed', {
-      delivery: passwordResetDeliveryMessage(delivery),
+    console.info('[password-recovery] request processed', {
+      delivery:
+        purpose === 'password_reset'
+          ? passwordResetDeliveryMessage(delivery)
+          : accountInviteDeliveryMessage(delivery),
+      purpose,
       userId: user.id,
     });
   } catch (error) {
@@ -58,22 +81,24 @@ export async function POST(request: Request) {
   return genericForgotPasswordResponse(request);
 }
 
-async function findPasswordResetCandidate(email: string) {
+async function findPasswordRecoveryCandidate(email: string) {
   return env.DB.prepare(
     `SELECT
        u.id,
        u.email,
-       u.display_name AS displayName
+       u.display_name AS displayName,
+       u.role,
+       u.status,
+       pc.id AS credentialId
      FROM users u
-     JOIN password_credentials pc
+     LEFT JOIN password_credentials pc
        ON pc.user_id = u.id
      WHERE lower(u.email) = ?
-       AND u.status = 'active'
        AND u.role IN ('admin', 'client')
      LIMIT 1`,
   )
     .bind(email)
-    .first<PasswordResetCandidate>();
+    .first<PasswordRecoveryCandidate>();
 }
 
 function genericForgotPasswordResponse(request: Request) {

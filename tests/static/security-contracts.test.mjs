@@ -98,3 +98,17 @@ test('production email and reminder surfaces stay auditable', () => {
   assert.match(worker, /scheduled/);
   assert.match(worker, /runScheduledSettlementReminder/);
 });
+
+test('forgot password sends the right recovery email for activated and pending accounts', () => {
+  const forgotPasswordRoute = readSource(
+    'app/api/auth/forgot-password/route.ts',
+  );
+
+  assert.match(forgotPasswordRoute, /LEFT JOIN password_credentials/);
+  assert.match(forgotPasswordRoute, /purpose = user\.credentialId/);
+  assert.match(forgotPasswordRoute, /'password_reset'/);
+  assert.match(forgotPasswordRoute, /'account_activation'/);
+  assert.match(forgotPasswordRoute, /sendPasswordResetEmail/);
+  assert.match(forgotPasswordRoute, /sendAccountInviteEmail/);
+  assert.match(forgotPasswordRoute, /genericForgotPasswordResponse/);
+});

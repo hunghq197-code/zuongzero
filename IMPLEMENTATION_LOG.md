@@ -27,6 +27,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Super admin tao tai khoan client thi dong thoi tao mot khach hang moi, khong phai chon khach hang co san.
 - Ho tro link kich hoat tai khoan va link reset/doi mat khau.
 - Ho tro trang quen mat khau.
+- Trang quen mat khau tu dong gui reset link cho tai khoan da kich hoat; neu tai khoan chua kich hoat/chua co password thi gui lai link kich hoat de khach dat mat khau lan dau.
 - Ho tro trang tai khoan ca nhan de cap nhat profile va doi mat khau.
 - Them nut dang xuat tren giao dien admin/client.
 
@@ -160,6 +161,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npm run test` thanh cong: 13 unit tests + 6 contract tests.
 - 2026-09-10: `npm run build` thanh cong sau khi them bo test Phase 6.
 - 2026-09-10: `npm run test:production` thanh cong tren `https://artistportal.zuongzeroent.com`: `/login` va `/forgot-password` tra 200, cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
+- 2026-09-10: fix forgot-password production: tai khoan pending/no-password se nhan lai activation email thay vi im lang; tai khoan active/co-password van nhan password reset email.
+- 2026-09-10: `npx oxfmt --write app\api\auth\forgot-password\route.ts tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npx oxlint app\api\auth\forgot-password\route.ts tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 13 unit tests + 7 contract tests.
+- 2026-09-10: `npm run build` thanh cong voi fix forgot-password.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `8d1b4c97-e880-4866-908a-db9a01bd5aa9`.
+- 2026-09-10: `npm run test:production` thanh cong sau deploy; test POST `/api/auth/forgot-password` cho account pending `hungnpoil@gmail.com` tra `303`, Worker log bao `Đã gửi email kích hoạt`, D1 tao invite `account_activation` pending moi het han `2026-09-17T03:41:46.830Z`.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
