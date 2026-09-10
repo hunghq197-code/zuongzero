@@ -75,6 +75,7 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   const clientDashboard = readSource('components/royalty-dashboard.tsx');
   const adminDashboard = readSource('lib/admin-dashboard.ts');
   const adminConsole = readSource('components/admin-console.tsx');
+  const musicBrand = readSource('components/music-brand.tsx');
 
   assert.match(clientData, /statementPeriods: \[\]/);
   assert.match(clientData, /trend: \[\]/);
@@ -91,6 +92,9 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(adminConsole, /TablePagination/);
   assert.match(clientDashboard, /ChartHoverTooltip/);
   assert.match(clientDashboard, /TablePagination/);
+  assert.match(adminConsole, /activeAdminTab/);
+  assert.match(musicBrand, /onSelect/);
+  assert.match(musicBrand, /#client-statements/);
 });
 
 test('production email and reminder surfaces stay auditable', () => {

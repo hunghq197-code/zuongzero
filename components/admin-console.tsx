@@ -59,6 +59,7 @@ import {
   BrandMark,
   ConsoleRail,
   EqualizerBars,
+  type ConsoleRailItem,
 } from '@/components/music-brand';
 import { Progress } from '@/components/ui/progress';
 import {
@@ -129,6 +130,24 @@ type GuaranteeStatusFilter = 'all' | TrackGuaranteeStatus;
 type UploadMode = 'single' | 'bulk';
 type ReminderActionState = 'idle' | 'saving' | 'saved' | 'failed';
 type EmailActionState = 'idle' | 'loading' | 'saving' | 'saved' | 'failed';
+type AdminTab =
+  | 'overview'
+  | 'customers'
+  | 'accounts'
+  | 'statements'
+  | 'guarantees'
+  | 'reminders'
+  | 'email';
+
+const adminTabs = new Set<AdminTab>([
+  'overview',
+  'customers',
+  'accounts',
+  'statements',
+  'guarantees',
+  'reminders',
+  'email',
+]);
 
 type EmailProductionStatusRow = {
   apiKeyConfigured: boolean;
@@ -536,6 +555,7 @@ export function AdminConsole({
   const [customers, setCustomers] = useState<ManagedCustomerRow[]>([]);
   const [selectedClient, setSelectedClient] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState(initialPeriod);
+  const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('overview');
   const [overview, setOverview] = useState<AdminOverviewData>(() =>
     emptyAdminOverviewData(initialPeriod),
   );
@@ -637,6 +657,20 @@ export function AdminConsole({
   const selectedPeriodLabel =
     adminQuarterOptions.find((period) => period.value === selectedPeriod)
       ?.label ?? selectedPeriod;
+  const adminRailItems = useMemo<ConsoleRailItem[]>(
+    () => [
+      { icon: BarChart3, id: 'overview', label: 'Tổng quan' },
+      { icon: Users, id: 'customers', label: 'Khách hàng' },
+      { icon: FileSpreadsheet, id: 'statements', label: 'Statement' },
+      { icon: WalletCards, id: 'guarantees', label: 'GM' },
+      { icon: BellRing, id: 'reminders', label: 'Nhắc lịch' },
+      { icon: Mail, id: 'email', label: 'Email' },
+      ...(isSuperAdmin
+        ? [{ icon: ShieldCheck, id: 'accounts', label: 'Tài khoản' }]
+        : []),
+    ],
+    [isSuperAdmin],
+  );
   const visibleCustomers = useMemo(() => {
     const query = customerSearch.trim().toLowerCase();
 
@@ -1756,7 +1790,16 @@ export function AdminConsole({
   return (
     <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
       <div className="grid min-h-screen grid-cols-[88px_minmax(0,1fr)] max-lg:block">
-        <ConsoleRail variant="admin" />
+        <ConsoleRail
+          activeItem={activeAdminTab}
+          items={adminRailItems}
+          onSelect={(itemId) => {
+            if (adminTabs.has(itemId as AdminTab)) {
+              setActiveAdminTab(itemId as AdminTab);
+            }
+          }}
+          variant="admin"
+        />
 
         <section className="min-w-0 overflow-x-hidden">
           <header className="sticky top-0 z-20 border-b border-border/80 bg-background/90 px-5 py-4 backdrop-blur md:px-8">
@@ -1835,7 +1878,12 @@ export function AdminConsole({
             ) : null}
             <Tabs
               className={isInitialLoading ? 'hidden' : 'min-w-0 space-y-5'}
-              defaultValue="overview"
+              onValueChange={(value) => {
+                if (adminTabs.has(value as AdminTab)) {
+                  setActiveAdminTab(value as AdminTab);
+                }
+              }}
+              value={activeAdminTab}
             >
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                 <TabsList className="min-h-11 w-full max-w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-lg border border-border/80 bg-white p-1 shadow-sm sm:w-fit">

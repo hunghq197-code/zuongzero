@@ -443,7 +443,10 @@ export function RoyaltyDashboard({
           </header>
 
           <div className="space-y-5 px-5 py-5 md:px-8 md:py-7">
-            <section className="music-card overflow-hidden">
+            <section
+              className="music-card scroll-mt-24 overflow-hidden"
+              id="client-overview"
+            >
               <div className="grid lg:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="p-4 md:p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -566,7 +569,10 @@ export function RoyaltyDashboard({
               ))}
             </section>
 
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <section
+              className="grid scroll-mt-24 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]"
+              id="client-statements"
+            >
               <section className="music-card p-4 md:p-5">
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -692,6 +698,7 @@ export function RoyaltyDashboard({
 
             <Tabs
               className="music-card p-4 md:p-5"
+              id="client-breakdown"
               onValueChange={(value) => setActiveTab(value as BreakdownKey)}
               value={activeTab}
             >

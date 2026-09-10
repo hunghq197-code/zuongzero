@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import {
   FileSpreadsheet,
   LayoutDashboard,
@@ -10,27 +11,27 @@ import {
 
 type ConsoleRailVariant = 'admin' | 'client';
 
-const railItems = {
+export type ConsoleRailItem = {
+  href?: string;
+  icon: ComponentType<{ className?: string }>;
+  id?: string;
+  label: string;
+};
+
+const railItems: Record<ConsoleRailVariant, ConsoleRailItem[]> = {
   admin: [
-    { href: '/admin', icon: LayoutDashboard, label: 'Console' },
-    { href: '/admin', icon: UsersRound, label: 'Clients' },
-    { href: '/admin', icon: UploadCloud, label: 'Uploads' },
-    { href: '/account', icon: ShieldCheck, label: 'Account' },
+    { href: '/admin', icon: LayoutDashboard, label: 'Tổng quan' },
+    { href: '/admin', icon: UsersRound, label: 'Khách hàng' },
+    { href: '/admin', icon: UploadCloud, label: 'Statement' },
+    { href: '/account', icon: ShieldCheck, label: 'Tài khoản' },
   ],
   client: [
-    { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { href: '/', icon: FileSpreadsheet, label: 'Statements' },
-    { href: '/', icon: WalletCards, label: 'Royalties' },
-    { href: '/account', icon: ShieldCheck, label: 'Account' },
+    { href: '#client-overview', icon: LayoutDashboard, label: 'Tổng quan' },
+    { href: '#client-statements', icon: FileSpreadsheet, label: 'Statement' },
+    { href: '#client-breakdown', icon: WalletCards, label: 'Breakdown' },
+    { href: '/account', icon: ShieldCheck, label: 'Tài khoản' },
   ],
-} satisfies Record<
-  ConsoleRailVariant,
-  Array<{
-    href: string;
-    icon: typeof LayoutDashboard;
-    label: string;
-  }>
->;
+};
 
 const barHeights = [
   'h-4',
@@ -79,29 +80,57 @@ export function EqualizerBars({ className = '' }: { className?: string }) {
 
 export function ConsoleRail({
   activeIndex = 0,
+  activeItem,
+  items,
+  onSelect,
   variant,
 }: {
   activeIndex?: number;
+  activeItem?: string;
+  items?: ConsoleRailItem[];
+  onSelect?: (itemId: string) => void;
   variant: ConsoleRailVariant;
 }) {
+  const resolvedItems = items ?? railItems[variant];
+
   return (
     <aside className="flex flex-col items-center gap-3 border-r border-white/10 bg-[#071118] px-4 py-5 text-white max-lg:hidden">
       <BrandMark />
       <div className="mt-6 grid gap-2">
-        {railItems[variant].map((item, index) => {
+        {resolvedItems.map((item, index) => {
           const Icon = item.icon;
-          const isActive = index === activeIndex;
+          const itemKey = item.id ?? item.href ?? item.label;
+          const isActive = activeItem
+            ? item.id === activeItem || item.href === activeItem
+            : index === activeIndex;
+          const itemClass = `flex size-11 items-center justify-center rounded-lg transition ${
+            isActive
+              ? 'bg-white text-[#071118]'
+              : 'text-white/62 hover:bg-white/10 hover:text-white'
+          }`;
+
+          if (item.id && onSelect) {
+            return (
+              <button
+                aria-label={item.label}
+                aria-pressed={isActive}
+                className={itemClass}
+                key={itemKey}
+                onClick={() => onSelect(item.id ?? itemKey)}
+                title={item.label}
+                type="button"
+              >
+                <Icon className="size-5" />
+              </button>
+            );
+          }
 
           return (
             <a
               aria-label={item.label}
-              className={`flex size-11 items-center justify-center rounded-lg transition ${
-                isActive
-                  ? 'bg-white text-[#071118]'
-                  : 'text-white/62 hover:bg-white/10 hover:text-white'
-              }`}
-              href={item.href}
-              key={item.label}
+              className={itemClass}
+              href={item.href ?? '#'}
+              key={itemKey}
               title={item.label}
             >
               <Icon className="size-5" />

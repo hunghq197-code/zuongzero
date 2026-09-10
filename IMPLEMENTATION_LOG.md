@@ -200,6 +200,12 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npm run build` thanh cong sau khi them chart tooltip va pagination.
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `af9b19ea-334d-4c52-850b-8f71180aaa0f`.
 - 2026-09-10: `npm run test:production` thanh cong sau deploy chart tooltip/pagination; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
+- 2026-09-10: bien left console rail thanh dieu huong that: admin rail doi tab tong quan/khach hang/statement/GM/nhac lich/email/tai khoan, client rail scroll den tong quan/statement/breakdown va link tai khoan.
+- 2026-09-10: `npx oxlint components\music-brand.tsx components\admin-console.tsx components\royalty-dashboard.tsx tests\static\security-contracts.test.mjs`.
+- 2026-09-10: `npm run test` thanh cong: 16 unit tests + 9 contract tests.
+- 2026-09-10: `npm run build` thanh cong sau khi them chuc nang cho console rail.
+- 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc`, Worker version `0432f8d5-e2ae-46f9-b594-d78da961d706`.
+- 2026-09-10: `npm run test:production` thanh cong sau deploy console rail; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin overview/accounts/email/reminders/statements tra 401 khi chua dang nhap.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`
