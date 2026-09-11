@@ -65,11 +65,7 @@ import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
 import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import type { TrackGuaranteeRow } from '@/lib/guarantees';
-import {
-  standardStatementColumns,
-  type StandardStatementColumnKey,
-  type StatementLineItem,
-} from '@/lib/statement-line-items';
+import { type StatementLineItem } from '@/lib/statement-line-items';
 
 declare global {
   interface Document {
@@ -105,6 +101,8 @@ const palette = [
   '#ec4899',
   '#64748b',
 ];
+
+const EMPTY_LINE_ITEMS: StatementLineItem[] = [];
 
 const toneClass: Record<StatementMetric['tone'], string> = {
   ink: 'border-l-[#071118]',
@@ -142,25 +140,6 @@ function formatRate(value: number | null) {
   if (value === null) return '-';
   const normalized = Math.abs(value) <= 1 ? value * 100 : value;
   return `${normalized.toFixed(2)}%`;
-}
-
-function formatLineItemValue(
-  item: StatementLineItem,
-  key: StandardStatementColumnKey,
-) {
-  const value = item[key];
-  if (value === null || value === '') return '-';
-  if (key === 'grossIncome' || key === 'netPayable') {
-    return typeof value === 'number' ? formatMoney(value) : '-';
-  }
-  if (key === 'royaltyRate') {
-    return typeof value === 'number' ? formatRate(value) : '-';
-  }
-  if (key === 'sales') {
-    return typeof value === 'number' ? formatNumber(value) : '-';
-  }
-
-  return String(value);
 }
 
 function statusLabel(status: string) {
@@ -287,6 +266,152 @@ function makeEmptyPeriod({
   };
 }
 
+type AggregatedLineItem = BreakdownItem & {
+  meta?: string;
+};
+
+type TrackIdentityRow = {
+  isrc: string;
+  netPayable: number;
+  sales: number;
+  trackTitle: string;
+  trackVersion: string | null;
+};
+
+type SourceInsights = {
+  configurations: AggregatedLineItem[];
+  contentTypes: AggregatedLineItem[];
+  contracts: AggregatedLineItem[];
+  financeRows: Array<{
+    label: string;
+    value: string;
+    helper: string;
+  }>;
+  releaseArtists: AggregatedLineItem[];
+  salesPeriods: AggregatedLineItem[];
+  trackIdentities: TrackIdentityRow[];
+};
+
+function makeSourceInsights(items: StatementLineItem[]): SourceInsights {
+  const grossIncomeRows = items.filter(
+    (item) => typeof item.grossIncome === 'number',
+  );
+  const royaltyRateRows = items.filter(
+    (item) => typeof item.royaltyRate === 'number',
+  );
+  const grossIncome = grossIncomeRows.reduce(
+    (total, item) => total + (item.grossIncome ?? 0),
+    0,
+  );
+  const averageRoyaltyRate =
+    royaltyRateRows.length > 0
+      ? royaltyRateRows.reduce(
+          (total, item) => total + (item.royaltyRate ?? 0),
+          0,
+        ) / royaltyRateRows.length
+      : null;
+
+  return {
+    configurations: aggregateLineItems(items, (item) => item.configuration),
+    contentTypes: aggregateLineItems(items, (item) => item.contentType),
+    contracts: aggregateLineItems(items, (item) => item.contractName),
+    financeRows: [
+      {
+        helper: `${formatNumber(grossIncomeRows.length)} dòng có Gross Income`,
+        label: 'Gross Income',
+        value: grossIncomeRows.length > 0 ? formatMoney(grossIncome) : '-',
+      },
+      {
+        helper: `${formatNumber(royaltyRateRows.length)} dòng có Royalty Rate`,
+        label: 'Royalty Rate trung bình',
+        value: formatRate(averageRoyaltyRate),
+      },
+    ],
+    releaseArtists: aggregateLineItems(items, (item) => item.releaseArtist),
+    salesPeriods: aggregateLineItems(items, (item) => item.salesPeriod),
+    trackIdentities: makeTrackIdentityRows(items),
+  };
+}
+
+function aggregateLineItems(
+  items: StatementLineItem[],
+  getName: (item: StatementLineItem) => string | null,
+) {
+  const rows = new Map<string, AggregatedLineItem>();
+
+  for (const item of items) {
+    const name = cleanInsightLabel(getName(item));
+    if (!name) continue;
+
+    const current = rows.get(name) ?? {
+      name,
+      percentage: 0,
+      rows: 0,
+      units: 0,
+      value: 0,
+    };
+    current.rows += 1;
+    current.units += item.sales;
+    current.value += item.netPayable;
+    rows.set(name, current);
+  }
+
+  const result = Array.from(rows.values()).sort((left, right) => {
+    return Math.abs(right.value) - Math.abs(left.value);
+  });
+  const total = result.reduce((sum, row) => sum + Math.abs(row.value), 0);
+
+  return result.map((row) => ({
+    ...row,
+    percentage: total > 0 ? (Math.abs(row.value) / total) * 100 : 0,
+  }));
+}
+
+function makeTrackIdentityRows(items: StatementLineItem[]) {
+  const rows = new Map<string, TrackIdentityRow>();
+
+  for (const item of items) {
+    const isrc = cleanInsightLabel(item.isrc);
+    const trackTitle = cleanInsightLabel(item.trackTitle);
+    if (!isrc && !trackTitle) continue;
+
+    const key = isrc || `${trackTitle}:${item.trackVersion ?? ''}`;
+    const current = rows.get(key) ?? {
+      isrc: isrc || '-',
+      netPayable: 0,
+      sales: 0,
+      trackTitle: trackTitle || '-',
+      trackVersion: cleanInsightLabel(item.trackVersion),
+    };
+    current.netPayable += item.netPayable;
+    current.sales += item.sales;
+    rows.set(key, current);
+  }
+
+  return Array.from(rows.values())
+    .sort(
+      (left, right) => Math.abs(right.netPayable) - Math.abs(left.netPayable),
+    )
+    .slice(0, 10);
+}
+
+function cleanInsightLabel(value: string | null) {
+  const label = value?.trim();
+  return label ? label : null;
+}
+
+function hasSourceInsights(insights: SourceInsights) {
+  return (
+    insights.configurations.length > 0 ||
+    insights.contentTypes.length > 0 ||
+    insights.contracts.length > 0 ||
+    insights.releaseArtists.length > 0 ||
+    insights.salesPeriods.length > 0 ||
+    insights.trackIdentities.length > 0 ||
+    insights.financeRows.some((row) => row.value !== '-')
+  );
+}
+
 export function RoyaltyDashboard({
   accessLevel,
   breakdownsByPeriod,
@@ -365,8 +490,13 @@ export function RoyaltyDashboard({
     (usesProvidedData ? emptyBreakdowns : breakdownsByCurrency.VND);
   const activeBreakdown = hasStatements ? activeBreakdownData[activeTab] : [];
   const activeLineItems = hasStatements
-    ? (lineItemsByPeriod[activePeriod.period] ?? [])
-    : [];
+    ? (lineItemsByPeriod[activePeriod.period] ?? EMPTY_LINE_ITEMS)
+    : EMPTY_LINE_ITEMS;
+  const sourceInsights = useMemo(
+    () => makeSourceInsights(activeLineItems),
+    [activeLineItems],
+  );
+  const shouldShowSourceInsights = hasSourceInsights(sourceInsights);
   const trendData = hasStatements ? dashboardTrend : [];
   const activeGuarantees = useMemo(
     () => guarantees.filter((guarantee) => guarantee.status !== 'archived'),
@@ -374,7 +504,6 @@ export function RoyaltyDashboard({
   );
   const statementPreviewPage = usePaginatedRows(clientPeriods);
   const guaranteePage = usePaginatedRows(activeGuarantees);
-  const lineItemPage = usePaginatedRows(activeLineItems);
   const ledgerPage = usePaginatedRows(clientPeriods);
 
   useEffect(() => {
@@ -786,64 +915,55 @@ export function RoyaltyDashboard({
               </TabsContent>
             </Tabs>
 
-            <section className="music-card p-4 md:p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Source data
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold">
-                    Dữ liệu chuẩn theo dòng
-                  </h2>
-                </div>
-                <Badge className="rounded-lg" variant="outline">
-                  {formatNumber(activeLineItems.length)} dòng
-                </Badge>
-              </div>
+            {shouldShowSourceInsights ? (
+              <section className="grid gap-4 xl:grid-cols-2">
+                {sourceInsights.salesPeriods.length > 0 ? (
+                  <MiniBreakdownPanel
+                    data={sourceInsights.salesPeriods}
+                    eyebrow="Sales Period"
+                    title="Doanh thu theo tháng phát sinh"
+                  />
+                ) : null}
 
-              <div className="overflow-hidden rounded-lg border border-border">
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[2200px]">
-                    <TableHeader>
-                      <TableRow>
-                        {standardStatementColumns.map((column) => (
-                          <TableHead key={column.key}>
-                            {column.label}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {activeLineItems.length > 0 ? (
-                        lineItemPage.visibleRows.map((item) => (
-                          <TableRow key={`${item.rowIndex}-${item.isrc ?? ''}`}>
-                            {standardStatementColumns.map((column) => (
-                              <TableCell
-                                className="max-w-[180px] truncate"
-                                key={column.key}
-                                title={formatLineItemValue(item, column.key)}
-                              >
-                                {formatLineItemValue(item, column.key)}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            className="h-24 text-center text-sm text-muted-foreground"
-                            colSpan={standardStatementColumns.length}
-                          >
-                            Chưa có dữ liệu chi tiết cho statement này.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-                <TablePagination {...lineItemPage} itemLabel="dòng dữ liệu" />
-              </div>
-            </section>
+                {sourceInsights.releaseArtists.length > 0 ? (
+                  <MiniBreakdownPanel
+                    data={sourceInsights.releaseArtists}
+                    eyebrow="Release Artist"
+                    title="Release artist nổi bật"
+                  />
+                ) : null}
+
+                {sourceInsights.contentTypes.length > 0 ? (
+                  <MiniBreakdownPanel
+                    data={sourceInsights.contentTypes}
+                    eyebrow="Type"
+                    title="Loại nội dung"
+                  />
+                ) : null}
+
+                {sourceInsights.configurations.length > 0 ? (
+                  <MiniBreakdownPanel
+                    data={sourceInsights.configurations}
+                    eyebrow="Configuration"
+                    title="Configuration phụ"
+                  />
+                ) : null}
+
+                {sourceInsights.contracts.length > 0 ? (
+                  <MiniTablePanel
+                    eyebrow="Contract Name"
+                    rows={sourceInsights.contracts}
+                    title="Hợp đồng trong statement"
+                  />
+                ) : null}
+
+                {sourceInsights.trackIdentities.length > 0 ? (
+                  <TrackIdentityPanel rows={sourceInsights.trackIdentities} />
+                ) : null}
+
+                <SourceFinancePanel rows={sourceInsights.financeRows} />
+              </section>
+            ) : null}
 
             <section className="music-card p-4 md:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -965,6 +1085,170 @@ function parseScopeInput(input: unknown, periods: string[]) {
   return {
     period: candidate.period,
   };
+}
+
+function MiniBreakdownPanel({
+  data,
+  eyebrow,
+  title,
+}: {
+  data: AggregatedLineItem[];
+  eyebrow: string;
+  title: string;
+}) {
+  return (
+    <section className="music-card p-4 md:p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {eyebrow}
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">{title}</h2>
+        </div>
+        <Badge className="rounded-lg" variant="outline">
+          Top {Math.min(data.length, 8)}
+        </Badge>
+      </div>
+      <div className="min-h-[260px] rounded-lg border border-border bg-white p-4">
+        <RankedBreakdown data={data.slice(0, 8)} />
+      </div>
+    </section>
+  );
+}
+
+function MiniTablePanel({
+  eyebrow,
+  rows,
+  title,
+}: {
+  eyebrow: string;
+  rows: AggregatedLineItem[];
+  title: string;
+}) {
+  const page = usePaginatedRows(rows);
+
+  return (
+    <section className="music-card p-4 md:p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {eyebrow}
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">{title}</h2>
+        </div>
+        <Badge className="rounded-lg" variant="outline">
+          {formatNumber(rows.length)} mục
+        </Badge>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tên</TableHead>
+              <TableHead>Net Payable</TableHead>
+              <TableHead>Sales</TableHead>
+              <TableHead>Dòng</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {page.visibleRows.map((row) => (
+              <TableRow key={row.name}>
+                <TableCell className="max-w-[240px] truncate font-medium">
+                  {row.name}
+                </TableCell>
+                <TableCell>{formatMoney(row.value)}</TableCell>
+                <TableCell>{formatNumber(row.units)}</TableCell>
+                <TableCell>{formatNumber(row.rows)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <TablePagination {...page} itemLabel="mục" />
+      </div>
+    </section>
+  );
+}
+
+function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
+  return (
+    <section className="music-card p-4 md:p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            ISRC / Version
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">Tracking bài hát</h2>
+        </div>
+        <Badge className="rounded-lg" variant="outline">
+          Top {formatNumber(rows.length)}
+        </Badge>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Bài hát</TableHead>
+              <TableHead>ISRC</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Net Payable</TableHead>
+              <TableHead>Sales</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={`${row.isrc}:${row.trackTitle}`}>
+                <TableCell className="max-w-[220px] truncate font-medium">
+                  {row.trackTitle}
+                </TableCell>
+                <TableCell className="font-mono text-xs">{row.isrc}</TableCell>
+                <TableCell>{row.trackVersion ?? '-'}</TableCell>
+                <TableCell>{formatMoney(row.netPayable)}</TableCell>
+                <TableCell>{formatNumber(row.sales)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
+}
+
+function SourceFinancePanel({ rows }: { rows: SourceInsights['financeRows'] }) {
+  const visibleRows = rows.filter((row) => row.value !== '-');
+  if (visibleRows.length === 0) return null;
+
+  return (
+    <section className="music-card p-4 md:p-5">
+      <div className="mb-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          Gross / Royalty
+        </p>
+        <h2 className="mt-1 text-lg font-semibold">Chỉ số tài chính bổ sung</h2>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Chỉ số</TableHead>
+              <TableHead>Giá trị</TableHead>
+              <TableHead>Ghi chú</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleRows.map((row) => (
+              <TableRow key={row.label}>
+                <TableCell className="font-medium">{row.label}</TableCell>
+                <TableCell>{row.value}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {row.helper}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
 }
 
 function BreakdownChart({

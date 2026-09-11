@@ -236,6 +236,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-10: `npx wrangler deploy --config wrangler.cloudflare.jsonc` thanh cong, Worker version `1d807731-631c-4c4e-a7a5-755d627ec45b`.
 - 2026-09-10: `npm run test:production` thanh cong tren `https://artistportal.zuongzeroent.com`: `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin/export nhay cam tra 401 khi chua dang nhap.
 - Viec con lai de bat luu detail rows production: apply remote D1 migration `drizzle/0010_statement_line_items.sql` sau khi token Cloudflare co quyen D1.
+- 2026-09-11: sua UX client dashboard cho Phase 8: bo bang raw `Du lieu chuan theo dong` 22 cot; cac cot da co trong chart hien huu tiep tuc dung chart cu, cac cot chua co duoc gom thanh chart/bang nho rieng nhu Sales Period, Release Artist, Type, Configuration phu, Contract, ISRC/Version va Gross/Royalty.
+- 2026-09-11: `npx oxfmt --write components\royalty-dashboard.tsx tests\static\security-contracts.test.mjs`.
+- 2026-09-11: `npx oxlint components\royalty-dashboard.tsx tests\static\security-contracts.test.mjs`.
+- 2026-09-11: `npm run test` thanh cong: 17 unit tests + 10 contract tests.
+- 2026-09-11: `npm run build` thanh cong sau khi sua UX line-item insights.
+- 2026-09-11: `npx wrangler deploy --config wrangler.cloudflare.jsonc` thanh cong, Worker version `c2b6eb64-2593-432a-84e8-730660b12b47`.
+- 2026-09-11: `npm run test:production` thanh cong sau deploy UX line-item insights; `/login`, `/forgot-password`, `/login/verify` tra 200 va cac API admin/export nhay cam tra 401 khi chua dang nhap.
 - `npx oxfmt --write components/admin-console.tsx`
 - `npx oxlint components/admin-console.tsx`
 - `npm run build`

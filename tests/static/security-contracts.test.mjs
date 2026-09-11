@@ -103,8 +103,11 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(clientData, /trend: \[\]/);
   assert.match(clientDashboard, /createEmptyCurrencyBreakdowns/);
   assert.match(clientDashboard, /Chưa có statement/);
-  assert.match(clientDashboard, /standardStatementColumns/);
-  assert.match(clientDashboard, /Dữ liệu chuẩn theo dòng/);
+  assert.doesNotMatch(clientDashboard, /standardStatementColumns/);
+  assert.doesNotMatch(clientDashboard, /Dữ liệu chuẩn theo dòng/);
+  assert.match(clientDashboard, /makeSourceInsights/);
+  assert.match(clientDashboard, /Doanh thu theo tháng phát sinh/);
+  assert.match(clientDashboard, /Tracking bài hát/);
   assert.match(adminDashboard, /trendingTracks/);
   assert.match(adminDashboard, /trendingArtists/);
   assert.match(adminDashboard, /emptyAdminOverviewData/);
