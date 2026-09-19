@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   CheckCircle2,
+  ChevronDown,
   Disc3,
   Download,
   FileSpreadsheet,
@@ -54,7 +55,6 @@ import {
   type BreakdownKey,
   type BreakdownSection,
   type RevenueTrendPoint,
-  type StatementMetric,
   type StatementPeriod,
 } from '@/lib/dashboard-data';
 import {
@@ -103,24 +103,6 @@ const palette = [
 ];
 
 const EMPTY_LINE_ITEMS: StatementLineItem[] = [];
-
-const toneClass: Record<StatementMetric['tone'], string> = {
-  ink: 'border-l-[#071118]',
-  blue: 'border-l-[#2563eb]',
-  teal: 'border-l-[#00b8a9]',
-  amber: 'border-l-[#f59e0b]',
-  rose: 'border-l-[#ff4d6d]',
-  violet: 'border-l-[#7c3aed]',
-};
-
-const toneDotClass: Record<StatementMetric['tone'], string> = {
-  ink: 'bg-[#071118]',
-  blue: 'bg-[#2563eb]',
-  teal: 'bg-[#00b8a9]',
-  amber: 'bg-[#f59e0b]',
-  rose: 'bg-[#ff4d6d]',
-  violet: 'bg-[#7c3aed]',
-};
 
 type DashboardAccessLevel = 'admin' | 'owner' | 'viewer' | 'finance';
 
@@ -198,97 +180,25 @@ function statementExportUrl(reportPeriodId: string, format: 'excel' | 'pdf') {
   return `/api/statements/${encodeURIComponent(reportPeriodId)}/export?format=${format}`;
 }
 
-function makeQuarterCashFlow(activePeriod: StatementPeriod): StatementMetric[] {
+function makeQuarterFinancialSummary(activePeriod: StatementPeriod) {
   const revenueReduction = Math.max(
     activePeriod.grossRevenue - activePeriod.revenue,
     0,
   );
+  const totalDeductions =
+    revenueReduction + activePeriod.costs + activePeriod.reservesWithheld;
   const quarterNet =
     activePeriod.revenue -
     activePeriod.costs -
     activePeriod.reservesWithheld +
     activePeriod.reservesReleased;
 
-  return [
-    {
-      label: 'Tổng doanh thu',
-      value: formatMoney(activePeriod.grossRevenue),
-      helper: 'Doanh thu gộp ghi nhận trong quý',
-      tone: 'ink',
-    },
-    {
-      label: 'Các khoản giảm trừ',
-      value: formatMoney(revenueReduction),
-      helper: 'Chênh lệch giữa doanh thu gộp và doanh thu ròng',
-      tone: 'amber',
-    },
-    {
-      label: 'GM đã khấu trừ',
-      value: formatMoney(activePeriod.costs),
-      helper: 'Khoản tạm ứng GM được thu hồi trong quý',
-      tone: 'rose',
-    },
-    {
-      label: 'Dự phòng giữ lại',
-      value: formatMoney(activePeriod.reservesWithheld),
-      helper: 'Khoản tạm giữ trong kỳ báo cáo',
-      tone: 'violet',
-    },
-    {
-      label: 'Dự phòng hoàn lại',
-      value: formatMoney(activePeriod.reservesReleased),
-      helper: 'Khoản dự phòng được cộng trả trong quý',
-      tone: 'blue',
-    },
-    {
-      label: 'Thực nhận trong quý',
-      value: formatMoney(quarterNet),
-      helper: 'Doanh thu ròng sau GM và dự phòng',
-      tone: 'teal',
-    },
-  ];
-}
-
-function makeSettlementMetrics(
-  activePeriod: StatementPeriod,
-): StatementMetric[] {
-  const unpaid = Math.max(activePeriod.payable - activePeriod.paid, 0);
-
-  return [
-    {
-      label: 'Số dư đầu kỳ',
-      value: formatMoney(activePeriod.opening),
-      helper: 'Số tiền được chuyển từ quý trước',
-      tone: 'ink',
-    },
-    {
-      label: 'Tổng phải trả',
-      value: formatMoney(activePeriod.payable),
-      helper: 'Số dư đầu kỳ cộng thực nhận trong quý',
-      tone: 'violet',
-    },
-    {
-      label: 'Đã thanh toán',
-      value: formatMoney(activePeriod.paid),
-      helper:
-        activePeriod.paymentStatus === 'paid'
-          ? 'Đã chuyển khoản cho khách hàng'
-          : 'Chưa phát sinh thanh toán',
-      tone: 'teal',
-    },
-    {
-      label: 'Chưa thanh toán',
-      value: formatMoney(unpaid),
-      helper: 'Tổng phải trả trừ số tiền đã thanh toán',
-      tone: 'amber',
-    },
-    {
-      label: 'Chuyển kỳ sau',
-      value: formatMoney(activePeriod.carryForward),
-      helper: 'Số dư giữ lại khi chưa đạt ngưỡng chuyển khoản',
-      tone: 'rose',
-    },
-  ];
+  return {
+    quarterNet,
+    revenueReduction,
+    totalDeductions,
+    unpaid: Math.max(activePeriod.payable - activePeriod.paid, 0),
+  };
 }
 
 function makeEmptyPeriod({
@@ -541,8 +451,7 @@ export function RoyaltyDashboard({
       clientName: assignedClient.name,
       period: resolvedSelectedPeriod || defaultPeriod,
     });
-  const quarterCashFlow = makeQuarterCashFlow(activePeriod);
-  const settlementMetrics = makeSettlementMetrics(activePeriod);
+  const financialSummary = makeQuarterFinancialSummary(activePeriod);
   const activeSection =
     breakdownSections.find((section) => section.id === activeTab) ??
     breakdownSections[0];
@@ -776,56 +685,98 @@ export function RoyaltyDashboard({
               </div>
             </section>
 
-            <section aria-labelledby="quarter-cash-flow-title">
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <section
+              aria-labelledby="financial-summary-title"
+              className="music-card overflow-hidden"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 md:px-5">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Dòng tiền trong quý
+                    Tổng quan tài chính
                   </p>
                   <h2
                     className="mt-1 text-lg font-semibold"
-                    id="quarter-cash-flow-title"
+                    id="financial-summary-title"
                   >
-                    Từ doanh thu đến thực nhận
+                    {vietnamesePeriodLabel(activePeriod.period)}
                   </h2>
                 </div>
-                <Badge className="rounded-lg" variant="outline">
-                  {vietnamesePeriodLabel(activePeriod.period)}
+                <Badge className={settlementBadgeClass(activePeriod)}>
+                  {settlementStatusLabel(activePeriod)}
                 </Badge>
               </div>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-                {quarterCashFlow.map((metric, index) => (
-                  <FinancialMetricCard
-                    index={index + 1}
-                    key={metric.label}
-                    metric={metric}
-                  />
-                ))}
-              </div>
-            </section>
 
-            <section aria-labelledby="settlement-summary-title">
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Thanh toán và số dư
+              <div className="grid md:grid-cols-3 md:divide-x md:divide-border">
+                <FinancialSummaryValue
+                  label="Tổng doanh thu"
+                  value={formatMoney(activePeriod.grossRevenue)}
+                />
+                <FinancialSummaryValue
+                  label="Tổng giảm trừ"
+                  value={formatMoney(financialSummary.totalDeductions)}
+                />
+                <FinancialSummaryValue
+                  emphasized
+                  label="Thực nhận trong quý"
+                  value={formatMoney(financialSummary.quarterNet)}
+                />
+              </div>
+
+              <div className="border-t border-border bg-muted/25 px-4 py-4 md:px-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">Thanh toán</p>
+                  <p className="text-xs text-muted-foreground">
+                    Ngưỡng chuyển khoản {formatMoney(SETTLEMENT_THRESHOLD_VND)}
                   </p>
-                  <h2
-                    className="mt-1 text-lg font-semibold"
-                    id="settlement-summary-title"
-                  >
-                    Tình trạng đối soát
-                  </h2>
                 </div>
-                <p className="text-xs font-medium text-muted-foreground">
-                  Ngưỡng chuyển khoản {formatMoney(SETTLEMENT_THRESHOLD_VND)}
-                </p>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <PaymentSummaryValue
+                    label="Cần thanh toán"
+                    value={formatMoney(activePeriod.payable)}
+                  />
+                  <PaymentSummaryValue
+                    label="Đã thanh toán"
+                    value={formatMoney(activePeriod.paid)}
+                  />
+                  <PaymentSummaryValue
+                    label="Còn lại"
+                    value={formatMoney(financialSummary.unpaid)}
+                  />
+                </dl>
               </div>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                {settlementMetrics.map((metric) => (
-                  <FinancialMetricCard key={metric.label} metric={metric} />
-                ))}
-              </div>
+
+              <details className="group border-t border-border">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold hover:bg-muted/30 md:px-5 [&::-webkit-details-marker]:hidden">
+                  <span>Chi tiết cách tính</span>
+                  <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                </summary>
+                <dl className="grid border-t border-border bg-muted/15 sm:grid-cols-2 lg:grid-cols-3">
+                  <FinancialDetailValue
+                    label="Giảm trừ doanh thu"
+                    value={formatMoney(financialSummary.revenueReduction)}
+                  />
+                  <FinancialDetailValue
+                    label="GM đã khấu trừ"
+                    value={formatMoney(activePeriod.costs)}
+                  />
+                  <FinancialDetailValue
+                    label="Dự phòng giữ lại"
+                    value={formatMoney(activePeriod.reservesWithheld)}
+                  />
+                  <FinancialDetailValue
+                    label="Dự phòng hoàn lại"
+                    value={`+${formatMoney(activePeriod.reservesReleased)}`}
+                  />
+                  <FinancialDetailValue
+                    label="Số dư đầu kỳ"
+                    value={formatMoney(activePeriod.opening)}
+                  />
+                  <FinancialDetailValue
+                    label="Chuyển kỳ sau"
+                    value={formatMoney(activePeriod.carryForward)}
+                  />
+                </dl>
+              </details>
             </section>
 
             <section
@@ -1157,38 +1108,42 @@ export function RoyaltyDashboard({
   );
 }
 
-function FinancialMetricCard({
-  index,
-  metric,
+function FinancialSummaryValue({
+  emphasized = false,
+  label,
+  value,
 }: {
-  index?: number;
-  metric: StatementMetric;
+  emphasized?: boolean;
+  label: string;
+  value: string;
 }) {
   return (
-    <article
-      className={`music-card min-h-[142px] border-l-4 p-4 ${toneClass[metric.tone]}`}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase leading-5 tracking-[0.14em] text-muted-foreground">
-          {metric.label}
-        </p>
-        {index ? (
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground">
-            {index}
-          </span>
-        ) : (
-          <span
-            className={`size-2.5 shrink-0 rounded-full ${toneDotClass[metric.tone]}`}
-          />
-        )}
-      </div>
-      <p className="font-display mt-5 break-words text-2xl font-semibold leading-tight">
-        {metric.value}
+    <div className={emphasized ? 'bg-[#eafaf7] p-5' : 'p-5'}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
       </p>
-      <p className="mt-3 text-xs font-medium leading-5 text-muted-foreground">
-        {metric.helper}
+      <p className="font-display mt-2 break-words text-2xl font-semibold leading-tight md:text-3xl">
+        {value}
       </p>
-    </article>
+    </div>
+  );
+}
+
+function PaymentSummaryValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-base font-semibold">{value}</dd>
+    </div>
+  );
+}
+
+function FinancialDetailValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0 sm:border-r md:px-5">
+      <dt className="text-sm text-muted-foreground">{label}</dt>
+      <dd className="shrink-0 text-sm font-semibold">{value}</dd>
+    </div>
   );
 }
 

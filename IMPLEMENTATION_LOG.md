@@ -285,6 +285,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 8 - Data chuan 22 cot: WORKER DEPLOYED, D1 MIGRATION PENDING. Da merge file `test.xlsx` lam schema chuan, UI admin/client hien mapping/detail, export co sheet `Source Rows`; Worker co guard khi bang chua ton tai. Can apply migration 0010 de bat luu du detail rows vao `statement_line_items`.
 - Payment marking toi gian: CODE DONE, LOCAL DB READY. Chi co `unpaid`/`paid`, paid date va actor; khong them partial payment, chung tu hay bang lich su rieng.
 - 2026-09-19: CLIENT DASHBOARD FINANCIAL UX DEPLOYED. Da deploy len `https://artistportal.zuongzeroent.com` voi Worker version `5bae66af-dbeb-47e9-bbf8-4d459a3fc490`; `npm run test:production` dat 10/10 kiem tra (cac trang auth tra 200, API bao ve tra 401 khi chua dang nhap).
+- 2026-09-19: CLIENT FINANCIAL SUMMARY SIMPLIFIED AND DEPLOYED. Da gom 11 the tai chinh thanh mot khoi tong quan gom doanh thu, tong giam tru, thuc nhan va ba chi so thanh toan; GM, du phong va so du duoc thu gon trong `Chi tiet cach tinh`. Da kiem tra desktop/mobile, `npm test`, `npm run build` va production smoke 10/10; Worker version `4c2b554f-3add-4300-b2b7-c429f14aca40`.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 

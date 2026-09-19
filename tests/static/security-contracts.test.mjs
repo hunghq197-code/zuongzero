@@ -116,7 +116,7 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.doesNotMatch(clientDashboard, /standardStatementColumns/);
   assert.doesNotMatch(clientDashboard, /Dữ liệu chuẩn theo dòng/);
   assert.match(clientDashboard, /makeSourceInsights/);
-  assert.match(clientDashboard, /Từ doanh thu đến thực nhận/);
+  assert.match(clientDashboard, /Tổng quan tài chính/);
   assert.match(clientDashboard, /Thực nhận trong quý/);
   assert.match(clientDashboard, /Chưa thanh toán/);
   assert.match(clientData, /s\.gross_revenue AS grossRevenue/);
