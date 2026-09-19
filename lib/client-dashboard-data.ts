@@ -15,11 +15,12 @@ import {
   createEmptyCurrencyBreakdowns,
   dimensionToBreakdownKey,
 } from '@/lib/royalty-breakdowns';
-import { summarizeSettlement } from '@/lib/settlements';
 import {
-  listTrackGuarantees,
-  type TrackGuaranteeRow,
-} from '@/lib/guarantees';
+  summarizeSettlement,
+  summarizeStatementPayment,
+  type StatementPaymentStatus,
+} from '@/lib/settlements';
+import { listTrackGuarantees, type TrackGuaranteeRow } from '@/lib/guarantees';
 import {
   hasStatementLineItemsTable,
   type StatementLineItem,
@@ -43,8 +44,11 @@ type StatementRow = {
   closing: number;
   costs: number;
   currency: CurrencyCode;
+  grossRevenue: number;
   id: string;
   opening: number;
+  paidAt: string | null;
+  paymentStatus: StatementPaymentStatus;
   period: string;
   reservesReleased: number;
   reservesWithheld: number;
@@ -88,8 +92,11 @@ export async function getClientDashboardData({
          rp.period,
          rp.currency,
          rp.status,
+         rp.payment_status AS paymentStatus,
+         rp.paid_at AS paidAt,
          c.display_name AS clientName,
          s.opening_balance AS opening,
+         s.gross_revenue AS grossRevenue,
          s.net_revenue AS revenue,
          s.net_costs AS costs,
          s.reserves_withheld AS reservesWithheld,
@@ -127,6 +134,10 @@ export async function getClientDashboardData({
       reservesWithheld: Number(row.reservesWithheld) || 0,
       revenue,
     });
+    const payment = summarizeStatementPayment(
+      settlement,
+      row.paymentStatus === 'paid' ? 'paid' : 'unpaid',
+    );
 
     return {
       carryForward: settlement.carryForward,
@@ -135,13 +146,18 @@ export async function getClientDashboardData({
       closing: settlement.carryForward,
       costs,
       currency: row.currency,
+      grossRevenue: Number(row.grossRevenue) || 0,
       id: row.id,
       label: periodDisplayLabel(row.period),
       opening,
-      paid: settlement.paidAmount,
+      paid: payment.paidAmount,
+      paidAt: payment.status === 'paid' ? row.paidAt : null,
+      paymentStatus: payment.status,
       payable: settlement.payable,
       period: row.period,
       revenue,
+      reservesReleased: Number(row.reservesReleased) || 0,
+      reservesWithheld: Number(row.reservesWithheld) || 0,
       rowCount: Number(row.rowCount) || 0,
       settlementStatus: settlement.status,
       status: row.status,

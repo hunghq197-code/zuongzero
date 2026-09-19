@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   Copy,
   Disc3,
-  Download,
   Edit3,
   EyeOff,
   FileSpreadsheet,
@@ -63,6 +62,11 @@ import {
   type ConsoleRailItem,
 } from '@/components/music-brand';
 import { Progress } from '@/components/ui/progress';
+import {
+  NativeSelect,
+  NativeSelectOptGroup,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
 import {
   Select,
   SelectContent,
@@ -125,11 +129,17 @@ type ManagedCustomerRow = {
 
 type CustomerStatus = 'active' | 'locked' | 'archived';
 type CustomerActionState = 'idle' | 'saving' | 'saved' | 'failed';
-type StatementAction = 'publish' | 'unpublish' | 'lock';
+type StatementAction =
+  | 'publish'
+  | 'unpublish'
+  | 'lock'
+  | 'mark_paid'
+  | 'mark_unpaid';
 type CustomerStatusFilter = 'all' | CustomerStatus;
 type StatementStatusFilter = 'all' | AdminStatementRow['status'];
 type GuaranteeStatusFilter = 'all' | TrackGuaranteeStatus;
 type UploadMode = 'single' | 'bulk';
+type ImportStrategy = 'create' | 'replace' | 'sync';
 type ReminderActionState = 'idle' | 'saving' | 'saved' | 'failed';
 type EmailActionState = 'idle' | 'loading' | 'saving' | 'saved' | 'failed';
 type AdminTab =
@@ -327,6 +337,24 @@ function statementStatusLabel(status: AdminStatementRow['status']) {
   return 'Draft';
 }
 
+function importStrategyLabel(strategy: ImportStrategy) {
+  if (strategy === 'sync') return 'Đồng bộ bổ sung';
+  if (strategy === 'replace') return 'Ghi đè toàn bộ';
+  return 'Tạo statement mới';
+}
+
+function importStrategyDescription(strategy: ImportStrategy) {
+  if (strategy === 'sync') {
+    return 'Giữ dữ liệu cũ, thêm dòng mới và cập nhật dòng trùng khóa nghiệp vụ.';
+  }
+
+  if (strategy === 'replace') {
+    return 'Thay toàn bộ dữ liệu, biểu đồ và số liệu của khách hàng trong quý đã chọn.';
+  }
+
+  return 'Chỉ tạo khi khách hàng chưa có statement trong quý đã chọn.';
+}
+
 function statementStatusFilterLabel(status: StatementStatusFilter) {
   if (status === 'all') return 'Tất cả status';
   return statementStatusLabel(status);
@@ -339,22 +367,163 @@ function adminStatementExportUrl(
   return `/api/admin/statements/${encodeURIComponent(reportPeriodId)}/export?format=${format}`;
 }
 
-function settlementStatusLabel(status: AdminStatementRow['settlementStatus']) {
-  return status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán';
+function settlementStatusLabel(statement: AdminStatementRow) {
+  if (statement.settlementStatus === 'carried_forward') {
+    return 'Chuyển kỳ sau';
+  }
+
+  return statement.paymentStatus === 'paid'
+    ? 'Đã thanh toán'
+    : 'Chưa thanh toán';
 }
 
-function settlementBadgeClass(status: AdminStatementRow['settlementStatus']) {
-  return status === 'paid'
+function settlementBadgeClass(statement: AdminStatementRow) {
+  if (statement.settlementStatus === 'carried_forward') {
+    return 'rounded-lg bg-[#fff8e7] text-[#986200]';
+  }
+
+  return statement.paymentStatus === 'paid'
     ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
-    : 'rounded-lg bg-[#fff8e7] text-[#986200]';
+    : 'rounded-lg bg-[#fff1f0] text-[#a53a30]';
 }
 
 function settlementHelper(statement: AdminStatementRow) {
-  if (statement.settlementStatus === 'paid') {
-    return `Paid ${formatMoney(statement.paid)}`;
+  if (statement.settlementStatus === 'carried_forward') {
+    return `Qua quý sau ${formatMoney(statement.carryForward)}`;
   }
 
-  return `Qua quý sau ${formatMoney(statement.carryForward)}`;
+  if (statement.paymentStatus === 'paid') {
+    return statement.paidAt
+      ? `${formatMoney(statement.paid)} · ${formatAccountDate(statement.paidAt)}`
+      : formatMoney(statement.paid);
+  }
+
+  return `Chờ chuyển khoản ${formatMoney(statement.payable)}`;
+}
+
+function StatementPaymentAction({
+  busy,
+  onUpdate,
+  statement,
+}: {
+  busy: boolean;
+  onUpdate: (statement: AdminStatementRow, action: StatementAction) => void;
+  statement: AdminStatementRow;
+}) {
+  if (statement.settlementStatus === 'carried_forward') return null;
+
+  const isPaid = statement.paymentStatus === 'paid';
+
+  return (
+    <Button
+      className={
+        isPaid
+          ? 'mt-2 h-8 px-2 text-xs'
+          : 'mt-2 h-8 bg-[#00796f] px-2 text-xs text-white hover:bg-[#00665d]'
+      }
+      disabled={busy}
+      onClick={() => onUpdate(statement, isPaid ? 'mark_unpaid' : 'mark_paid')}
+      type="button"
+      variant={isPaid ? 'outline' : 'default'}
+    >
+      {isPaid ? (
+        <RefreshCw className="size-3.5" />
+      ) : (
+        <CheckCircle2 className="size-3.5" />
+      )}
+      {isPaid ? 'Hoàn tác' : 'Xác nhận đã trả'}
+    </Button>
+  );
+}
+
+function StatementActionsMenu({
+  busy,
+  isSuperAdmin,
+  onDelete,
+  onPrepareUpload,
+  onUpdate,
+  statement,
+}: {
+  busy: boolean;
+  isSuperAdmin: boolean;
+  onDelete: (statement: AdminStatementRow) => void;
+  onPrepareUpload: (
+    statement: AdminStatementRow,
+    strategy: Extract<ImportStrategy, 'replace' | 'sync'>,
+  ) => void;
+  onUpdate: (statement: AdminStatementRow, action: StatementAction) => void;
+  statement: AdminStatementRow;
+}) {
+  function runAction(action: string) {
+    if (action === 'pdf' || action === 'excel') {
+      window.location.assign(
+        adminStatementExportUrl(statement.reportPeriodId, action),
+      );
+      return;
+    }
+
+    if (action === 'sync' || action === 'replace') {
+      onPrepareUpload(statement, action);
+      return;
+    }
+
+    if (action === 'publish' || action === 'unpublish' || action === 'lock') {
+      onUpdate(statement, action);
+      return;
+    }
+
+    if (action === 'delete') onDelete(statement);
+  }
+
+  return (
+    <NativeSelect
+      aria-label={`Thao tác statement ${statement.clientName}`}
+      className="ml-auto w-[132px] bg-white"
+      disabled={busy}
+      onChange={(event) => runAction(event.currentTarget.value)}
+      size="sm"
+      value=""
+    >
+      <NativeSelectOption value="">Thao tác</NativeSelectOption>
+      <NativeSelectOptGroup label="Tải statement">
+        <NativeSelectOption value="pdf">Tải PDF</NativeSelectOption>
+        <NativeSelectOption value="excel">Tải Excel</NativeSelectOption>
+      </NativeSelectOptGroup>
+      <NativeSelectOptGroup label="Cập nhật dữ liệu">
+        <NativeSelectOption
+          disabled={statement.status === 'locked'}
+          value="sync"
+        >
+          Bổ sung dữ liệu
+        </NativeSelectOption>
+        <NativeSelectOption
+          disabled={statement.status === 'locked'}
+          value="replace"
+        >
+          Thay file
+        </NativeSelectOption>
+      </NativeSelectOptGroup>
+      <NativeSelectOptGroup label="Trạng thái">
+        {statement.status === 'published' ? (
+          <>
+            <NativeSelectOption value="unpublish">
+              Ẩn khỏi client
+            </NativeSelectOption>
+            <NativeSelectOption value="lock">Khóa statement</NativeSelectOption>
+          </>
+        ) : (
+          <NativeSelectOption value="publish">
+            {statement.status === 'locked' ? 'Mở lại' : 'Publish'}
+          </NativeSelectOption>
+        )}
+      </NativeSelectOptGroup>
+      {isSuperAdmin ? (
+        <NativeSelectOptGroup label="Nguy hiểm">
+          <NativeSelectOption value="delete">Xóa statement</NativeSelectOption>
+        </NativeSelectOptGroup>
+      ) : null}
+    </NativeSelect>
+  );
 }
 
 function guaranteeStatusLabel(status: TrackGuaranteeStatus) {
@@ -610,6 +779,9 @@ export function AdminConsole({
   >('idle');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadMode, setUploadMode] = useState<UploadMode>('single');
+  const [importStrategy, setImportStrategy] =
+    useState<ImportStrategy>('create');
+  const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false);
   const [uploadState, setUploadState] = useState<
     'idle' | 'uploading' | 'stored' | 'failed'
   >('idle');
@@ -724,7 +896,7 @@ export function AdminConsole({
           statement.clientName,
           statement.filename,
           statement.period,
-          settlementStatusLabel(statement.settlementStatus),
+          settlementStatusLabel(statement),
           statement.status,
         ])
       );
@@ -1287,6 +1459,7 @@ export function AdminConsole({
     const body = new FormData();
     body.append('file', selectedFile);
     body.append('uploadMode', uploadMode);
+    body.append('importStrategy', importStrategy);
     if (uploadMode === 'single' && activeClient) {
       body.append('clientId', activeClient.id);
     }
@@ -1314,6 +1487,7 @@ export function AdminConsole({
       }
 
       setUploadState('stored');
+      setSelectedFile(null);
       if (uploadMode === 'single' && result.customer && activeClient) {
         setCustomers((currentCustomers) =>
           currentCustomers.map((customer) =>
@@ -1342,6 +1516,15 @@ export function AdminConsole({
           : 'Không thể upload file ở thời điểm này.',
       );
     }
+  }
+
+  function requestWorkbookUpload() {
+    if (importStrategy === 'replace') {
+      setReplaceConfirmOpen(true);
+      return;
+    }
+
+    void uploadWorkbook();
   }
 
   async function createTrackGuarantee(event: { preventDefault: () => void }) {
@@ -1794,10 +1977,15 @@ export function AdminConsole({
     }
   }
 
-  function prepareStatementReplace(statement: AdminStatementRow) {
+  function prepareStatementUpload(
+    statement: AdminStatementRow,
+    strategy: Extract<ImportStrategy, 'replace' | 'sync'>,
+  ) {
     setUploadMode('single');
+    setImportStrategy(strategy);
     setSelectedClient(statement.clientId);
     setSelectedPeriod(statement.period);
+    setSelectedFile(null);
     setUploadState('idle');
     setUploadMessage('');
     document.getElementById('admin-upload-panel')?.scrollIntoView({
@@ -2792,8 +2980,9 @@ export function AdminConsole({
                             File tổng nhiều khách hàng
                           </span>
                           <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                            Bật khi Excel có cột Account No. / Mã khách hàng. Ngưỡng
-                            thanh toán {formatMoney(SETTLEMENT_THRESHOLD_VND)}.
+                            Bật khi Excel có cột Account No. / Mã khách hàng.
+                            Ngưỡng thanh toán{' '}
+                            {formatMoney(SETTLEMENT_THRESHOLD_VND)}.
                           </span>
                         </span>
                         <input
@@ -2877,6 +3066,49 @@ export function AdminConsole({
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <span className="block text-sm font-medium">
+                          Cách cập nhật
+                        </span>
+                        <Select
+                          onValueChange={(value) => {
+                            if (
+                              value === 'create' ||
+                              value === 'sync' ||
+                              value === 'replace'
+                            ) {
+                              setImportStrategy(value);
+                              setUploadState('idle');
+                              setUploadMessage('');
+                            }
+                          }}
+                          value={importStrategy}
+                        >
+                          <SelectTrigger
+                            aria-label="Cách cập nhật statement"
+                            className="music-control h-10 w-full"
+                          >
+                            <span className="flex-1 truncate text-left">
+                              {importStrategyLabel(importStrategy)}
+                            </span>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="create">
+                              Tạo statement mới
+                            </SelectItem>
+                            <SelectItem value="sync">
+                              Đồng bộ bổ sung
+                            </SelectItem>
+                            <SelectItem value="replace">
+                              Ghi đè toàn bộ
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          {importStrategyDescription(importStrategy)}
+                        </p>
                       </div>
                     </div>
 
@@ -2977,14 +3209,14 @@ export function AdminConsole({
                         validation.state !== 'ready' ||
                         uploadState === 'uploading'
                       }
-                      onClick={uploadWorkbook}
+                      onClick={requestWorkbookUpload}
                     >
                       <FolderLock className="size-4" />
                       {uploadState === 'uploading'
                         ? 'Đang lưu...'
                         : uploadMode === 'bulk'
-                          ? 'Import file tổng'
-                          : 'Lưu file'}
+                          ? `${importStrategyLabel(importStrategy)} file tổng`
+                          : importStrategyLabel(importStrategy)}
                     </Button>
                     {uploadMessage ? (
                       <p
@@ -3079,16 +3311,23 @@ export function AdminConsole({
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Client</TableHead>
-                          <TableHead>Period</TableHead>
-                          <TableHead>Rows</TableHead>
-                          <TableHead>Units</TableHead>
-                          <TableHead>Revenue</TableHead>
-                          <TableHead>GM</TableHead>
-                          <TableHead>Carry</TableHead>
-                          <TableHead>Đối soát</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Action</TableHead>
+                          <TableHead className="min-w-[112px]">
+                            Client
+                          </TableHead>
+                          <TableHead className="min-w-[88px]">Kỳ</TableHead>
+                          <TableHead className="min-w-[120px]">
+                            Dữ liệu
+                          </TableHead>
+                          <TableHead className="min-w-[200px]">
+                            Tài chính
+                          </TableHead>
+                          <TableHead className="min-w-[220px]">
+                            Thanh toán
+                          </TableHead>
+                          <TableHead>Trạng thái</TableHead>
+                          <TableHead className="w-[140px] text-right">
+                            Thao tác
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -3103,156 +3342,82 @@ export function AdminConsole({
                                   {statement.clientCode}
                                 </span>
                               </TableCell>
-                              <TableCell>{statement.periodLabel}</TableCell>
-                              <TableCell>
-                                {formatNumber(statement.rowCount)}
+                              <TableCell className="whitespace-nowrap">
+                                {statement.periodLabel}
                               </TableCell>
                               <TableCell>
-                                {formatNumber(statement.units)}
+                                <dl className="space-y-1 text-xs">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <dt className="text-muted-foreground">
+                                      Rows
+                                    </dt>
+                                    <dd className="font-medium tabular-nums">
+                                      {formatNumber(statement.rowCount)}
+                                    </dd>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <dt className="text-muted-foreground">
+                                      Units
+                                    </dt>
+                                    <dd className="font-medium tabular-nums">
+                                      {formatNumber(statement.units)}
+                                    </dd>
+                                  </div>
+                                </dl>
                               </TableCell>
                               <TableCell>
-                                {formatMoney(statement.revenue)}
+                                <p className="whitespace-nowrap font-medium tabular-nums">
+                                  {formatMoney(statement.revenue)}
+                                </p>
+                                <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+                                  GM{' '}
+                                  {statement.costs > 0
+                                    ? formatMoney(statement.costs)
+                                    : '-'}
+                                  <span className="px-1.5">·</span>
+                                  Carry {formatMoney(statement.carryForward)}
+                                </p>
                               </TableCell>
-                              <TableCell>
-                                {statement.costs > 0
-                                  ? formatMoney(statement.costs)
-                                  : '-'}
-                              </TableCell>
-                              <TableCell>
-                                {formatMoney(statement.carryForward)}
-                              </TableCell>
-                              <TableCell>
+                              <TableCell className="align-top">
                                 <Badge
-                                  className={settlementBadgeClass(
-                                    statement.settlementStatus,
-                                  )}
+                                  className={settlementBadgeClass(statement)}
                                   variant="secondary"
                                 >
-                                  {settlementStatusLabel(
-                                    statement.settlementStatus,
-                                  )}
+                                  {settlementStatusLabel(statement)}
                                 </Badge>
                                 <span className="mt-1 block text-xs text-muted-foreground">
                                   {settlementHelper(statement)}
                                 </span>
+                                <StatementPaymentAction
+                                  busy={
+                                    activeStatementActionId ===
+                                    statement.reportPeriodId
+                                  }
+                                  onUpdate={(target, action) => {
+                                    void updateStatement(target, action);
+                                  }}
+                                  statement={statement}
+                                />
                               </TableCell>
                               <TableCell>
                                 <Badge className="rounded-lg" variant="outline">
                                   {statementStatusLabel(statement.status)}
                                 </Badge>
                               </TableCell>
-                              <TableCell>
-                                <div className="flex flex-wrap gap-2">
-                                  <a
-                                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-sm font-medium transition-colors hover:bg-muted"
-                                    href={adminStatementExportUrl(
-                                      statement.reportPeriodId,
-                                      'pdf',
-                                    )}
-                                  >
-                                    <Download className="size-4" />
-                                    PDF
-                                  </a>
-                                  <a
-                                    className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-sm font-medium transition-colors hover:bg-muted"
-                                    href={adminStatementExportUrl(
-                                      statement.reportPeriodId,
-                                      'excel',
-                                    )}
-                                  >
-                                    <FileSpreadsheet className="size-4" />
-                                    Excel
-                                  </a>
-                                  <Button
-                                    className="h-9"
-                                    onClick={() =>
-                                      prepareStatementReplace(statement)
-                                    }
-                                    type="button"
-                                    variant="outline"
-                                  >
-                                    <Upload className="size-4" />
-                                    Replace
-                                  </Button>
-                                  {statement.status === 'published' ? (
-                                    <>
-                                      <Button
-                                        className="h-9"
-                                        disabled={
-                                          activeStatementActionId ===
-                                          statement.reportPeriodId
-                                        }
-                                        onClick={() => {
-                                          void updateStatement(
-                                            statement,
-                                            'unpublish',
-                                          );
-                                        }}
-                                        type="button"
-                                        variant="outline"
-                                      >
-                                        <EyeOff className="size-4" />
-                                        Ẩn
-                                      </Button>
-                                      <Button
-                                        className="h-9"
-                                        disabled={
-                                          activeStatementActionId ===
-                                          statement.reportPeriodId
-                                        }
-                                        onClick={() => {
-                                          void updateStatement(
-                                            statement,
-                                            'lock',
-                                          );
-                                        }}
-                                        type="button"
-                                        variant="outline"
-                                      >
-                                        <LockKeyhole className="size-4" />
-                                        Lock
-                                      </Button>
-                                    </>
-                                  ) : (
-                                    <Button
-                                      className="h-9"
-                                      disabled={
-                                        activeStatementActionId ===
-                                        statement.reportPeriodId
-                                      }
-                                      onClick={() => {
-                                        void updateStatement(
-                                          statement,
-                                          'publish',
-                                        );
-                                      }}
-                                      type="button"
-                                      variant="outline"
-                                    >
-                                      <RefreshCw className="size-4" />
-                                      {statement.status === 'locked'
-                                        ? 'Mở lại'
-                                        : 'Publish'}
-                                    </Button>
-                                  )}
-                                  {isSuperAdmin ? (
-                                    <Button
-                                      className="h-9 border-[#f0b7b2] text-[#a53a30] hover:bg-[#fff2f0]"
-                                      disabled={
-                                        activeStatementActionId ===
-                                        statement.reportPeriodId
-                                      }
-                                      onClick={() =>
-                                        setStatementDeleteTarget(statement)
-                                      }
-                                      type="button"
-                                      variant="outline"
-                                    >
-                                      <Trash2 className="size-4" />
-                                      Xoá
-                                    </Button>
-                                  ) : null}
-                                </div>
+                              <TableCell className="text-right align-top">
+                                <StatementActionsMenu
+                                  busy={
+                                    activeStatementActionId ===
+                                    statement.reportPeriodId
+                                  }
+                                  isSuperAdmin={isSuperAdmin}
+                                  onDelete={setStatementDeleteTarget}
+                                  onPrepareUpload={prepareStatementUpload}
+                                  onUpdate={(target, action) => {
+                                    void updateStatement(target, action);
+                                  }}
+                                  statement={statement}
+                                />
                               </TableCell>
                             </TableRow>
                           ))
@@ -3260,7 +3425,7 @@ export function AdminConsole({
                           <TableRow>
                             <TableCell
                               className="h-24 text-center text-sm text-muted-foreground"
-                              colSpan={10}
+                              colSpan={7}
                             >
                               {statementRows.length > 0
                                 ? 'Không có statement khớp bộ lọc.'
@@ -4174,6 +4339,42 @@ export function AdminConsole({
                 <ActivityLogPanel activityRows={activityRows} />
               </TabsContent>
             </Tabs>
+
+            <AlertDialog
+              onOpenChange={setReplaceConfirmOpen}
+              open={replaceConfirmOpen}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogMedia className="bg-[#fff7e6] text-[#9a6200]">
+                    <AlertTriangle className="size-5" />
+                  </AlertDialogMedia>
+                  <AlertDialogTitle>
+                    Ghi đè statement hiện tại?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Toàn bộ dữ liệu và biểu đồ của{' '}
+                    {uploadMode === 'bulk'
+                      ? 'các khách hàng khớp trong file tổng'
+                      : (activeClient?.name ?? 'khách hàng đã chọn')}{' '}
+                    trong {selectedPeriodLabel} sẽ được thay bằng file mới.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Huỷ</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-[#a26400] text-white hover:bg-[#845100]"
+                    disabled={uploadState === 'uploading'}
+                    onClick={() => {
+                      setReplaceConfirmOpen(false);
+                      void uploadWorkbook();
+                    }}
+                  >
+                    Ghi đè
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog
               onOpenChange={(open) => {

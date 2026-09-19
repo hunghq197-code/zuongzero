@@ -56,6 +56,19 @@ export type StatementLineItem = {
   trackVersion: string | null;
 };
 
+export type StatementLineItemMergeStats = {
+  added: number;
+  previous: number;
+  total: number;
+  unchanged: number;
+  updated: number;
+};
+
+export type StatementLineItemMergeResult = {
+  items: StatementLineItem[];
+  stats: StatementLineItemMergeStats;
+};
+
 export const standardStatementColumns: StandardStatementColumn[] = [
   {
     key: 'accountNo',
@@ -233,4 +246,114 @@ export async function hasStatementLineItemsTable(db: D1Database) {
   } catch {
     return false;
   }
+}
+
+export function mergeStatementLineItems(
+  existingItems: StatementLineItem[],
+  incomingItems: StatementLineItem[],
+): StatementLineItemMergeResult {
+  const mergedItems = existingItems.map((item) => ({ ...item }));
+  const existingIndexes = new Map<string, number[]>();
+  const incomingOffsets = new Map<string, number>();
+  let added = 0;
+  let unchanged = 0;
+  let updated = 0;
+
+  for (const [index, item] of existingItems.entries()) {
+    const key = statementLineItemMergeKey(item);
+    const indexes = existingIndexes.get(key) ?? [];
+    indexes.push(index);
+    existingIndexes.set(key, indexes);
+  }
+
+  for (const incoming of incomingItems) {
+    const key = statementLineItemMergeKey(incoming);
+    const offset = incomingOffsets.get(key) ?? 0;
+    const existingIndex = existingIndexes.get(key)?.[offset];
+    incomingOffsets.set(key, offset + 1);
+
+    if (existingIndex === undefined) {
+      mergedItems.push({ ...incoming });
+      added += 1;
+      continue;
+    }
+
+    const existing = mergedItems[existingIndex];
+    if (lineItemValuesEqual(existing, incoming)) {
+      unchanged += 1;
+    } else {
+      updated += 1;
+    }
+    mergedItems[existingIndex] = { ...incoming };
+  }
+
+  const items = mergedItems.map((item, index) => ({
+    ...item,
+    rowIndex: index + 2,
+  }));
+
+  return {
+    items,
+    stats: {
+      added,
+      previous: existingItems.length,
+      total: items.length,
+      unchanged,
+      updated,
+    },
+  };
+}
+
+export function statementLineItemMergeKey(item: StatementLineItem) {
+  return [
+    item.accountNo,
+    item.contractName,
+    item.contentType,
+    item.startDate,
+    item.periodEndDate,
+    item.releaseTitle,
+    item.releaseArtist,
+    item.isrc,
+    item.trackTitle,
+    item.trackVersion,
+    item.trackArtist,
+    item.salesPeriod,
+    item.releaseLabel,
+    item.territory,
+    item.distributionChannel,
+    item.configuration,
+    item.partner,
+    item.currency,
+  ]
+    .map(normalizeMergeKeyPart)
+    .join('|');
+}
+
+function lineItemValuesEqual(
+  left: StatementLineItem,
+  right: StatementLineItem,
+) {
+  return (
+    roundMergeMoney(left.sales) === roundMergeMoney(right.sales) &&
+    roundMergeMoney(left.netPayable) === roundMergeMoney(right.netPayable) &&
+    optionalNumberEqual(left.grossIncome, right.grossIncome) &&
+    optionalNumberEqual(left.royaltyRate, right.royaltyRate)
+  );
+}
+
+function optionalNumberEqual(left: number | null, right: number | null) {
+  if (left === null || right === null) return left === right;
+  return roundMergeMoney(left) === roundMergeMoney(right);
+}
+
+function normalizeMergeKeyPart(value: string | null) {
+  return (value ?? '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function roundMergeMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }

@@ -22,13 +22,13 @@ const railItems: Record<ConsoleRailVariant, ConsoleRailItem[]> = {
   admin: [
     { href: '/admin', icon: LayoutDashboard, label: 'Tổng quan' },
     { href: '/admin', icon: UsersRound, label: 'Khách hàng' },
-    { href: '/admin', icon: UploadCloud, label: 'Statement' },
+    { href: '/admin', icon: UploadCloud, label: 'Báo cáo' },
     { href: '/account', icon: ShieldCheck, label: 'Tài khoản' },
   ],
   client: [
     { href: '#client-overview', icon: LayoutDashboard, label: 'Tổng quan' },
-    { href: '#client-statements', icon: FileSpreadsheet, label: 'Statement' },
-    { href: '#client-breakdown', icon: WalletCards, label: 'Breakdown' },
+    { href: '#client-statements', icon: FileSpreadsheet, label: 'Báo cáo' },
+    { href: '#client-breakdown', icon: WalletCards, label: 'Phân tích' },
     { href: '/account', icon: ShieldCheck, label: 'Tài khoản' },
   ],
 };

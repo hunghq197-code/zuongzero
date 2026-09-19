@@ -28,9 +28,14 @@ export type StatementPeriod = {
   status: 'published' | 'validating' | 'locked' | 'empty';
   opening: number;
   paid: number;
+  paidAt: string | null;
+  paymentStatus: 'unpaid' | 'paid';
   payable: number;
+  grossRevenue: number;
   revenue: number;
   costs: number;
+  reservesReleased: number;
+  reservesWithheld: number;
   closing: number;
   settlementStatus: 'paid' | 'carried_forward';
   units: number;
@@ -100,10 +105,15 @@ export const periods: StatementPeriod[] = [
     status: 'published',
     opening: 0,
     payable: 742_563_571,
-    paid: 742_563_571,
+    paid: 0,
+    paidAt: null,
+    paymentStatus: 'unpaid',
     carryForward: 0,
+    grossRevenue: 742_563_571,
     revenue: 742_563_571,
     costs: 0,
+    reservesReleased: 0,
+    reservesWithheld: 0,
     closing: 0,
     settlementStatus: 'paid',
     units: 883_526,
@@ -119,10 +129,15 @@ export const periods: StatementPeriod[] = [
     status: 'locked',
     opening: 0,
     payable: 244_025_742,
-    paid: 244_025_742,
+    paid: 0,
+    paidAt: null,
+    paymentStatus: 'unpaid',
     carryForward: 0,
+    grossRevenue: 244_025_742,
     revenue: 244_025_742,
     costs: 0,
+    reservesReleased: 0,
+    reservesWithheld: 0,
     closing: 0,
     settlementStatus: 'paid',
     units: 293_099,
@@ -138,10 +153,15 @@ export const periods: StatementPeriod[] = [
     status: 'published',
     opening: 0,
     payable: 194_824_171,
-    paid: 194_824_171,
+    paid: 0,
+    paidAt: null,
+    paymentStatus: 'unpaid',
     carryForward: 0,
+    grossRevenue: 194_824_171,
     revenue: 194_824_171,
     costs: 0,
+    reservesReleased: 0,
+    reservesWithheld: 0,
     closing: 0,
     settlementStatus: 'paid',
     units: 230_239,
@@ -169,49 +189,49 @@ export const revenueTrend: RevenueTrendPoint[] = [
 export const breakdownSections: BreakdownSection[] = [
   {
     id: 'sources',
-    label: 'Partners',
+    label: 'Đối tác',
     sourceColumn: 'Partner',
     chartType: 'bar',
   },
   {
     id: 'subSources',
-    label: 'Sub Sources',
+    label: 'Nguồn phụ',
     sourceColumn: 'Sub Source',
     chartType: 'bar',
   },
   {
     id: 'configurations',
-    label: 'Distribution Channels',
+    label: 'Kênh phân phối',
     sourceColumn: 'Distribution Channel',
     chartType: 'donut',
   },
   {
     id: 'territories',
-    label: 'Territories',
+    label: 'Quốc gia / khu vực',
     sourceColumn: 'Territory',
     chartType: 'bar',
   },
   {
     id: 'tracks',
-    label: 'Tracks',
+    label: 'Bài hát',
     sourceColumn: 'Track Title',
     chartType: 'ranked',
   },
   {
     id: 'artists',
-    label: 'Track Artists',
+    label: 'Nghệ sĩ',
     sourceColumn: 'Track Artist',
     chartType: 'donut',
   },
   {
     id: 'releases',
-    label: 'Release Titles',
+    label: 'Bản phát hành',
     sourceColumn: 'Release Title',
     chartType: 'donut',
   },
   {
     id: 'labels',
-    label: 'Labels',
+    label: 'Hãng phát hành',
     sourceColumn: 'Release Label',
     chartType: 'donut',
   },

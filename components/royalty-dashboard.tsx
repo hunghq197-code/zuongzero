@@ -142,95 +142,150 @@ function formatRate(value: number | null) {
   return `${normalized.toFixed(2)}%`;
 }
 
+function vietnamesePeriodLabel(period: string) {
+  const match = period.match(/^(20\d{2})-Q([1-4])$/);
+  return match ? `Quý ${match[2]}/${match[1]}` : periodDisplayLabel(period);
+}
+
 function statusLabel(status: string) {
-  if (status === 'published') return 'Published';
-  if (status === 'locked') return 'Locked';
+  if (status === 'published') return 'Đã công bố';
+  if (status === 'locked') return 'Đã khóa';
   if (status === 'empty') return 'Chưa có dữ liệu';
-  return 'Validating';
+  return 'Đang kiểm tra';
+}
+
+function accessLevelLabel(accessLevel: DashboardAccessLevel) {
+  if (accessLevel === 'admin') return 'Quản trị viên';
+  if (accessLevel === 'owner') return 'Chủ tài khoản';
+  if (accessLevel === 'finance') return 'Tài chính';
+  return 'Người xem';
 }
 
 function guaranteeStatusLabel(status: TrackGuaranteeRow['status']) {
   if (status === 'active') return 'Đang trừ GM';
-  if (status === 'recouped') return 'Đã recoup';
-  return 'Archived';
+  if (status === 'recouped') return 'Đã thu hồi';
+  return 'Đã lưu trữ';
 }
 
-function settlementStatusLabel(status: StatementPeriod['settlementStatus']) {
-  return status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán';
+function settlementStatusLabel(period: StatementPeriod) {
+  if (period.settlementStatus === 'carried_forward') return 'Chuyển kỳ sau';
+  return period.paymentStatus === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán';
 }
 
-function settlementBadgeClass(status: StatementPeriod['settlementStatus']) {
-  return status === 'paid'
+function settlementBadgeClass(period: StatementPeriod) {
+  if (period.settlementStatus === 'carried_forward') {
+    return 'rounded-lg bg-[#fff8e7] text-[#986200]';
+  }
+
+  return period.paymentStatus === 'paid'
     ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
-    : 'rounded-lg bg-[#fff8e7] text-[#986200]';
+    : 'rounded-lg bg-[#fff1f0] text-[#a53a30]';
 }
 
 function settlementHelper(period: StatementPeriod) {
-  if (period.settlementStatus === 'paid') {
+  if (period.settlementStatus === 'carried_forward') {
+    return `Chuyển quý sau ${formatMoney(period.carryForward)}`;
+  }
+
+  if (period.paymentStatus === 'paid') {
     return `Đã thanh toán ${formatMoney(period.paid)}`;
   }
 
-  return `Chuyển quý sau ${formatMoney(period.carryForward)}`;
+  return `Chờ chuyển khoản ${formatMoney(period.payable)}`;
 }
 
 function statementExportUrl(reportPeriodId: string, format: 'excel' | 'pdf') {
   return `/api/statements/${encodeURIComponent(reportPeriodId)}/export?format=${format}`;
 }
 
-function makeMetrics(activePeriod: StatementPeriod): StatementMetric[] {
+function makeQuarterCashFlow(activePeriod: StatementPeriod): StatementMetric[] {
+  const revenueReduction = Math.max(
+    activePeriod.grossRevenue - activePeriod.revenue,
+    0,
+  );
+  const quarterNet =
+    activePeriod.revenue -
+    activePeriod.costs -
+    activePeriod.reservesWithheld +
+    activePeriod.reservesReleased;
+
   return [
     {
-      label: 'Opening Balance',
-      value: formatMoney(activePeriod.opening),
-      helper: 'Beginning balance',
+      label: 'Tổng doanh thu',
+      value: formatMoney(activePeriod.grossRevenue),
+      helper: 'Doanh thu gộp ghi nhận trong quý',
       tone: 'ink',
     },
     {
-      label: 'Net Payable',
-      value: formatMoney(activePeriod.revenue),
-      helper: 'Current quarter',
-      tone: 'blue',
-    },
-    {
-      label: 'Payable Balance',
-      value: formatMoney(activePeriod.payable),
-      helper: 'Opening + quarter',
-      tone: 'violet',
-    },
-    {
-      label: 'Settlement',
-      value: settlementStatusLabel(activePeriod.settlementStatus),
-      helper: `Ngưỡng ${formatMoney(SETTLEMENT_THRESHOLD_VND)}`,
-      tone: activePeriod.settlementStatus === 'paid' ? 'teal' : 'amber',
-    },
-    {
-      label: 'Paid Amount',
-      value: formatMoney(activePeriod.paid),
-      helper: activePeriod.settlementStatus === 'paid' ? 'Paid' : 'Pending',
-      tone: 'teal',
-    },
-    {
-      label: 'Carry Forward',
-      value: formatMoney(activePeriod.carryForward),
-      helper: 'Qua quý sau nếu chưa đủ ngưỡng',
-      tone: 'rose',
-    },
-    {
-      label: 'Units',
-      value: formatNumber(activePeriod.units),
-      helper: 'Reported usage',
-      tone: 'ink',
-    },
-    {
-      label: 'Source Rows',
-      value: formatNumber(activePeriod.rowCount),
-      helper: 'Imported records',
+      label: 'Các khoản giảm trừ',
+      value: formatMoney(revenueReduction),
+      helper: 'Chênh lệch giữa doanh thu gộp và doanh thu ròng',
       tone: 'amber',
     },
     {
-      label: 'GM Recouped',
+      label: 'GM đã khấu trừ',
       value: formatMoney(activePeriod.costs),
-      helper: 'Advance đã trừ trong quý',
+      helper: 'Khoản tạm ứng GM được thu hồi trong quý',
+      tone: 'rose',
+    },
+    {
+      label: 'Dự phòng giữ lại',
+      value: formatMoney(activePeriod.reservesWithheld),
+      helper: 'Khoản tạm giữ trong kỳ báo cáo',
+      tone: 'violet',
+    },
+    {
+      label: 'Dự phòng hoàn lại',
+      value: formatMoney(activePeriod.reservesReleased),
+      helper: 'Khoản dự phòng được cộng trả trong quý',
+      tone: 'blue',
+    },
+    {
+      label: 'Thực nhận trong quý',
+      value: formatMoney(quarterNet),
+      helper: 'Doanh thu ròng sau GM và dự phòng',
+      tone: 'teal',
+    },
+  ];
+}
+
+function makeSettlementMetrics(
+  activePeriod: StatementPeriod,
+): StatementMetric[] {
+  const unpaid = Math.max(activePeriod.payable - activePeriod.paid, 0);
+
+  return [
+    {
+      label: 'Số dư đầu kỳ',
+      value: formatMoney(activePeriod.opening),
+      helper: 'Số tiền được chuyển từ quý trước',
+      tone: 'ink',
+    },
+    {
+      label: 'Tổng phải trả',
+      value: formatMoney(activePeriod.payable),
+      helper: 'Số dư đầu kỳ cộng thực nhận trong quý',
+      tone: 'violet',
+    },
+    {
+      label: 'Đã thanh toán',
+      value: formatMoney(activePeriod.paid),
+      helper:
+        activePeriod.paymentStatus === 'paid'
+          ? 'Đã chuyển khoản cho khách hàng'
+          : 'Chưa phát sinh thanh toán',
+      tone: 'teal',
+    },
+    {
+      label: 'Chưa thanh toán',
+      value: formatMoney(unpaid),
+      helper: 'Tổng phải trả trừ số tiền đã thanh toán',
+      tone: 'amber',
+    },
+    {
+      label: 'Chuyển kỳ sau',
+      value: formatMoney(activePeriod.carryForward),
+      helper: 'Số dư giữ lại khi chưa đạt ngưỡng chuyển khoản',
       tone: 'rose',
     },
   ];
@@ -252,13 +307,18 @@ function makeEmptyPeriod({
     closing: 0,
     costs: 0,
     currency: 'VND',
+    grossRevenue: 0,
     id: `${clientId}:${period}:VND:empty`,
     label: periodDisplayLabel(period),
     opening: 0,
     paid: 0,
+    paidAt: null,
+    paymentStatus: 'unpaid',
     payable: 0,
     period,
     revenue: 0,
+    reservesReleased: 0,
+    reservesWithheld: 0,
     rowCount: 0,
     settlementStatus: 'carried_forward',
     status: 'empty',
@@ -317,13 +377,13 @@ function makeSourceInsights(items: StatementLineItem[]): SourceInsights {
     contracts: aggregateLineItems(items, (item) => item.contractName),
     financeRows: [
       {
-        helper: `${formatNumber(grossIncomeRows.length)} dòng có Gross Income`,
-        label: 'Gross Income',
+        helper: `${formatNumber(grossIncomeRows.length)} dòng có thu nhập gộp`,
+        label: 'Thu nhập gộp',
         value: grossIncomeRows.length > 0 ? formatMoney(grossIncome) : '-',
       },
       {
-        helper: `${formatNumber(royaltyRateRows.length)} dòng có Royalty Rate`,
-        label: 'Royalty Rate trung bình',
+        helper: `${formatNumber(royaltyRateRows.length)} dòng có tỷ lệ bản quyền`,
+        label: 'Tỷ lệ bản quyền trung bình',
         value: formatRate(averageRoyaltyRate),
       },
     ],
@@ -481,7 +541,8 @@ export function RoyaltyDashboard({
       clientName: assignedClient.name,
       period: resolvedSelectedPeriod || defaultPeriod,
     });
-  const metrics = makeMetrics(activePeriod);
+  const quarterCashFlow = makeQuarterCashFlow(activePeriod);
+  const settlementMetrics = makeSettlementMetrics(activePeriod);
   const activeSection =
     breakdownSections.find((section) => section.id === activeTab) ??
     breakdownSections[0];
@@ -517,9 +578,9 @@ export function RoyaltyDashboard({
       context.registerTool(
         {
           name: 'select_statement_scope',
-          title: 'Select statement scope',
+          title: 'Chọn kỳ báo cáo',
           description:
-            'Select the visible read-only reporting quarter in the client royalty dashboard.',
+            'Chọn quý báo cáo đang hiển thị trên dashboard chỉ xem của khách hàng.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -540,7 +601,7 @@ export function RoyaltyDashboard({
             setSelectedPeriod(parsed.period);
             return {
               period: parsed.period,
-              status: 'selected',
+              status: 'đã chọn',
             };
           },
         },
@@ -563,10 +624,10 @@ export function RoyaltyDashboard({
                 <BrandMark className="lg:hidden" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Artist Portal
+                    Cổng thông tin nghệ sĩ
                   </p>
-                  <h1 className="font-display truncate text-2xl font-semibold md:text-3xl">
-                    Zuong Zero Artist Portal
+                  <h1 className="font-display break-words text-xl font-semibold leading-tight md:truncate md:text-3xl">
+                    Cổng thông tin nghệ sĩ Zuong Zero
                   </h1>
                 </div>
               </div>
@@ -576,7 +637,7 @@ export function RoyaltyDashboard({
                   variant="secondary"
                 >
                   <Disc3 className="size-3.5" />
-                  Read-only
+                  Chỉ xem
                 </Badge>
                 <Badge
                   className="h-8 max-w-[280px] truncate rounded-lg bg-white px-3 text-[#1f2937]"
@@ -586,7 +647,7 @@ export function RoyaltyDashboard({
                   {userEmail}
                 </Badge>
                 <Badge className="h-8 rounded-lg" variant="outline">
-                  {accessLevel}
+                  {accessLevelLabel(accessLevel)}
                 </Badge>
                 <button
                   className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-medium hover:bg-muted"
@@ -627,7 +688,7 @@ export function RoyaltyDashboard({
                           variant="secondary"
                         >
                           <WalletCards className="size-3.5" />
-                          Catalog
+                          Danh mục
                         </Badge>
                         <Badge className="rounded-lg" variant="outline">
                           {assignedClient.code}
@@ -637,7 +698,7 @@ export function RoyaltyDashboard({
                         {assignedClient.name}
                       </h2>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        {activePeriod.label} statement
+                        Báo cáo {vietnamesePeriodLabel(activePeriod.period)}
                       </p>
                     </div>
                     <div className="flex min-w-[170px] items-center justify-between gap-3 rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-2 text-sm font-medium text-[#047a70]">
@@ -645,12 +706,10 @@ export function RoyaltyDashboard({
                       {statusLabel(activePeriod.status)}
                     </div>
                     <Badge
-                      className={settlementBadgeClass(
-                        activePeriod.settlementStatus,
-                      )}
+                      className={settlementBadgeClass(activePeriod)}
                       variant="secondary"
                     >
-                      {settlementStatusLabel(activePeriod.settlementStatus)}
+                      {settlementStatusLabel(activePeriod)}
                     </Badge>
                   </div>
 
@@ -670,13 +729,15 @@ export function RoyaltyDashboard({
                           aria-label="Quý báo cáo"
                           className="music-control h-10 w-full"
                         >
-                          <SelectValue />
+                          <SelectValue>
+                            {vietnamesePeriodLabel(resolvedSelectedPeriod)}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {availablePeriods.map((period) => {
                             return (
                               <SelectItem key={period} value={period}>
-                                {periodDisplayLabel(period)}
+                                {vietnamesePeriodLabel(period)}
                               </SelectItem>
                             );
                           })}
@@ -690,22 +751,22 @@ export function RoyaltyDashboard({
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <RadioTower className="size-4 text-[#00b8a9]" />
-                      Statement mix
+                      Tóm tắt dữ liệu
                     </div>
                     <Badge className="rounded-lg border-white/15 bg-white/10 text-white">
-                      {hasStatements ? 'Published' : 'Empty'}
+                      {hasStatements ? 'Đã có dữ liệu' : 'Chưa có dữ liệu'}
                     </Badge>
                   </div>
                   <EqualizerBars className="mt-7" />
                   <dl className="mt-7 grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <dt className="text-white/55">Rows</dt>
+                      <dt className="text-white/55">Số dòng dữ liệu</dt>
                       <dd className="mt-1 text-xl font-semibold">
                         {formatNumber(activePeriod.rowCount)}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-white/55">Units</dt>
+                      <dt className="text-white/55">Lượt khai thác</dt>
                       <dd className="mt-1 text-xl font-semibold">
                         {formatNumber(activePeriod.units)}
                       </dd>
@@ -715,28 +776,56 @@ export function RoyaltyDashboard({
               </div>
             </section>
 
-            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {metrics.map((metric) => (
-                <article
-                  className={`music-card min-h-[134px] border-l-4 p-4 ${toneClass[metric.tone]}`}
-                  key={metric.label}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      {metric.label}
-                    </p>
-                    <span
-                      className={`size-2.5 rounded-full ${toneDotClass[metric.tone]}`}
-                    />
-                  </div>
-                  <p className="font-display mt-5 break-words text-2xl font-semibold leading-tight md:text-3xl">
-                    {metric.value}
+            <section aria-labelledby="quarter-cash-flow-title">
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Dòng tiền trong quý
                   </p>
-                  <p className="mt-3 text-xs font-medium leading-5 text-muted-foreground">
-                    {metric.helper}
+                  <h2
+                    className="mt-1 text-lg font-semibold"
+                    id="quarter-cash-flow-title"
+                  >
+                    Từ doanh thu đến thực nhận
+                  </h2>
+                </div>
+                <Badge className="rounded-lg" variant="outline">
+                  {vietnamesePeriodLabel(activePeriod.period)}
+                </Badge>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+                {quarterCashFlow.map((metric, index) => (
+                  <FinancialMetricCard
+                    index={index + 1}
+                    key={metric.label}
+                    metric={metric}
+                  />
+                ))}
+              </div>
+            </section>
+
+            <section aria-labelledby="settlement-summary-title">
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Thanh toán và số dư
                   </p>
-                </article>
-              ))}
+                  <h2
+                    className="mt-1 text-lg font-semibold"
+                    id="settlement-summary-title"
+                  >
+                    Tình trạng đối soát
+                  </h2>
+                </div>
+                <p className="text-xs font-medium text-muted-foreground">
+                  Ngưỡng chuyển khoản {formatMoney(SETTLEMENT_THRESHOLD_VND)}
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                {settlementMetrics.map((metric) => (
+                  <FinancialMetricCard key={metric.label} metric={metric} />
+                ))}
+              </div>
             </section>
 
             <section
@@ -747,10 +836,10 @@ export function RoyaltyDashboard({
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Revenue
+                      Doanh thu
                     </p>
                     <h2 className="mt-1 text-lg font-semibold">
-                      Quarterly trend
+                      Xu hướng theo quý
                     </h2>
                   </div>
                   <TrendingUp className="size-5 text-primary" />
@@ -763,10 +852,10 @@ export function RoyaltyDashboard({
                   <BarChart3 className="mt-0.5 size-5 text-primary" />
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Statements
+                      Báo cáo
                     </p>
                     <h2 className="mt-1 text-lg font-semibold">
-                      Statement mới nhất
+                      Báo cáo gần đây
                     </h2>
                   </div>
                 </div>
@@ -775,13 +864,15 @@ export function RoyaltyDashboard({
                     statementPreviewPage.visibleRows.map((period) => (
                       <div className="bg-white px-3 py-3" key={period.id}>
                         <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-medium">{period.label}</p>
+                          <p className="text-sm font-medium">
+                            {vietnamesePeriodLabel(period.period)}
+                          </p>
                           <Badge className="rounded-lg" variant="outline">
                             {statusLabel(period.status)}
                           </Badge>
                         </div>
                         <p className="font-display mt-2 text-xl font-semibold">
-                          {settlementStatusLabel(period.settlementStatus)}
+                          {settlementStatusLabel(period)}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {settlementHelper(period)}
@@ -809,14 +900,14 @@ export function RoyaltyDashboard({
                       <div>
                         <FileSpreadsheet className="mx-auto size-8 text-primary" />
                         <p className="mt-3 text-sm font-medium">
-                          Chưa có statement
+                          Chưa có báo cáo
                         </p>
                       </div>
                     </div>
                   )}
                   <TablePagination
                     {...statementPreviewPage}
-                    itemLabel="statement"
+                    itemLabel="báo cáo"
                   />
                 </div>
               </section>
@@ -830,7 +921,7 @@ export function RoyaltyDashboard({
                       GM
                     </p>
                     <h2 className="mt-1 text-lg font-semibold">
-                      Guaranteed Minimum
+                      Khoản đảm bảo tối thiểu
                     </h2>
                   </div>
                   <WalletCards className="size-5 text-[#ff4d6d]" />
@@ -839,11 +930,11 @@ export function RoyaltyDashboard({
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Track</TableHead>
+                        <TableHead>Bài hát</TableHead>
                         <TableHead>GM</TableHead>
                         <TableHead>Đã trừ</TableHead>
                         <TableHead>Còn lại</TableHead>
-                        <TableHead>Status</TableHead>
+                        <TableHead>Trạng thái</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -891,7 +982,7 @@ export function RoyaltyDashboard({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Breakdown
+                    Phân tích
                   </p>
                   <h2 className="mt-1 text-lg font-semibold">
                     Phân tích doanh thu
@@ -920,7 +1011,7 @@ export function RoyaltyDashboard({
                 {sourceInsights.salesPeriods.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.salesPeriods}
-                    eyebrow="Sales Period"
+                    eyebrow="Kỳ phát sinh"
                     title="Doanh thu theo tháng phát sinh"
                   />
                 ) : null}
@@ -928,15 +1019,15 @@ export function RoyaltyDashboard({
                 {sourceInsights.releaseArtists.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.releaseArtists}
-                    eyebrow="Release Artist"
-                    title="Release artist nổi bật"
+                    eyebrow="Nghệ sĩ phát hành"
+                    title="Nghệ sĩ phát hành nổi bật"
                   />
                 ) : null}
 
                 {sourceInsights.contentTypes.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.contentTypes}
-                    eyebrow="Type"
+                    eyebrow="Loại nội dung"
                     title="Loại nội dung"
                   />
                 ) : null}
@@ -944,16 +1035,16 @@ export function RoyaltyDashboard({
                 {sourceInsights.configurations.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.configurations}
-                    eyebrow="Configuration"
-                    title="Configuration phụ"
+                    eyebrow="Cấu hình khai thác"
+                    title="Cấu hình khai thác bổ sung"
                   />
                 ) : null}
 
                 {sourceInsights.contracts.length > 0 ? (
                   <MiniTablePanel
-                    eyebrow="Contract Name"
+                    eyebrow="Hợp đồng"
                     rows={sourceInsights.contracts}
-                    title="Hợp đồng trong statement"
+                    title="Hợp đồng trong báo cáo"
                   />
                 ) : null}
 
@@ -969,10 +1060,10 @@ export function RoyaltyDashboard({
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Ledger
+                    Sổ báo cáo
                   </p>
                   <h2 className="mt-1 text-lg font-semibold">
-                    Latest statements
+                    Lịch sử báo cáo
                   </h2>
                 </div>
                 <Users className="size-5 text-primary" />
@@ -982,15 +1073,15 @@ export function RoyaltyDashboard({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Period</TableHead>
-                      <TableHead>Rows</TableHead>
-                      <TableHead>Units</TableHead>
-                      <TableHead>Net Payable</TableHead>
+                      <TableHead>Quý</TableHead>
+                      <TableHead>Số dòng</TableHead>
+                      <TableHead>Lượt khai thác</TableHead>
+                      <TableHead>Doanh thu ròng</TableHead>
                       <TableHead>GM</TableHead>
-                      <TableHead>Payable</TableHead>
+                      <TableHead>Phải trả</TableHead>
                       <TableHead>Đối soát</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Export</TableHead>
+                      <TableHead>Trạng thái</TableHead>
+                      <TableHead>Tải xuống</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -998,7 +1089,8 @@ export function RoyaltyDashboard({
                       ledgerPage.visibleRows.map((period) => (
                         <TableRow key={period.id}>
                           <TableCell className="font-medium">
-                            {period.label}: {period.clientName}
+                            {vietnamesePeriodLabel(period.period)}:{' '}
+                            {period.clientName}
                           </TableCell>
                           <TableCell>{formatNumber(period.rowCount)}</TableCell>
                           <TableCell>{formatNumber(period.units)}</TableCell>
@@ -1009,12 +1101,10 @@ export function RoyaltyDashboard({
                           <TableCell>{formatMoney(period.payable)}</TableCell>
                           <TableCell>
                             <Badge
-                              className={settlementBadgeClass(
-                                period.settlementStatus,
-                              )}
+                              className={settlementBadgeClass(period)}
                               variant="secondary"
                             >
-                              {settlementStatusLabel(period.settlementStatus)}
+                              {settlementStatusLabel(period)}
                             </Badge>
                             <span className="mt-1 block text-xs text-muted-foreground">
                               {settlementHelper(period)}
@@ -1051,19 +1141,54 @@ export function RoyaltyDashboard({
                           className="h-24 text-center text-sm text-muted-foreground"
                           colSpan={9}
                         >
-                          Chưa có statement cho khách hàng này.
+                          Chưa có báo cáo cho khách hàng này.
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
-                <TablePagination {...ledgerPage} itemLabel="statement" />
+                <TablePagination {...ledgerPage} itemLabel="báo cáo" />
               </div>
             </section>
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function FinancialMetricCard({
+  index,
+  metric,
+}: {
+  index?: number;
+  metric: StatementMetric;
+}) {
+  return (
+    <article
+      className={`music-card min-h-[142px] border-l-4 p-4 ${toneClass[metric.tone]}`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase leading-5 tracking-[0.14em] text-muted-foreground">
+          {metric.label}
+        </p>
+        {index ? (
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted/50 text-[11px] font-semibold text-muted-foreground">
+            {index}
+          </span>
+        ) : (
+          <span
+            className={`size-2.5 shrink-0 rounded-full ${toneDotClass[metric.tone]}`}
+          />
+        )}
+      </div>
+      <p className="font-display mt-5 break-words text-2xl font-semibold leading-tight">
+        {metric.value}
+      </p>
+      <p className="mt-3 text-xs font-medium leading-5 text-muted-foreground">
+        {metric.helper}
+      </p>
+    </article>
   );
 }
 
@@ -1106,7 +1231,7 @@ function MiniBreakdownPanel({
           <h2 className="mt-1 text-lg font-semibold">{title}</h2>
         </div>
         <Badge className="rounded-lg" variant="outline">
-          Top {Math.min(data.length, 8)}
+          {Math.min(data.length, 8)} mục nổi bật
         </Badge>
       </div>
       <div className="min-h-[260px] rounded-lg border border-border bg-white p-4">
@@ -1145,8 +1270,8 @@ function MiniTablePanel({
           <TableHeader>
             <TableRow>
               <TableHead>Tên</TableHead>
-              <TableHead>Net Payable</TableHead>
-              <TableHead>Sales</TableHead>
+              <TableHead>Doanh thu ròng</TableHead>
+              <TableHead>Lượt khai thác</TableHead>
               <TableHead>Dòng</TableHead>
             </TableRow>
           </TableHeader>
@@ -1175,12 +1300,12 @@ function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            ISRC / Version
+            ISRC / Phiên bản
           </p>
-          <h2 className="mt-1 text-lg font-semibold">Tracking bài hát</h2>
+          <h2 className="mt-1 text-lg font-semibold">Theo dõi bài hát</h2>
         </div>
         <Badge className="rounded-lg" variant="outline">
-          Top {formatNumber(rows.length)}
+          {formatNumber(rows.length)} bài hát nổi bật
         </Badge>
       </div>
       <div className="overflow-hidden rounded-lg border border-border">
@@ -1189,9 +1314,9 @@ function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
             <TableRow>
               <TableHead>Bài hát</TableHead>
               <TableHead>ISRC</TableHead>
-              <TableHead>Version</TableHead>
-              <TableHead>Net Payable</TableHead>
-              <TableHead>Sales</TableHead>
+              <TableHead>Phiên bản</TableHead>
+              <TableHead>Doanh thu ròng</TableHead>
+              <TableHead>Lượt khai thác</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1221,7 +1346,7 @@ function SourceFinancePanel({ rows }: { rows: SourceInsights['financeRows'] }) {
     <section className="music-card p-4 md:p-5">
       <div className="mb-4">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          Gross / Royalty
+          Doanh thu / Bản quyền
         </p>
         <h2 className="mt-1 text-lg font-semibold">Chỉ số tài chính bổ sung</h2>
       </div>
@@ -1281,9 +1406,9 @@ function BreakdownChart({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Type</TableHead>
-              <TableHead>Value</TableHead>
-              <TableHead>Units</TableHead>
+              <TableHead>Loại</TableHead>
+              <TableHead>Giá trị</TableHead>
+              <TableHead>Lượt khai thác</TableHead>
               <TableHead>%</TableHead>
             </TableRow>
           </TableHeader>
@@ -1318,7 +1443,7 @@ function RevenueTrendChart({ data }: { data: typeof revenueTrend }) {
       <div className="flex min-w-0 items-end gap-3 overflow-visible pb-3">
         {data.map((item, index) => {
           const value = item.vnd;
-          const tooltip = `${item.label}: ${formatMoney(value)} / ${formatNumber(item.units)} units`;
+          const tooltip = `${vietnamesePeriodLabel(item.period)}: ${formatMoney(value)} / ${formatNumber(item.units)} lượt khai thác`;
           return (
             <div
               className="flex min-w-0 flex-1 flex-col items-center gap-2"
@@ -1326,13 +1451,13 @@ function RevenueTrendChart({ data }: { data: typeof revenueTrend }) {
             >
               <div className="flex h-[250px] w-full items-end border-b border-border">
                 <div
-                  aria-label={`${item.label}: ${formatMoney(value)}`}
+                  aria-label={`${vietnamesePeriodLabel(item.period)}: ${formatMoney(value)}`}
                   className="group relative flex h-full w-full items-end"
                   title={tooltip}
                 >
                   <ChartHoverTooltip
-                    label={item.label}
-                    meta={`${formatNumber(item.units)} units`}
+                    label={vietnamesePeriodLabel(item.period)}
+                    meta={`${formatNumber(item.units)} lượt khai thác`}
                     value={formatMoney(value)}
                   />
                   <div
@@ -1345,7 +1470,7 @@ function RevenueTrendChart({ data }: { data: typeof revenueTrend }) {
                 </div>
               </div>
               <span className="w-full truncate text-center text-xs text-muted-foreground">
-                {item.label.replace('202', "'2")}
+                {vietnamesePeriodLabel(item.period)}
               </span>
             </div>
           );
@@ -1375,11 +1500,11 @@ function BarBreakdown({ data }: { data: BreakdownItem[] }) {
               <div
                 aria-label={`${item.name}: ${formatMoney(item.value)}`}
                 className="group relative flex h-full w-full items-end"
-                title={`${item.name}: ${formatMoney(item.value)} / ${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+                title={`${item.name}: ${formatMoney(item.value)} / ${formatNumber(item.units)} lượt khai thác / ${item.percentage.toFixed(2)}%`}
               >
                 <ChartHoverTooltip
                   label={item.name}
-                  meta={`${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+                  meta={`${formatNumber(item.units)} lượt khai thác / ${item.percentage.toFixed(2)}%`}
                   value={formatMoney(item.value)}
                 />
                 <div
@@ -1418,11 +1543,11 @@ function RankedBreakdown({ data }: { data: BreakdownItem[] }) {
           </div>
           <div
             className="group relative h-3 rounded-full bg-muted"
-            title={`${item.name}: ${formatMoney(item.value)} / ${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+            title={`${item.name}: ${formatMoney(item.value)} / ${formatNumber(item.units)} lượt khai thác / ${item.percentage.toFixed(2)}%`}
           >
             <ChartHoverTooltip
               label={item.name}
-              meta={`${formatNumber(item.units)} units / ${item.percentage.toFixed(2)}%`}
+              meta={`${formatNumber(item.units)} lượt khai thác / ${item.percentage.toFixed(2)}%`}
               value={formatMoney(item.value)}
             />
             <div
@@ -1447,7 +1572,7 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
     return (
       <div className="flex h-full min-h-[330px] items-center justify-center">
         <div
-          aria-label="Revenue share: empty"
+          aria-label="Tỷ trọng doanh thu: chưa có dữ liệu"
           className="relative size-[230px] rounded-full border border-border bg-muted"
         >
           <div className="absolute inset-[64px] rounded-full border border-border bg-white" />
@@ -1491,7 +1616,7 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
     <div className="flex h-full min-h-[330px] flex-col items-center justify-center gap-4">
       <div className="relative size-[240px]">
         <svg
-          aria-label="Revenue share"
+          aria-label="Tỷ trọng doanh thu"
           className="size-full -rotate-90 overflow-visible"
           viewBox="0 0 240 240"
         >
@@ -1522,7 +1647,8 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
             >
               <title>
                 {item.name}: {formatMoney(item.value)} /{' '}
-                {formatNumber(item.units)} units / {item.percentage.toFixed(2)}%
+                {formatNumber(item.units)} lượt khai thác /{' '}
+                {item.percentage.toFixed(2)}%
               </title>
             </circle>
           ))}
@@ -1543,7 +1669,7 @@ function DonutChart({ data }: { data: BreakdownItem[] }) {
           ) : (
             <>
               <p className="text-xs font-medium text-muted-foreground">
-                Total share
+                Tổng tỷ trọng
               </p>
               <p className="font-display mt-1 text-lg font-semibold">100%</p>
             </>

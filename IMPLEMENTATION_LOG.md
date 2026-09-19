@@ -248,6 +248,30 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - `npm run build`
 - Kiem tra local demo `http://localhost:3000/admin`.
 - Kiem tra production `/login` tra `200 OK`.
+- 2026-09-19: LOCAL DEMO READY cho quan ly statement: them 3 chien luoc upload `create`, `sync`, `replace`; `create` chan ghi de statement da ton tai, `sync` giu dong cu + them dong moi + cap nhat dong trung khoa nghiep vu, `replace` thay toan bo statement.
+- 2026-09-19: tab Statement co action `Bo sung` va `Thay file`; upload panel co selector `Cach cap nhat`; ghi de bat buoc xac nhan, statement `locked` bi chan sua o ca UI va API.
+- 2026-09-19: sync tinh lai tong doanh thu, units, breakdown/chart, settlement va GM recoup tu tap line item sau dong bo; upload audit luu `importStrategy`, merge stats va `replaced_upload_id`.
+- 2026-09-19: them unit tests cho merge idempotent, update, add va duplicate business key; `npm run test` thanh cong 21 unit tests + 10 contract tests; `npx oxlint ...` va `npm run build` thanh cong.
+- 2026-09-19: demo local dang chay tai `http://localhost:3000/admin`; chua deploy production de giu dung quy trinh test demo truoc. Chuc nang `sync` production van can migration `drizzle/0010_statement_line_items.sql` duoc apply.
+- 2026-09-19: PRODUCTION DEPLOY BLOCKED truoc buoc upload Worker: `npx wrangler d1 execute royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc --file drizzle/0010_statement_line_items.sql` tra Cloudflare `Authentication error [code: 10000]`. Wrangler dang OAuth bang account `92abb617a9e31952e865d615bee7359e`, trong khi D1 production thuoc account `2b6f84a024bc49c8d450f9bead71a702`; `CLOUDFLARE_API_TOKEN` local dang missing. Can login Wrangler vao dung account hoac set API token co D1 Edit + Workers Scripts Edit, sau do retry migration va deploy.
+- 2026-09-19: PRODUCTION DEPLOYED sau khi Wrangler login dung account `2b6f84a024bc49c8d450f9bead71a702`: migration `0010_statement_line_items.sql` thanh cong, D1 co bang `statement_line_items` va 4 index lien quan.
+- 2026-09-19: `npx wrangler deploy --config wrangler.cloudflare.jsonc` thanh cong, Worker version `f7d09c03-1fed-4d45-bfb4-ea7c8fe78f20`; domain chinh `https://artistportal.zuongzeroent.com` da nhan UI/API create-sync-replace statement.
+- 2026-09-19: `npm run test:production` thanh cong sau deploy; 3 trang auth tra `200`, cac API admin va export statement admin/client tra `401` khi chua dang nhap.
+- 2026-09-19: PAYMENT STATUS CODE DONE + LOCAL DB READY. Them `payment_status`, `paid_at`, `paid_by_user_id` truc tiep vao `report_periods`; statement moi mac dinh `unpaid`.
+- 2026-09-19: Admin co action danh dau `Da thanh toan`/chuyen lai `Chua thanh toan`; statement duoi nguong 1.000.000 VND chi hien `Chuyen ky sau` va API chan mark paid. Dashboard client va file export doc trang thai thanh toan that thay vi suy ra tu nguong.
+- 2026-09-19: Khi sync/replace file, payment status tu reset ve `unpaid` de tranh giu trang thai cu sau khi so tien thay doi. Moi action payment deu ghi audit log voi actor, trang thai truoc/sau va payable.
+- 2026-09-19: Migration local `drizzle/0011_statement_payment_status.sql` thanh cong; `npm test` qua 24 unit + 10 contract tests; lint cac file thay doi sach; `npm run build` thanh cong. Global `npm run lint` van con cac loi accessibility co san trong `components/ui/*` va `hooks/use-mobile.ts`, khong thuoc thay doi nay.
+- 2026-09-19: PAYMENT STATUS PRODUCTION NOT DEPLOYED. Can test truc quan demo local bang tai khoan admin, sau do apply migration 0011 remote truoc khi deploy Worker.
+- 2026-09-19: PAYMENT STATUS PRODUCTION DEPLOYED. Migration `drizzle/0011_statement_payment_status.sql` da apply thanh cong tren D1 remote; 15 report period cu duoc khoi tao `unpaid`, schema da xac nhan co `payment_status`, `paid_at`, `paid_by_user_id`.
+- 2026-09-19: `npx wrangler deploy --config wrangler.cloudflare.jsonc` thanh cong, Worker version `8859a375-769b-4891-828f-984e87b60683`. `npm run test:production` qua toan bo login/forgot-password/OTP va auth guard cho API admin/export tren `https://artistportal.zuongzeroent.com`.
+- 2026-09-19: STATEMENT TABLE UX CODE DONE, LOCAL DEMO ONLY. Rut bang admin tu 10 cot xuong 7 cot; gom Rows/Units vao `Du lieu`, Revenue/GM/Carry vao `Tai chinh`, giu thanh toan thanh action chinh ro rang.
+- 2026-09-19: Gom PDF/Excel, bo sung/thay file, publish/an/lock va xoa vao menu ba cham co nhom; moi dong chi con payment action + overflow menu. `npm test` qua 24 unit + 10 contract tests, targeted lint sach va `npm run build` thanh cong. Chua deploy production de test demo truoc.
+- 2026-09-19: STATEMENT TABLE UX DEPLOYED. `npx wrangler deploy --config wrangler.cloudflare.jsonc` thanh cong, Worker version `c9ed46c0-056c-4c35-9893-d62441bc584b`; `npm run test:production` qua toan bo auth page va API guard tren domain chinh.
+- 2026-09-19: STATEMENT ACTION MENU HOTFIX DEPLOYED. Base UI portal menu gay client crash khi mo tren production; da thay bang native select `Thao tac` khong dung portal, van giu day du PDF/Excel, sync/replace, publish/an/lock va xoa. Worker version `6358b522-4d7e-463c-8753-b4d8ccac579a`; 34 tests, targeted lint, build va production smoke deu thanh cong.
+- 2026-09-19: CLIENT DASHBOARD FINANCIAL UX CODE DONE, LOCAL DEMO ONLY. Sap xep lai so lieu thanh hai nhom `Dong tien trong quy` va `Thanh toan va so du`; luong tien hien theo thu tu tong doanh thu, cac khoan giam tru, GM, du phong giu lai/hoan lai va thuc nhan trong quy. Doi soat tach ro so du dau ky, tong phai tra, da thanh toan, chua thanh toan va chuyen ky sau.
+- 2026-09-19: Dashboard client da doc them `gross_revenue`, `reserves_withheld`, `reserves_released` tu D1; cong thuc thuc nhan quy la `net_revenue - net_costs - reserves_withheld + reserves_released`, khong tao them loai chi phi suy dien ngoai data.
+- 2026-09-19: Viet hoa toan bo noi dung hien thi tren dashboard client, bao gom header, trang thai, ky bao cao, chart, bang, tooltip, empty state va thanh dieu huong. Da test truc quan desktop/mobile voi data 742.563.571 VND; so dai khong tran, heading mobile khong bi cat.
+- 2026-09-19: `npm test` qua 24 unit tests + 10 contract tests, targeted `oxlint` sach, `git diff --check` sach va `npm run build` thanh cong. Chua deploy production de giu quy trinh demo truoc khi deploy ban chinh.
 
 ## Roadmap cac phase
 
@@ -259,7 +283,8 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 6 - Test va van hanh production: DONE. Da co unit/contract test va production smoke test de kiem auth, upload single/bulk contract, publish/delete guard, GM recoup/reverse, dashboard client/admin va domain production.
 - Phase 7 - Bao cao/export doi soat: DEPLOYED. Da co export PDF/Excel statement theo quy cho client/admin va download audit; con nen tach tiep lich su thanh toan/payment marking thanh buoc tiep theo neu can van hanh doi soat that.
 - Phase 8 - Data chuan 22 cot: WORKER DEPLOYED, D1 MIGRATION PENDING. Da merge file `test.xlsx` lam schema chuan, UI admin/client hien mapping/detail, export co sheet `Source Rows`; Worker co guard khi bang chua ton tai. Can apply migration 0010 de bat luu du detail rows vao `statement_line_items`.
-- Phase tiep theo de van hanh doi soat that: payment marking/manual paid date, lich su thanh toan theo client/quarter, export bien ban doi soat co trang thai thanh toan va audit nguoi mark paid.
+- Payment marking toi gian: CODE DONE, LOCAL DB READY. Chi co `unpaid`/`paid`, paid date va actor; khong them partial payment, chung tu hay bang lich su rieng.
+- 2026-09-19: CLIENT DASHBOARD FINANCIAL UX DEPLOYED. Da deploy len `https://artistportal.zuongzeroent.com` voi Worker version `5bae66af-dbeb-47e9-bbf8-4d459a3fc490`; `npm run test:production` dat 10/10 kiem tra (cac trang auth tra 200, API bao ve tra 401 khi chua dang nhap).
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 
@@ -276,4 +301,4 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Upload lai data mau cho tung client/quy va doi chieu chart voi file Excel.
 - Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
 - Test flow nhac doi soat bang email that voi mot client co statement published, gom dry-run, gui ngay va retry loi.
-- Phase 7 buoc tiep theo: them lich su thanh toan/payment marking, bien lai thanh toan va bo loc audit download theo client/quy.
+- Test demo local payment marking tai tab Statement; neu dat, apply `drizzle/0011_statement_payment_status.sql` len D1 remote roi deploy Worker.

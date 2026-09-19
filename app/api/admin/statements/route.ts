@@ -15,7 +15,15 @@ import {
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
 import { buildReverseGuaranteeRecoupmentStatements } from '@/lib/guarantees';
 import { hasStatementLineItemsTable } from '@/lib/statement-line-items';
+import { summarizeSettlement } from '@/lib/settlements';
 import { ensureUserRecord } from '@/lib/user-records';
+
+type StatementAction =
+  | 'publish'
+  | 'unpublish'
+  | 'lock'
+  | 'mark_paid'
+  | 'mark_unpaid';
 
 type StatementBody = {
   action?: unknown;
@@ -24,9 +32,15 @@ type StatementBody = {
 
 type StatementTarget = {
   clientId: string;
+  costs: number;
   currency: string;
+  opening: number;
+  paymentStatus: 'unpaid' | 'paid';
   period: string;
   reportPeriodId: string;
+  reservesReleased: number;
+  reservesWithheld: number;
+  revenue: number;
   status: 'draft' | 'validating' | 'published' | 'locked' | 'replaced';
 };
 
@@ -129,7 +143,11 @@ async function updateStatementResponse(request: Request) {
   const statement = await findStatementTarget(env.DB, reportPeriodId);
   if (!statement) return jsonError('Không tìm thấy statement.', 404);
 
-  if (statement.status === 'locked' && action !== 'publish') {
+  if (
+    statement.status === 'locked' &&
+    action !== 'publish' &&
+    !isPaymentAction(action)
+  ) {
     return jsonError('Statement đã lock. Hãy mở lại trước khi chỉnh.', 400);
   }
 
@@ -141,6 +159,66 @@ async function updateStatementResponse(request: Request) {
     role: authorization.role,
     userId: authorization.user.userId,
   });
+
+  if (isPaymentAction(action)) {
+    const settlement = summarizeSettlement({
+      costs: Number(statement.costs) || 0,
+      opening: Number(statement.opening) || 0,
+      reservesReleased: Number(statement.reservesReleased) || 0,
+      reservesWithheld: Number(statement.reservesWithheld) || 0,
+      revenue: Number(statement.revenue) || 0,
+    });
+
+    if (action === 'mark_paid' && settlement.status === 'carried_forward') {
+      return jsonError(
+        'Statement chưa đủ ngưỡng thanh toán và đang chuyển sang kỳ sau.',
+        400,
+      );
+    }
+
+    const paymentStatus = action === 'mark_paid' ? 'paid' : 'unpaid';
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE report_periods
+         SET payment_status = ?,
+             paid_at = ?,
+             paid_by_user_id = ?,
+             updated_at = ?
+         WHERE id = ?
+           AND currency = 'VND'`,
+      ).bind(
+        paymentStatus,
+        paymentStatus === 'paid' ? now : null,
+        paymentStatus === 'paid' ? actor.id : null,
+        now,
+        reportPeriodId,
+      ),
+      createAuditLog(
+        actor.id,
+        statement.clientId,
+        `admin_statement_${action}`,
+        'report_period',
+        reportPeriodId,
+        {
+          currency: statement.currency,
+          payable: settlement.payable,
+          period: statement.period,
+          previousPaymentStatus: statement.paymentStatus,
+          paymentStatus,
+        },
+        now,
+      ),
+    ]);
+
+    return Response.json({
+      overview: await getAdminOverviewData(env.DB, statement.period),
+      statements: await listAdminStatements(env.DB, {
+        period: statement.period,
+      }),
+      message: statementMessage(action),
+    });
+  }
+
   const nextStatus = statementStatusForAction(action);
 
   await env.DB.batch([
@@ -359,7 +437,13 @@ async function findStatementTarget(db: D1Database, reportPeriodId: string) {
          rp.client_id AS clientId,
          rp.period,
          rp.currency,
-         rp.status
+         rp.status,
+         rp.payment_status AS paymentStatus,
+         s.opening_balance AS opening,
+         s.net_revenue AS revenue,
+         s.net_costs AS costs,
+         s.reserves_withheld AS reservesWithheld,
+         s.reserves_released AS reservesReleased
        FROM report_periods rp
        JOIN statements s
          ON s.report_period_id = rp.id
@@ -451,20 +535,37 @@ function createAuditLog(
 }
 
 function parseStatementAction(value: unknown) {
-  if (value === 'publish' || value === 'unpublish' || value === 'lock') {
+  if (
+    value === 'publish' ||
+    value === 'unpublish' ||
+    value === 'lock' ||
+    value === 'mark_paid' ||
+    value === 'mark_unpaid'
+  ) {
     return value;
   }
 
   return null;
 }
 
-function statementStatusForAction(action: 'publish' | 'unpublish' | 'lock') {
+function isPaymentAction(
+  action: StatementAction,
+): action is 'mark_paid' | 'mark_unpaid' {
+  return action === 'mark_paid' || action === 'mark_unpaid';
+}
+
+function statementStatusForAction(
+  action: Exclude<StatementAction, 'mark_paid' | 'mark_unpaid'>,
+) {
   if (action === 'publish') return 'published';
   if (action === 'lock') return 'locked';
   return 'replaced';
 }
 
-function statementMessage(action: 'publish' | 'unpublish' | 'lock') {
+function statementMessage(action: StatementAction) {
+  if (action === 'mark_paid') return 'Đã cập nhật trạng thái đã thanh toán.';
+  if (action === 'mark_unpaid')
+    return 'Đã chuyển về trạng thái chưa thanh toán.';
   if (action === 'publish') return 'Đã publish statement.';
   if (action === 'lock') return 'Đã lock statement.';
   return 'Đã ẩn statement khỏi dashboard khách hàng.';

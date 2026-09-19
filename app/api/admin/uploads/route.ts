@@ -15,13 +15,16 @@ import { ensureUserRecord } from '@/lib/user-records';
 import {
   parseRoyaltyWorkbook,
   stableBreakdownId,
+  summarizeStatementLineItems,
   type ParsedClientStatementGroup,
   type ParsedCurrencyStatement,
 } from '@/lib/xlsx-royalty-parser';
 import {
   hasStatementLineItemsTable,
+  mergeStatementLineItems,
   standardStatementColumnLabels,
   type StatementLineItem,
+  type StatementLineItemMergeStats,
 } from '@/lib/statement-line-items';
 import {
   SETTLEMENT_THRESHOLD_VND,
@@ -49,13 +52,23 @@ type CustomerUploadSummary = {
 };
 
 type UploadMode = 'single' | 'bulk';
+type ImportStrategy = 'create' | 'replace' | 'sync';
 
 type UploadTarget = {
   client: UploadClient;
   clientCodeFromFile: string | null;
+  existingUploadId: string | null;
+  incomingRowCount: number;
+  mergeStats: StatementLineItemMergeStats | null;
   parsedStatements: ParsedCurrencyStatement[];
   rowCount: number;
   uploadId: string;
+};
+
+type ExistingStatement = {
+  rowCount: number;
+  sourceUploadId: string | null;
+  status: 'draft' | 'validating' | 'published' | 'locked' | 'replaced';
 };
 
 export const dynamic = 'force-dynamic';
@@ -88,6 +101,7 @@ async function uploadResponse(request: Request) {
   const clientId = readRequiredText(formData, 'clientId');
   const period = readRequiredText(formData, 'period');
   const uploadMode = readUploadMode(formData);
+  const importStrategy = readImportStrategy(formData);
   const selectedClient =
     uploadMode === 'single' ? await findUploadClient(clientId) : null;
 
@@ -112,7 +126,7 @@ async function uploadResponse(request: Request) {
   const parsedWorkbook = parseUploadedWorkbook(buffer, uploadMode);
   if (parsedWorkbook instanceof Response) return parsedWorkbook;
 
-  const uploadTargets = await resolveUploadTargets({
+  const resolvedTargets = await resolveUploadTargets({
     db: env.DB,
     parsedGroups: parsedWorkbook.clientStatements,
     parsedStatements: parsedWorkbook.statements,
@@ -120,11 +134,19 @@ async function uploadResponse(request: Request) {
     selectedClient,
     uploadMode,
   });
-  if (uploadTargets instanceof Response) return uploadTargets;
+  if (resolvedTargets instanceof Response) return resolvedTargets;
 
   const bulkUploadId = crypto.randomUUID();
   const now = new Date().toISOString();
   const storeLineItems = await hasStatementLineItemsTable(env.DB);
+  const uploadTargets = await prepareUploadTargets({
+    db: env.DB,
+    importStrategy,
+    period,
+    storeLineItems,
+    targets: resolvedTargets,
+  });
+  if (uploadTargets instanceof Response) return uploadTargets;
   const uploader = await ensureUserRecord(env.DB, {
     displayName: user.displayName,
     email: user.email,
@@ -148,6 +170,7 @@ async function uploadResponse(request: Request) {
         originalFilename: file.name,
         period,
         sha256,
+        importStrategy,
         uploadMode,
         uploadedBy: uploader.id,
       },
@@ -162,6 +185,8 @@ async function uploadResponse(request: Request) {
         importSummary: buildImportSummary({
           clientCount: uploadTargets.length,
           currencies: parsedWorkbook.currencies,
+          importStrategy,
+          mergeStats: target.mergeStats,
           rowCount: target.rowCount,
           storeLineItems,
           totalRowCount: parsedWorkbook.rowCount,
@@ -171,11 +196,13 @@ async function uploadResponse(request: Request) {
         objectKey,
         parsedStatements: target.parsedStatements,
         period,
+        replacedUploadId: target.existingUploadId,
         selectedClient: target.client,
         sha256,
         stagingReportPeriodId: `${target.client.id}:${period}:staging`,
         storeLineItems,
         uploadId: target.uploadId,
+        importStrategy,
         uploadMode,
         uploaderId: uploader.id,
         now,
@@ -200,14 +227,20 @@ async function uploadResponse(request: Request) {
     customers: customerSummaries,
     importedClients: uploadTargets.length,
     importedRows: parsedWorkbook.rowCount,
+    statementRows: uploadTargets.reduce(
+      (total, target) => total + target.rowCount,
+      0,
+    ),
     status: 'imported',
     uploadId:
       uploadMode === 'single' ? uploadTargets[0]?.uploadId : bulkUploadId,
     warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
-    message:
-      uploadMode === 'bulk'
-        ? `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${uploadTargets.length} khách hàng, ${periodDisplayLabel(period)} (VNĐ).`
-        : `Đã lưu và publish ${parsedWorkbook.rowCount} dòng cho ${uploadTargets[0]?.client.name ?? 'khách hàng'}, ${periodDisplayLabel(period)} (VNĐ).`,
+    message: importSuccessMessage({
+      importStrategy,
+      period,
+      targets: uploadTargets,
+      uploadMode,
+    }),
   });
 }
 
@@ -229,6 +262,8 @@ function parseUploadedWorkbook(buffer: ArrayBuffer, uploadMode: UploadMode) {
 function buildImportSummary({
   clientCount,
   currencies,
+  importStrategy,
+  mergeStats,
   rowCount,
   storeLineItems,
   totalRowCount,
@@ -237,6 +272,8 @@ function buildImportSummary({
 }: {
   clientCount: number;
   currencies: CurrencyCode[];
+  importStrategy: ImportStrategy;
+  mergeStats: StatementLineItemMergeStats | null;
   rowCount: number;
   storeLineItems: boolean;
   totalRowCount: number;
@@ -250,6 +287,7 @@ function buildImportSummary({
     expectedColumns: standardStatementColumnLabels,
     fileType: 'xlsx',
     importStatus: 'imported',
+    importStrategy,
     malwareScan: 'pending',
     periodPolicy: 'Gregorian quarter YYYY-Qn, Asia/Bangkok UTC+7',
     rowCount,
@@ -257,6 +295,7 @@ function buildImportSummary({
     signature: 'zip',
     lineItemStorage: storeLineItems ? 'enabled' : 'pending-migration',
     totalRowCount,
+    mergeStats,
     uploadMode,
     warnings: uploadWarnings(warnings, storeLineItems),
   };
@@ -298,6 +337,9 @@ async function resolveUploadTargets({
       {
         client: selectedClient,
         clientCodeFromFile: null,
+        existingUploadId: null,
+        incomingRowCount: rowCount,
+        mergeStats: null,
         parsedStatements,
         rowCount,
         uploadId: crypto.randomUUID(),
@@ -326,6 +368,9 @@ async function resolveUploadTargets({
     targets.push({
       client,
       clientCodeFromFile: group.clientCode,
+      existingUploadId: null,
+      incomingRowCount: group.rowCount,
+      mergeStats: null,
       parsedStatements: group.statements,
       rowCount: group.rowCount,
       uploadId: crypto.randomUUID(),
@@ -342,6 +387,177 @@ async function resolveUploadTargets({
   return targets;
 }
 
+async function prepareUploadTargets({
+  db,
+  importStrategy,
+  period,
+  storeLineItems,
+  targets,
+}: {
+  db: D1Database;
+  importStrategy: ImportStrategy;
+  period: string;
+  storeLineItems: boolean;
+  targets: UploadTarget[];
+}): Promise<UploadTarget[] | Response> {
+  const preparedTargets: UploadTarget[] = [];
+
+  for (const target of targets) {
+    const parsedStatements: ParsedCurrencyStatement[] = [];
+    const mergeStats: StatementLineItemMergeStats = {
+      added: 0,
+      previous: 0,
+      total: 0,
+      unchanged: 0,
+      updated: 0,
+    };
+    let existingUploadId: string | null = null;
+
+    for (const parsedStatement of target.parsedStatements) {
+      const reportPeriodId = reportPeriodIdForCurrency(
+        target.client.id,
+        period,
+        parsedStatement.currency,
+      );
+      const existing = await findExistingStatement(db, reportPeriodId);
+      const statementExists = Boolean(existing?.sourceUploadId);
+
+      if (existing?.status === 'locked') {
+        return jsonError(
+          `${target.client.name}, ${periodDisplayLabel(period)} đang bị khóa. Hãy mở khóa trước khi thay đổi dữ liệu.`,
+          409,
+        );
+      }
+
+      if (importStrategy === 'create' && statementExists) {
+        return jsonError(
+          `${target.client.name} đã có statement ${periodDisplayLabel(period)}. Chọn Đồng bộ bổ sung hoặc Ghi đè toàn bộ.`,
+          409,
+        );
+      }
+
+      existingUploadId ??= existing?.sourceUploadId ?? null;
+
+      if (importStrategy !== 'sync' || !statementExists) {
+        parsedStatements.push(parsedStatement);
+        if (importStrategy === 'sync') {
+          mergeStats.added += parsedStatement.rowCount;
+          mergeStats.total += parsedStatement.rowCount;
+        }
+        continue;
+      }
+
+      if (!storeLineItems) {
+        return jsonError(
+          'Chưa thể đồng bộ bổ sung vì kho dữ liệu chi tiết chưa sẵn sàng. Hãy hoàn tất migration statement_line_items hoặc dùng Ghi đè toàn bộ.',
+          503,
+        );
+      }
+
+      const existingItems = await readStoredStatementLineItems(
+        db,
+        reportPeriodId,
+      );
+      if (existingItems.length < Number(existing?.rowCount ?? 0)) {
+        return jsonError(
+          `${target.client.name}, ${periodDisplayLabel(period)} chưa có đủ dữ liệu chi tiết để đồng bộ. Hãy Ghi đè toàn bộ một lần, sau đó các lần sau có thể dùng Đồng bộ bổ sung.`,
+          409,
+        );
+      }
+
+      const merged = mergeStatementLineItems(
+        existingItems,
+        parsedStatement.lineItems,
+      );
+      parsedStatements.push(summarizeStatementLineItems(merged.items));
+      mergeStats.added += merged.stats.added;
+      mergeStats.previous += merged.stats.previous;
+      mergeStats.total += merged.stats.total;
+      mergeStats.unchanged += merged.stats.unchanged;
+      mergeStats.updated += merged.stats.updated;
+    }
+
+    preparedTargets.push({
+      ...target,
+      existingUploadId,
+      mergeStats: importStrategy === 'sync' ? mergeStats : null,
+      parsedStatements,
+      rowCount: parsedStatements.reduce(
+        (total, statement) => total + statement.rowCount,
+        0,
+      ),
+    });
+  }
+
+  return preparedTargets;
+}
+
+async function findExistingStatement(db: D1Database, reportPeriodId: string) {
+  return db
+    .prepare(
+      `SELECT
+         rp.status,
+         s.source_upload_id AS sourceUploadId,
+         COALESCE(s.row_count, 0) AS rowCount
+       FROM report_periods rp
+       LEFT JOIN statements s
+         ON s.report_period_id = rp.id
+       WHERE rp.id = ?
+       LIMIT 1`,
+    )
+    .bind(reportPeriodId)
+    .first<ExistingStatement>();
+}
+
+async function readStoredStatementLineItems(
+  db: D1Database,
+  reportPeriodId: string,
+) {
+  const rows = await db
+    .prepare(
+      `SELECT
+         account_no AS accountNo,
+         configuration,
+         contract_name AS contractName,
+         content_type AS contentType,
+         currency,
+         distribution_channel AS distributionChannel,
+         gross_income AS grossIncome,
+         isrc,
+         net_payable AS netPayable,
+         partner,
+         period_end_date AS periodEndDate,
+         release_artist AS releaseArtist,
+         release_label AS releaseLabel,
+         release_title AS releaseTitle,
+         royalty_rate AS royaltyRate,
+         row_index AS rowIndex,
+         sales,
+         sales_period AS salesPeriod,
+         start_date AS startDate,
+         territory,
+         track_artist AS trackArtist,
+         track_title AS trackTitle,
+         track_version AS trackVersion
+       FROM statement_line_items
+       WHERE report_period_id = ?
+         AND currency = 'VND'
+       ORDER BY row_index ASC, id ASC`,
+    )
+    .bind(reportPeriodId)
+    .all<StatementLineItem>();
+
+  return rows.results.map((row) => ({
+    ...row,
+    currency: 'VND' as const,
+    grossIncome: row.grossIncome === null ? null : Number(row.grossIncome) || 0,
+    netPayable: Number(row.netPayable) || 0,
+    royaltyRate: row.royaltyRate === null ? null : Number(row.royaltyRate) || 0,
+    rowIndex: Number(row.rowIndex) || 0,
+    sales: Number(row.sales) || 0,
+  }));
+}
+
 async function buildImportStatements({
   byteSize,
   bulkUploadId,
@@ -351,11 +567,13 @@ async function buildImportStatements({
   objectKey,
   parsedStatements,
   period,
+  replacedUploadId,
   selectedClient,
   sha256,
   stagingReportPeriodId,
   storeLineItems,
   uploadId,
+  importStrategy,
   uploadMode,
   uploaderId,
   now,
@@ -368,11 +586,13 @@ async function buildImportStatements({
   objectKey: string;
   parsedStatements: ParsedCurrencyStatement[];
   period: string;
+  replacedUploadId: string | null;
   selectedClient: UploadClient;
   sha256: string;
   stagingReportPeriodId: string;
   storeLineItems: boolean;
   uploadId: string;
+  importStrategy: ImportStrategy;
   uploadMode: UploadMode;
   uploaderId: string;
   now: string;
@@ -444,9 +664,10 @@ async function buildImportStatements({
            sha256,
            status,
            validation_summary,
+           replaced_upload_id,
            created_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?)`,
       )
       .bind(
         uploadId,
@@ -459,6 +680,7 @@ async function buildImportStatements({
         byteSize,
         sha256,
         JSON.stringify(importSummary),
+        replacedUploadId,
         now,
       ),
   ];
@@ -527,6 +749,9 @@ async function buildImportStatements({
            VALUES (?, ?, ?, ?, 'published', ?, NULL, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              status = 'published',
+             payment_status = 'unpaid',
+             paid_at = NULL,
+             paid_by_user_id = NULL,
              published_at = excluded.published_at,
              updated_at = excluded.updated_at`,
         )
@@ -679,6 +904,8 @@ async function buildImportStatements({
           filename,
           period,
           rowCount: importSummary.rowCount,
+          importStrategy,
+          mergeStats: importSummary.mergeStats,
           settlements: settlementResults,
           sha256,
           uploadMode,
@@ -877,6 +1104,51 @@ function readUploadMode(formData: FormData): UploadMode {
     readRequiredText(formData, 'uploadMode') ||
     readRequiredText(formData, 'mode');
   return value === 'bulk' ? 'bulk' : 'single';
+}
+
+function readImportStrategy(formData: FormData): ImportStrategy {
+  const value = readRequiredText(formData, 'importStrategy');
+  if (value === 'replace' || value === 'sync') return value;
+  return 'create';
+}
+
+function importSuccessMessage({
+  importStrategy,
+  period,
+  targets,
+  uploadMode,
+}: {
+  importStrategy: ImportStrategy;
+  period: string;
+  targets: UploadTarget[];
+  uploadMode: UploadMode;
+}) {
+  const totalRows = targets.reduce(
+    (total, target) => total + target.rowCount,
+    0,
+  );
+  const subject =
+    uploadMode === 'bulk'
+      ? `${targets.length} khách hàng`
+      : (targets[0]?.client.name ?? 'khách hàng');
+
+  if (importStrategy === 'sync') {
+    const stats = targets.reduce<StatementLineItemMergeStats>(
+      (total, target) => ({
+        added: total.added + (target.mergeStats?.added ?? 0),
+        previous: total.previous + (target.mergeStats?.previous ?? 0),
+        total: total.total + (target.mergeStats?.total ?? target.rowCount),
+        unchanged: total.unchanged + (target.mergeStats?.unchanged ?? 0),
+        updated: total.updated + (target.mergeStats?.updated ?? 0),
+      }),
+      { added: 0, previous: 0, total: 0, unchanged: 0, updated: 0 },
+    );
+
+    return `Đã đồng bộ ${subject}, ${periodDisplayLabel(period)}: ${stats.total} dòng tổng, ${stats.added} thêm mới, ${stats.updated} cập nhật, ${stats.unchanged} không đổi.`;
+  }
+
+  const verb = importStrategy === 'replace' ? 'ghi đè' : 'tạo mới';
+  return `Đã ${verb} và publish ${totalRows} dòng cho ${subject}, ${periodDisplayLabel(period)} (VNĐ).`;
 }
 
 async function findUploadClient(

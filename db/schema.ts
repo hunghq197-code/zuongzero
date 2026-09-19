@@ -184,6 +184,13 @@ export const reportPeriods = sqliteTable(
     status: text('status', {
       enum: ['draft', 'validating', 'published', 'locked', 'replaced'],
     }).notNull(),
+    paymentStatus: text('payment_status', {
+      enum: ['unpaid', 'paid'],
+    })
+      .notNull()
+      .default('unpaid'),
+    paidAt: text('paid_at'),
+    paidByUserId: text('paid_by_user_id').references(() => users.id),
     publishedAt: text('published_at'),
     lockedAt: text('locked_at'),
     createdAt: text('created_at').notNull(),
@@ -197,6 +204,7 @@ export const reportPeriods = sqliteTable(
     ),
     index('idx_report_periods_client_period').on(table.clientId, table.period),
     index('idx_report_periods_status').on(table.status),
+    index('idx_report_periods_payment_status').on(table.paymentStatus),
   ],
 );
 

@@ -73,12 +73,22 @@ test('upload contracts enforce quarterly xlsx import and bulk client matching', 
   assert.match(uploadsRoute, /REPORT_PERIOD_PATTERN/);
   assert.match(uploadsRoute, /YYYY-Q1 đến YYYY-Q4/);
   assert.match(uploadsRoute, /uploadMode === 'bulk'/);
+  assert.match(
+    uploadsRoute,
+    /type ImportStrategy = 'create' \| 'replace' \| 'sync'/,
+  );
+  assert.match(uploadsRoute, /mergeStatementLineItems/);
+  assert.match(uploadsRoute, /statementExists/);
+  assert.match(uploadsRoute, /existing\?\.status === 'locked'/);
+  assert.match(uploadsRoute, /replaced_upload_id/);
   assert.match(uploadsRoute, /Không tìm thấy mã khách hàng trong file tổng/);
   assert.match(uploadsRoute, /statement_line_items/);
   assert.match(schema, /statement_line_items/);
   assert.match(lineItems, /Contract Name/);
   assert.match(lineItems, /Gross Income/);
   assert.match(lineItems, /Royalty Rate/);
+  assert.match(lineItems, /statementLineItemMergeKey/);
+  assert.match(lineItems, /mergeStatementLineItems/);
   assert.match(parser, /'accountno'/);
   assert.match(parser, /'isrc'/);
   assert.match(parser, /'partner'/);
@@ -102,12 +112,18 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(clientData, /statement_line_items/);
   assert.match(clientData, /trend: \[\]/);
   assert.match(clientDashboard, /createEmptyCurrencyBreakdowns/);
-  assert.match(clientDashboard, /Chưa có statement/);
+  assert.match(clientDashboard, /Chưa có báo cáo/);
   assert.doesNotMatch(clientDashboard, /standardStatementColumns/);
   assert.doesNotMatch(clientDashboard, /Dữ liệu chuẩn theo dòng/);
   assert.match(clientDashboard, /makeSourceInsights/);
+  assert.match(clientDashboard, /Từ doanh thu đến thực nhận/);
+  assert.match(clientDashboard, /Thực nhận trong quý/);
+  assert.match(clientDashboard, /Chưa thanh toán/);
+  assert.match(clientData, /s\.gross_revenue AS grossRevenue/);
+  assert.match(clientData, /reservesReleased/);
+  assert.match(clientData, /reservesWithheld/);
   assert.match(clientDashboard, /Doanh thu theo tháng phát sinh/);
-  assert.match(clientDashboard, /Tracking bài hát/);
+  assert.match(clientDashboard, /Theo dõi bài hát/);
   assert.match(adminDashboard, /trendingTracks/);
   assert.match(adminDashboard, /trendingArtists/);
   assert.match(adminDashboard, /emptyAdminOverviewData/);
@@ -121,6 +137,11 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(clientDashboard, /TablePagination/);
   assert.match(adminConsole, /activeAdminTab/);
   assert.match(adminConsole, /adminStatementExportUrl/);
+  assert.match(adminConsole, /Đồng bộ bổ sung/);
+  assert.match(adminConsole, /Ghi đè toàn bộ/);
+  assert.match(adminConsole, /prepareStatementUpload/);
+  assert.match(adminConsole, /mark_paid/);
+  assert.match(adminConsole, /mark_unpaid/);
   assert.match(clientDashboard, /statementExportUrl/);
   assert.match(musicBrand, /onSelect/);
   assert.match(musicBrand, /#client-statements/);

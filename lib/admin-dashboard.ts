@@ -10,7 +10,12 @@ import {
   periodDisplayLabel,
   previousCalendarQuarter,
 } from '@/lib/reporting-periods';
-import { summarizeSettlement, type SettlementStatus } from '@/lib/settlements';
+import {
+  summarizeSettlement,
+  summarizeStatementPayment,
+  type SettlementStatus,
+  type StatementPaymentStatus,
+} from '@/lib/settlements';
 
 export type AdminOverviewData = {
   period: string;
@@ -77,6 +82,8 @@ export type AdminStatementRow = {
   currency: CurrencyCode;
   filename: string | null;
   lockedAt: string | null;
+  paidAt: string | null;
+  paymentStatus: StatementPaymentStatus;
   period: string;
   periodLabel: string;
   paid: number;
@@ -214,6 +221,8 @@ export async function listAdminStatements(
          rp.period,
          rp.currency,
          rp.status,
+         rp.payment_status AS paymentStatus,
+         rp.paid_at AS paidAt,
          rp.published_at AS publishedAt,
          rp.locked_at AS lockedAt,
          s.opening_balance AS opening,
@@ -252,6 +261,10 @@ export async function listAdminStatements(
       reservesWithheld: Number(row.reservesWithheld) || 0,
       revenue,
     });
+    const payment = summarizeStatementPayment(
+      settlement,
+      row.paymentStatus === 'paid' ? 'paid' : 'unpaid',
+    );
 
     return {
       ...row,
@@ -259,7 +272,9 @@ export async function listAdminStatements(
       closing: settlement.carryForward,
       costs,
       currency: 'VND',
-      paid: settlement.paidAmount,
+      paid: payment.paidAmount,
+      paidAt: payment.status === 'paid' ? row.paidAt : null,
+      paymentStatus: payment.status,
       payable: settlement.payable,
       periodLabel: periodDisplayLabel(row.period),
       revenue,
@@ -367,7 +382,9 @@ export function fallbackAdminStatements(): AdminStatementRow[] {
     currency: 'VND',
     filename: null,
     lockedAt: null,
+    paidAt: period.paidAt,
     paid: period.paid,
+    paymentStatus: period.paymentStatus,
     payable: period.payable,
     period: period.period,
     periodLabel: period.label,

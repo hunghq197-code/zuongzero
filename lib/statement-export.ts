@@ -1,5 +1,9 @@
 import { periodDisplayLabel } from '@/lib/reporting-periods';
-import { summarizeSettlement } from '@/lib/settlements';
+import {
+  summarizeSettlement,
+  summarizeStatementPayment,
+  type StatementPaymentStatus,
+} from '@/lib/settlements';
 import {
   hasStatementLineItemsTable,
   standardStatementColumns,
@@ -25,7 +29,9 @@ export type StatementExportData = {
   reportPeriodId: string;
   settlement: {
     carryForward: number;
+    paidAt: string | null;
     paidAmount: number;
+    paymentStatus: StatementPaymentStatus;
     payable: number;
     status: 'paid' | 'carried_forward';
   };
@@ -75,6 +81,8 @@ type StatementExportRow = {
   netCosts: number;
   netRevenue: number;
   openingBalance: number;
+  paidAt: string | null;
+  paymentStatus: StatementPaymentStatus;
   period: string;
   publishedAt: string | null;
   reportPeriodId: string;
@@ -105,6 +113,8 @@ export async function getStatementExportData(
          rp.period,
          rp.currency,
          rp.status,
+         rp.payment_status AS paymentStatus,
+         rp.paid_at AS paidAt,
          rp.published_at AS publishedAt,
          c.code AS clientCode,
          c.display_name AS clientName,
@@ -222,6 +232,10 @@ export async function getStatementExportData(
     reservesWithheld: numberValue(statement.reservesWithheld),
     revenue: numberValue(statement.netRevenue),
   });
+  const payment = summarizeStatementPayment(
+    settlement,
+    statement.paymentStatus === 'paid' ? 'paid' : 'unpaid',
+  );
 
   return {
     breakdowns: breakdowns.results.map((row) => ({
@@ -255,7 +269,9 @@ export async function getStatementExportData(
     reportPeriodId: statement.reportPeriodId,
     settlement: {
       carryForward: settlement.carryForward,
-      paidAmount: settlement.paidAmount,
+      paidAt: payment.status === 'paid' ? statement.paidAt : null,
+      paidAmount: payment.paidAmount,
+      paymentStatus: payment.status,
       payable: settlement.payable,
       status: settlement.status,
     },
@@ -363,6 +379,8 @@ function buildStatementWorkbook(data: StatementExportData) {
     ['GM recouped', data.statement.netCosts],
     ['Payable', data.settlement.payable],
     ['Paid amount', data.settlement.paidAmount],
+    ['Payment status', data.settlement.paymentStatus],
+    ['Paid at', data.settlement.paidAt ?? '-'],
     ['Carry forward', data.settlement.carryForward],
     ['Settlement status', data.settlement.status],
     ['Units', data.statement.units],
@@ -442,6 +460,8 @@ function buildStatementPdf(data: StatementExportData) {
     `GM recouped: ${formatMoneyPlain(data.statement.netCosts)}`,
     `Payable: ${formatMoneyPlain(data.settlement.payable)}`,
     `Paid amount: ${formatMoneyPlain(data.settlement.paidAmount)}`,
+    `Payment status: ${data.settlement.paymentStatus}`,
+    `Paid at: ${data.settlement.paidAt ?? '-'}`,
     `Carry forward: ${formatMoneyPlain(data.settlement.carryForward)}`,
     `Units: ${formatInteger(data.statement.units)}`,
     `Rows: ${formatInteger(data.statement.rowCount)}`,
@@ -466,18 +486,20 @@ function buildStatementPdf(data: StatementExportData) {
     '',
     'SOURCE ROWS',
     ...(data.lineItems.length
-      ? data.lineItems.slice(0, 18).map((row) =>
-          [
-            row.isrc ? `ISRC ${row.isrc}` : null,
-            row.trackTitle,
-            row.trackVersion,
-            row.partner,
-            formatInteger(row.sales),
-            formatMoneyPlain(row.netPayable),
-          ]
-            .filter(Boolean)
-            .join(' / '),
-        )
+      ? data.lineItems
+          .slice(0, 18)
+          .map((row) =>
+            [
+              row.isrc ? `ISRC ${row.isrc}` : null,
+              row.trackTitle,
+              row.trackVersion,
+              row.partner,
+              formatInteger(row.sales),
+              formatMoneyPlain(row.netPayable),
+            ]
+              .filter(Boolean)
+              .join(' / '),
+          )
       : ['No source rows stored for this statement.']),
   ].map(asciiPdfText);
 

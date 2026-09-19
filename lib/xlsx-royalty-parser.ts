@@ -362,6 +362,95 @@ export function parseRoyaltyWorkbook(
   };
 }
 
+export function summarizeStatementLineItems(
+  items: StatementLineItem[],
+): ParsedCurrencyStatement {
+  const currency: CurrencyCode = 'VND';
+  const accumulator = getCurrencyAccumulator(
+    new Map<CurrencyCode, CurrencyAccumulator>(),
+    currency,
+  );
+
+  for (const [index, sourceItem] of items.entries()) {
+    const item = {
+      ...sourceItem,
+      currency,
+      rowIndex: index + 2,
+    };
+    const amount = item.netPayable;
+    const units = Math.round(item.sales);
+    accumulator.value += amount;
+    accumulator.grossValue += item.grossIncome ?? amount;
+    accumulator.units += units;
+    accumulator.rowCount += 1;
+    accumulator.lineItems.push(item);
+
+    addOptionalBreakdown(
+      accumulator.breakdowns.sources,
+      item.partner,
+      amount,
+      units,
+    );
+    addOptionalBreakdown(
+      accumulator.breakdowns.configurations,
+      item.distributionChannel ?? item.configuration,
+      amount,
+      units,
+    );
+    addOptionalBreakdown(
+      accumulator.breakdowns.territories,
+      item.territory,
+      amount,
+      units,
+    );
+    addOptionalBreakdown(
+      accumulator.breakdowns.tracks,
+      item.trackTitle,
+      amount,
+      units,
+    );
+    addOptionalBreakdown(
+      accumulator.breakdowns.artists,
+      item.trackArtist,
+      amount,
+      units,
+    );
+    addOptionalBreakdown(
+      accumulator.breakdowns.releases,
+      item.releaseTitle,
+      amount,
+      units,
+    );
+    addOptionalBreakdown(
+      accumulator.breakdowns.labels,
+      item.releaseLabel,
+      amount,
+      units,
+    );
+
+    if (item.trackTitle || item.isrc) {
+      addTrackRevenueValue(
+        accumulator.trackRevenue,
+        normalizeLabel(item.trackTitle ?? item.isrc ?? ''),
+        item.isrc,
+        amount,
+        units,
+      );
+    }
+  }
+
+  return {
+    breakdowns: finalizeBreakdowns(accumulator),
+    currency,
+    grossRevenue: roundMoney(accumulator.grossValue),
+    lineItems: accumulator.lineItems,
+    revenue: roundMoney(accumulator.value),
+    rowCount: accumulator.rowCount,
+    trackRevenue: finalizeTrackRevenue(accumulator.trackRevenue),
+    units: accumulator.units,
+  };
+}
+
 export function stableBreakdownId(
   reportPeriodId: string,
   key: BreakdownKey,
@@ -696,6 +785,16 @@ function addBreakdownValue(
   entry.units += units;
   entry.value += value;
   target.set(label, entry);
+}
+
+function addOptionalBreakdown(
+  target: Map<string, BreakdownAccumulator>,
+  label: string | null,
+  value: number,
+  units: number,
+) {
+  if (!label) return;
+  addBreakdownValue(target, normalizeLabel(label), value, units);
 }
 
 function addTrackRevenueValue(
