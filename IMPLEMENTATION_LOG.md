@@ -273,6 +273,16 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-19: Viet hoa toan bo noi dung hien thi tren dashboard client, bao gom header, trang thai, ky bao cao, chart, bang, tooltip, empty state va thanh dieu huong. Da test truc quan desktop/mobile voi data 742.563.571 VND; so dai khong tran, heading mobile khong bi cat.
 - 2026-09-19: `npm test` qua 24 unit tests + 10 contract tests, targeted `oxlint` sach, `git diff --check` sach va `npm run build` thanh cong. Chua deploy production de giu quy trinh demo truoc khi deploy ban chinh.
 
+## Phase 10 - Safe Import
+
+- 2026-09-21: PHASE 10 SAFE IMPORT DEPLOYED. Upload Excel gio bat buoc `Kiem tra truoc khi nhap`; server parse, validate va tinh truoc rows, doanh thu, GM du kien, thuc nhan va chenh lech ma chua ghi D1/R2.
+- Nut xac nhan chi hoat dong voi confirmation token gan voi SHA-256 file va preview hien tai; neu file, strategy hoac du lieu statement thay doi thi server tu choi commit cu.
+- Truoc moi lan import, Worker luu snapshot statement, breakdown, line items, GM recoup va guarantee balances vao R2. Admin co `Lich su va hoan tac`, phan biet `Dang su dung`/`Da hoan tac` va chi hoan tac duoc version dang active.
+- Rollback bi chan khi statement dang khoa, da thanh toan, khong phai version hien tai, hoac client co mot import active moi hon. Moi rollback ghi audit log va dua upload ve status `rolled_back` de bao toan thu tu GM.
+- Da test end-to-end local create -> rollback -> replace -> rollback, xac nhan phuc hoi statement, source upload, line items va audit log; data/file/session test da duoc don sach sau kiem tra.
+- Da test UX desktop 1440px va mobile 390px; preview table dung cuon ngang co kiem soat tren mobile. `npm test` qua 30 unit + 12 contract tests, targeted `oxlint`, `npx tsc --noEmit` va `npm run build` thanh cong.
+- Da deploy Cloudflare Worker version `47fc2bc7-e2e6-435e-8a62-cac7a045ef75` len `https://artistportal.zuongzeroent.com` bang `npx wrangler deploy --config wrangler.cloudflare.jsonc`; `npm run test:production` qua 13/13 checks (trang auth va auth guard API), chua test import/rollback co dang nhap tren production. Phase 10 khong can migration D1 moi; snapshot dung R2 hien co va status `rolled_back` la gia tri text tuong thich schema hien tai.
+
 ## Roadmap cac phase
 
 - Phase 1 - Quy + VND-only: DONE. Da chuyen ky bao cao tu thang sang quy `YYYY-Qn` va loai bo USD/ngoai te khoi luong import/dashboard.
@@ -310,3 +320,4 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Test flow nhac doi soat bang email that voi mot client co statement published, gom dry-run, gui ngay va retry loi.
 - Test demo local payment marking tai tab Statement; neu dat, apply `drizzle/0011_statement_payment_status.sql` len D1 remote roi deploy Worker.
 - Test nghiep vu Phase 9 tren production bang file co Gross Income: tao mot rule theo ISRC, import vao mot client/quy test, doi chieu dong co rule duoc tinh lai va dong khong co rule giu nguyen Net Payable tu Excel.
+- Test nghiep vu Phase 10 bang mot file Excel that tren production voi tai khoan admin: xem preview, import, mo lich su, rollback va doi chieu so lieu. Chi dung client/quy test de tranh anh huong du lieu that.

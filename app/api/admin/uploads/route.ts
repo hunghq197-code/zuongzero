@@ -36,6 +36,16 @@ import {
   listApplicableTrackRoyaltyRules,
   type RoyaltyRuleApplicationStats,
 } from '@/lib/royalty-rules';
+import {
+  createImportConfirmationToken,
+  sumStatementImportPreview,
+  type StatementImportPreview,
+  type StatementImportPreviewCustomer,
+} from '@/lib/statement-import-preview';
+import {
+  captureStatementImportSnapshot,
+  statementImportSnapshotKey,
+} from '@/lib/statement-import-snapshots';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
@@ -58,6 +68,7 @@ type CustomerUploadSummary = {
 
 type UploadMode = 'single' | 'bulk';
 type ImportStrategy = 'create' | 'replace' | 'sync';
+type UploadAction = 'commit' | 'preview';
 
 type UploadTarget = {
   client: UploadClient;
@@ -72,6 +83,10 @@ type UploadTarget = {
 };
 
 type ExistingStatement = {
+  grossRevenue: number;
+  netCosts: number;
+  netRevenue: number;
+  paymentStatus: 'paid' | 'unpaid';
   rowCount: number;
   sourceUploadId: string | null;
   status: 'draft' | 'validating' | 'published' | 'locked' | 'replaced';
@@ -106,6 +121,7 @@ async function uploadResponse(request: Request) {
   const file = formData.get('file');
   const clientId = readRequiredText(formData, 'clientId');
   const period = readRequiredText(formData, 'period');
+  const uploadAction = readUploadAction(formData);
   const uploadMode = readUploadMode(formData);
   const importStrategy = readImportStrategy(formData);
   const selectedClient =
@@ -160,6 +176,36 @@ async function uploadResponse(request: Request) {
     targets: ruleAppliedTargets,
   });
   if (uploadTargets instanceof Response) return uploadTargets;
+  const sha256 = await hashBuffer(buffer);
+  const preview = await buildUploadPreview({
+    db: env.DB,
+    filename: file.name,
+    importStrategy,
+    period,
+    targets: uploadTargets,
+    uploadMode,
+    warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
+  });
+  const previewToken = await createImportConfirmationToken({
+    fileSha256: sha256,
+    preview,
+  });
+
+  if (uploadAction === 'preview') {
+    return Response.json({
+      preview,
+      previewToken,
+      status: 'preview',
+    });
+  }
+
+  if (readRequiredText(formData, 'previewToken') !== previewToken) {
+    return jsonError(
+      'Dữ liệu hoặc cấu hình đã thay đổi sau bước kiểm tra. Hãy kiểm tra lại file trước khi nhập.',
+      409,
+    );
+  }
+
   const uploader = await ensureUserRecord(env.DB, {
     displayName: user.displayName,
     email: user.email,
@@ -167,11 +213,31 @@ async function uploadResponse(request: Request) {
     role: adminAccess.role,
     userId: user.userId,
   });
-  const sha256 = await hashBuffer(buffer);
 
   const statements: D1PreparedStatement[] = [];
   for (const target of uploadTargets) {
     const objectKey = `clients/${target.client.id}/periods/${period}/uploads/${target.uploadId}.xlsx`;
+    const rollbackSnapshotKey = statementImportSnapshotKey({
+      clientId: target.client.id,
+      period,
+      uploadId: target.uploadId,
+    });
+    const rollbackSnapshot = await captureStatementImportSnapshot({
+      clientId: target.client.id,
+      db: env.DB,
+      period,
+    });
+    await env.FILES.put(rollbackSnapshotKey, JSON.stringify(rollbackSnapshot), {
+      httpMetadata: {
+        contentType: 'application/json',
+      },
+      customMetadata: {
+        clientId: target.client.id,
+        period,
+        purpose: 'statement-import-rollback',
+        uploadId: target.uploadId,
+      },
+    });
     await env.FILES.put(objectKey, buffer, {
       httpMetadata: {
         contentType: XLSX_MIME,
@@ -200,6 +266,7 @@ async function uploadResponse(request: Request) {
           currencies: parsedWorkbook.currencies,
           importStrategy,
           mergeStats: target.mergeStats,
+          rollbackSnapshotKey,
           rowCount: target.rowCount,
           royaltyRuleStats: target.royaltyRuleStats,
           storeLineItems,
@@ -279,6 +346,7 @@ function buildImportSummary({
   currencies,
   importStrategy,
   mergeStats,
+  rollbackSnapshotKey,
   rowCount,
   royaltyRuleStats,
   storeLineItems,
@@ -290,6 +358,7 @@ function buildImportSummary({
   currencies: CurrencyCode[];
   importStrategy: ImportStrategy;
   mergeStats: StatementLineItemMergeStats | null;
+  rollbackSnapshotKey: string;
   rowCount: number;
   royaltyRuleStats: RoyaltyRuleApplicationStats;
   storeLineItems: boolean;
@@ -314,6 +383,7 @@ function buildImportSummary({
     lineItemStorage: storeLineItems ? 'enabled' : 'pending-migration',
     totalRowCount,
     mergeStats,
+    rollbackSnapshotKey,
     uploadMode,
     warnings: uploadWarnings(warnings, storeLineItems),
   };
@@ -539,6 +609,13 @@ async function prepareUploadTargets({
         );
       }
 
+      if (existing?.paymentStatus === 'paid') {
+        return jsonError(
+          `${target.client.name}, ${periodDisplayLabel(period)} đã thanh toán. Hãy hoàn tác trạng thái thanh toán trước khi thay đổi dữ liệu.`,
+          409,
+        );
+      }
+
       if (importStrategy === 'create' && statementExists) {
         return jsonError(
           `${target.client.name} đã có statement ${periodDisplayLabel(period)}. Chọn Đồng bộ bổ sung hoặc Ghi đè toàn bộ.`,
@@ -602,13 +679,130 @@ async function prepareUploadTargets({
   return preparedTargets;
 }
 
+async function buildUploadPreview({
+  db,
+  filename,
+  importStrategy,
+  period,
+  targets,
+  uploadMode,
+  warnings,
+}: {
+  db: D1Database;
+  filename: string;
+  importStrategy: ImportStrategy;
+  period: string;
+  targets: UploadTarget[];
+  uploadMode: UploadMode;
+  warnings: string[];
+}): Promise<StatementImportPreview> {
+  const customers: StatementImportPreviewCustomer[] = [];
+
+  for (const target of targets) {
+    let currentGrossRevenue = 0;
+    let currentRevenue = 0;
+    let currentRows = 0;
+    let guaranteeRecouped = 0;
+    let nextGrossRevenue = 0;
+    let nextPayable = 0;
+    let nextRevenue = 0;
+    let nextRows = 0;
+    let settlementStatus: 'carried_forward' | 'paid' = 'carried_forward';
+
+    for (const parsedStatement of target.parsedStatements) {
+      const reportPeriodId = reportPeriodIdForCurrency(
+        target.client.id,
+        period,
+        parsedStatement.currency,
+      );
+      const existing = await findExistingStatement(db, reportPeriodId);
+      const opening = await readPreviousClosingBalance(
+        db,
+        target.client.id,
+        period,
+      );
+      const guaranteePlan = await planTrackGuaranteeRecoupments({
+        clientId: target.client.id,
+        db,
+        now: new Date().toISOString(),
+        reportPeriodId,
+        sourceUploadId: target.uploadId,
+        trackRevenue: parsedStatement.trackRevenue,
+      });
+      const settlement = summarizeSettlement({
+        costs: guaranteePlan.deductionTotal,
+        opening,
+        reservesReleased: 0,
+        reservesWithheld: 0,
+        revenue: parsedStatement.revenue,
+      });
+
+      currentGrossRevenue = roundMoney(
+        currentGrossRevenue + Number(existing?.grossRevenue ?? 0),
+      );
+      currentRevenue = roundMoney(
+        currentRevenue + Number(existing?.netRevenue ?? 0),
+      );
+      currentRows += Number(existing?.rowCount ?? 0);
+      guaranteeRecouped = roundMoney(
+        guaranteeRecouped + guaranteePlan.deductionTotal,
+      );
+      nextGrossRevenue = roundMoney(
+        nextGrossRevenue + parsedStatement.grossRevenue,
+      );
+      nextPayable = roundMoney(nextPayable + settlement.payable);
+      nextRevenue = roundMoney(nextRevenue + parsedStatement.revenue);
+      nextRows += parsedStatement.rowCount;
+      settlementStatus = settlement.status;
+    }
+
+    customers.push({
+      clientCode: target.client.code,
+      clientId: target.client.id,
+      clientName: target.client.name,
+      currentGrossRevenue,
+      currentRevenue,
+      currentRows,
+      excelRows: target.royaltyRuleStats.excelRows,
+      guaranteeRecouped,
+      mergeStats: target.mergeStats,
+      nextGrossRevenue,
+      nextPayable,
+      nextRevenue,
+      nextRows,
+      revenueDelta: roundMoney(nextRevenue - currentRevenue),
+      royaltyRuleRows: target.royaltyRuleStats.ruleRows,
+      rowDelta: nextRows - currentRows,
+      settlementStatus,
+    });
+  }
+
+  return {
+    clientCount: customers.length,
+    customers,
+    destructive:
+      importStrategy === 'replace' &&
+      customers.some((customer) => customer.currentRows > 0),
+    filename,
+    importStrategy,
+    period,
+    totals: sumStatementImportPreview(customers),
+    uploadMode,
+    warnings,
+  };
+}
+
 async function findExistingStatement(db: D1Database, reportPeriodId: string) {
   return db
     .prepare(
       `SELECT
          rp.status,
+         rp.payment_status AS paymentStatus,
          s.source_upload_id AS sourceUploadId,
-         COALESCE(s.row_count, 0) AS rowCount
+         COALESCE(s.row_count, 0) AS rowCount,
+         COALESCE(s.gross_revenue, 0) AS grossRevenue,
+         COALESCE(s.net_revenue, 0) AS netRevenue,
+         COALESCE(s.net_costs, 0) AS netCosts
        FROM report_periods rp
        LEFT JOIN statements s
          ON s.report_period_id = rp.id
@@ -1243,6 +1437,12 @@ async function readCustomerUploadSummary(db: D1Database, clientId: string) {
 function readRequiredText(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readUploadAction(formData: FormData): UploadAction {
+  return readRequiredText(formData, 'action') === 'commit'
+    ? 'commit'
+    : 'preview';
 }
 
 function readUploadMode(formData: FormData): UploadMode {

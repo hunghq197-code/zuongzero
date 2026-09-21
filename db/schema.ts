@@ -227,7 +227,14 @@ export const uploads = sqliteTable(
     byteSize: integer('byte_size').notNull(),
     sha256: text('sha256').notNull(),
     status: text('status', {
-      enum: ['uploaded', 'validated', 'imported', 'failed', 'quarantined'],
+      enum: [
+        'uploaded',
+        'validated',
+        'imported',
+        'rolled_back',
+        'failed',
+        'quarantined',
+      ],
     }).notNull(),
     validationSummary: text('validation_summary'),
     replacedUploadId: text('replaced_upload_id'),

@@ -25,6 +25,8 @@ test('all admin API routes require signed-in admin authorization', () => {
     'app/api/admin/statements/route.ts',
     'app/api/admin/statements/[reportPeriodId]/export/route.ts',
     'app/api/admin/uploads/route.ts',
+    'app/api/admin/uploads/history/route.ts',
+    'app/api/admin/uploads/rollback/route.ts',
   ];
 
   for (const route of adminRoutes) {
@@ -81,6 +83,10 @@ test('upload contracts enforce quarterly xlsx import and bulk client matching', 
   assert.match(uploadsRoute, /mergeStatementLineItems/);
   assert.match(uploadsRoute, /statementExists/);
   assert.match(uploadsRoute, /existing\?\.status === 'locked'/);
+  assert.match(uploadsRoute, /existing\?\.paymentStatus === 'paid'/);
+  assert.match(uploadsRoute, /uploadAction === 'preview'/);
+  assert.match(uploadsRoute, /previewToken/);
+  assert.match(uploadsRoute, /captureStatementImportSnapshot/);
   assert.match(uploadsRoute, /replaced_upload_id/);
   assert.match(uploadsRoute, /Không tìm thấy mã khách hàng trong file tổng/);
   assert.match(uploadsRoute, /statement_line_items/);
@@ -99,6 +105,32 @@ test('upload contracts enforce quarterly xlsx import and bulk client matching', 
   assert.match(parser, /\?:\\\/>\|>/);
   assert.match(parser, /trackExternalId: string \| null/);
   assert.doesNotMatch(parser, /configuration:\s*\[[^\]]*'type'/s);
+});
+
+test('safe import preview and rollback remain guarded and auditable', () => {
+  const uploadsRoute = readSource('app/api/admin/uploads/route.ts');
+  const historyRoute = readSource('app/api/admin/uploads/history/route.ts');
+  const rollbackRoute = readSource('app/api/admin/uploads/rollback/route.ts');
+  const snapshots = readSource('lib/statement-import-snapshots.ts');
+  const adminConsole = readSource('components/admin-console.tsx');
+
+  assert.match(uploadsRoute, /createImportConfirmationToken/);
+  assert.match(uploadsRoute, /rollbackSnapshotKey/);
+  assert.match(historyRoute, /current_statement\.source_upload_id = u\.id/);
+  assert.match(historyRoute, /target\.paymentStatus !== 'paid'/);
+  assert.match(historyRoute, /hasNewerActiveUpload/);
+  assert.match(rollbackRoute, /target\.currentUploadId !== uploadId/);
+  assert.match(rollbackRoute, /target\.status === 'locked'/);
+  assert.match(rollbackRoute, /target\.paymentStatus === 'paid'/);
+  assert.match(rollbackRoute, /newerActiveUpload/);
+  assert.match(rollbackRoute, /SET status = 'rolled_back'/);
+  assert.match(rollbackRoute, /admin_statement_upload_rolled_back/);
+  assert.match(snapshots, /restoreStatementImportSnapshot/);
+  assert.match(snapshots, /DELETE FROM statement_line_items/);
+  assert.match(snapshots, /DELETE FROM track_guarantee_recoupments/);
+  assert.match(adminConsole, /Kiểm tra trước khi nhập dữ liệu/);
+  assert.match(adminConsole, /Lịch sử và hoàn tác/);
+  assert.match(adminConsole, /Xác nhận hoàn tác/);
 });
 
 test('client and admin dashboard regressions keep empty states and aggregate views', () => {

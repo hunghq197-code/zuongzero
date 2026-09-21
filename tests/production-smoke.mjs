@@ -52,6 +52,17 @@ const checks = [
   },
   {
     expected: [401],
+    label: 'admin upload history requires auth',
+    path: '/api/admin/uploads/history?reportPeriodId=smoke-report',
+  },
+  {
+    expected: [401],
+    label: 'admin upload rollback requires auth',
+    method: 'POST',
+    path: '/api/admin/uploads/rollback',
+  },
+  {
+    expected: [401],
     label: 'admin statement export requires auth',
     path: '/api/admin/statements/smoke-report/export?format=pdf',
   },
@@ -71,6 +82,7 @@ for (const check of checks) {
     headers: {
       Accept: 'text/html,application/json',
     },
+    method: check.method ?? 'GET',
     redirect: 'manual',
     signal: AbortSignal.timeout(15_000),
   });

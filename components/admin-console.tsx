@@ -14,7 +14,6 @@ import {
   Edit3,
   EyeOff,
   FileSpreadsheet,
-  FolderLock,
   LockKeyhole,
   LogOut,
   Mail,
@@ -29,6 +28,7 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  Undo2,
   UserPlus,
   Users,
   WalletCards,
@@ -100,6 +100,10 @@ import {
 } from '@/lib/admin-dashboard';
 import type { TrackGuaranteeRow, TrackGuaranteeStatus } from '@/lib/guarantees';
 import { standardStatementColumns } from '@/lib/statement-line-items';
+import type {
+  StatementImportPreview,
+  StatementImportPreviewCustomer,
+} from '@/lib/statement-import-preview';
 
 type AdminRole = 'super_admin' | 'admin';
 type ManagedAccountRole = 'admin' | 'client';
@@ -142,6 +146,21 @@ type StatementStatusFilter = 'all' | AdminStatementRow['status'];
 type GuaranteeStatusFilter = 'all' | TrackGuaranteeStatus;
 type UploadMode = 'single' | 'bulk';
 type ImportStrategy = 'create' | 'replace' | 'sync';
+type UploadHistoryRow = {
+  byteSize: number;
+  canRollback: boolean;
+  createdAt: string;
+  filename: string;
+  id: string;
+  importStrategy: ImportStrategy;
+  isCurrent: boolean;
+  replacedUploadId: string | null;
+  rowCount: number;
+  sha256: string;
+  status: 'imported' | 'rolled_back';
+  uploadMode: UploadMode;
+  uploaderEmail: string | null;
+};
 type ReminderActionState = 'idle' | 'saving' | 'saved' | 'failed';
 type EmailActionState = 'idle' | 'loading' | 'saving' | 'saved' | 'failed';
 type AdminTab =
@@ -256,6 +275,21 @@ function formatMoney(value: number) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('vi-VN').format(value);
+}
+
+function formatSignedMoney(value: number) {
+  if (value === 0) return formatMoney(0);
+  return `${value > 0 ? '+' : '-'}${formatMoney(Math.abs(value))}`;
+}
+
+function formatSignedNumber(value: number) {
+  if (value === 0) return '0';
+  return `${value > 0 ? '+' : '-'}${formatNumber(Math.abs(value))}`;
+}
+
+function formatFileSize(value: number) {
+  if (value < 1024 * 1024) return `${Math.max(Math.round(value / 1024), 1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function standardColumnStorageLabel(storage: 'matched' | 'added') {
@@ -444,6 +478,7 @@ function StatementActionsMenu({
   busy,
   isSuperAdmin,
   onDelete,
+  onHistory,
   onPrepareUpload,
   onUpdate,
   statement,
@@ -451,6 +486,7 @@ function StatementActionsMenu({
   busy: boolean;
   isSuperAdmin: boolean;
   onDelete: (statement: AdminStatementRow) => void;
+  onHistory: (statement: AdminStatementRow) => void;
   onPrepareUpload: (
     statement: AdminStatementRow,
     strategy: Extract<ImportStrategy, 'replace' | 'sync'>,
@@ -468,6 +504,11 @@ function StatementActionsMenu({
 
     if (action === 'sync' || action === 'replace') {
       onPrepareUpload(statement, action);
+      return;
+    }
+
+    if (action === 'history') {
+      onHistory(statement);
       return;
     }
 
@@ -494,6 +535,9 @@ function StatementActionsMenu({
         <NativeSelectOption value="excel">Tải Excel</NativeSelectOption>
       </NativeSelectOptGroup>
       <NativeSelectOptGroup label="Cập nhật dữ liệu">
+        <NativeSelectOption value="history">
+          Lịch sử và hoàn tác
+        </NativeSelectOption>
         <NativeSelectOption
           disabled={statement.status === 'locked'}
           value="sync"
@@ -785,11 +829,25 @@ export function AdminConsole({
   const [uploadMode, setUploadMode] = useState<UploadMode>('single');
   const [importStrategy, setImportStrategy] =
     useState<ImportStrategy>('create');
-  const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false);
   const [uploadState, setUploadState] = useState<
-    'idle' | 'uploading' | 'stored' | 'failed'
+    'idle' | 'previewing' | 'previewed' | 'uploading' | 'stored' | 'failed'
   >('idle');
   const [uploadMessage, setUploadMessage] = useState('');
+  const [uploadPreview, setUploadPreview] =
+    useState<StatementImportPreview | null>(null);
+  const [uploadPreviewToken, setUploadPreviewToken] = useState('');
+  const [uploadPreviewOpen, setUploadPreviewOpen] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<AdminStatementRow | null>(
+    null,
+  );
+  const [uploadHistory, setUploadHistory] = useState<UploadHistoryRow[]>([]);
+  const [uploadHistoryState, setUploadHistoryState] = useState<
+    'idle' | 'loading' | 'ready' | 'rolling_back' | 'failed'
+  >('idle');
+  const [uploadHistoryMessage, setUploadHistoryMessage] = useState('');
+  const [rollbackTarget, setRollbackTarget] = useState<UploadHistoryRow | null>(
+    null,
+  );
   const [managedAccounts, setManagedAccounts] = useState<ManagedAccountRow[]>(
     [],
   );
@@ -1449,7 +1507,30 @@ export function AdminConsole({
     }
   }
 
-  async function uploadWorkbook() {
+  function clearUploadPreview() {
+    setUploadPreview(null);
+    setUploadPreviewToken('');
+    setUploadPreviewOpen(false);
+  }
+
+  function buildUploadFormData(
+    action: 'commit' | 'preview',
+    previewToken = '',
+  ) {
+    const body = new FormData();
+    if (selectedFile) body.append('file', selectedFile);
+    body.append('action', action);
+    body.append('uploadMode', uploadMode);
+    body.append('importStrategy', importStrategy);
+    if (uploadMode === 'single' && activeClient) {
+      body.append('clientId', activeClient.id);
+    }
+    body.append('period', selectedPeriod);
+    if (previewToken) body.append('previewToken', previewToken);
+    return body;
+  }
+
+  async function previewWorkbook() {
     if (uploadMode === 'single' && !activeClient) {
       setUploadState('failed');
       setUploadMessage('Cần tạo khách hàng trước khi upload statement.');
@@ -1458,22 +1539,54 @@ export function AdminConsole({
 
     if (!selectedFile || validation.state !== 'ready') return;
 
-    setUploadState('uploading');
+    setUploadState('previewing');
     setUploadMessage('');
-
-    const body = new FormData();
-    body.append('file', selectedFile);
-    body.append('uploadMode', uploadMode);
-    body.append('importStrategy', importStrategy);
-    if (uploadMode === 'single' && activeClient) {
-      body.append('clientId', activeClient.id);
-    }
-    body.append('period', selectedPeriod);
+    clearUploadPreview();
 
     try {
       const response = await fetchWithSession('/api/admin/uploads', {
         method: 'POST',
-        body,
+        body: buildUploadFormData('preview'),
+      });
+      const result = await readJsonResponse<{
+        message?: string;
+        preview?: StatementImportPreview;
+        previewToken?: string;
+      }>(response);
+
+      if (!response.ok || !result.preview || !result.previewToken) {
+        throw new Error(
+          result.message ?? `Không thể kiểm tra file (${response.status}).`,
+        );
+      }
+
+      setUploadPreview(result.preview);
+      setUploadPreviewToken(result.previewToken);
+      setUploadPreviewOpen(true);
+      setUploadState('previewed');
+      setUploadMessage(
+        'File đã được kiểm tra. Xác nhận số liệu trước khi nhập.',
+      );
+    } catch (error) {
+      setUploadState('failed');
+      setUploadMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể kiểm tra file ở thời điểm này.',
+      );
+    }
+  }
+
+  async function uploadWorkbook() {
+    if (!selectedFile || !uploadPreviewToken) return;
+
+    setUploadState('uploading');
+    setUploadMessage('');
+
+    try {
+      const response = await fetchWithSession('/api/admin/uploads', {
+        method: 'POST',
+        body: buildUploadFormData('commit', uploadPreviewToken),
       });
       const result = await readJsonResponse<{
         customer?: {
@@ -1493,6 +1606,7 @@ export function AdminConsole({
 
       setUploadState('stored');
       setSelectedFile(null);
+      clearUploadPreview();
       if (uploadMode === 'single' && result.customer && activeClient) {
         setCustomers((currentCustomers) =>
           currentCustomers.map((customer) =>
@@ -1524,12 +1638,7 @@ export function AdminConsole({
   }
 
   function requestWorkbookUpload() {
-    if (importStrategy === 'replace') {
-      setReplaceConfirmOpen(true);
-      return;
-    }
-
-    void uploadWorkbook();
+    void previewWorkbook();
   }
 
   async function createTrackGuarantee(event: { preventDefault: () => void }) {
@@ -1982,6 +2091,82 @@ export function AdminConsole({
     }
   }
 
+  async function openUploadHistory(statement: AdminStatementRow) {
+    setHistoryTarget(statement);
+    setUploadHistory([]);
+    setUploadHistoryMessage('');
+    setUploadHistoryState('loading');
+
+    try {
+      const params = new URLSearchParams({
+        reportPeriodId: statement.reportPeriodId,
+      });
+      const response = await fetchWithSession(
+        `/api/admin/uploads/history?${params.toString()}`,
+      );
+      const result = await readJsonResponse<{
+        history?: UploadHistoryRow[];
+        message?: string;
+      }>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          result.message ??
+            `Không thể tải lịch sử import (${response.status}).`,
+        );
+      }
+
+      setUploadHistory(result.history ?? []);
+      setUploadHistoryState('ready');
+    } catch (error) {
+      setUploadHistoryMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể tải lịch sử import.',
+      );
+      setUploadHistoryState('failed');
+    }
+  }
+
+  async function rollbackUploadVersion(target: UploadHistoryRow) {
+    if (!historyTarget || uploadHistoryState === 'rolling_back') return;
+
+    setUploadHistoryState('rolling_back');
+    setUploadHistoryMessage('');
+    try {
+      const response = await fetchWithSession('/api/admin/uploads/rollback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportPeriodId: historyTarget.reportPeriodId,
+          uploadId: target.id,
+        }),
+      });
+      const result = await readJsonResponse<{ message?: string }>(response);
+      if (!response.ok) {
+        throw new Error(
+          result.message ?? `Không thể hoàn tác (${response.status}).`,
+        );
+      }
+
+      setRollbackTarget(null);
+      setHistoryTarget(null);
+      setUploadHistory([]);
+      setUploadHistoryState('idle');
+      setStatementActionMessage(
+        result.message ?? 'Đã hoàn tác phiên bản dữ liệu.',
+      );
+      setStatementActionState('saved');
+      await refreshAdminSnapshot(selectedPeriod);
+    } catch (error) {
+      setRollbackTarget(null);
+      setUploadHistoryState('failed');
+      setUploadHistoryMessage(
+        error instanceof Error ? error.message : 'Không thể hoàn tác dữ liệu.',
+      );
+    }
+  }
+
   function prepareStatementUpload(
     statement: AdminStatementRow,
     strategy: Extract<ImportStrategy, 'replace' | 'sync'>,
@@ -1991,6 +2176,7 @@ export function AdminConsole({
     setSelectedClient(statement.clientId);
     setSelectedPeriod(statement.period);
     setSelectedFile(null);
+    clearUploadPreview();
     setUploadState('idle');
     setUploadMessage('');
     document.getElementById('admin-upload-panel')?.scrollIntoView({
@@ -2162,7 +2348,12 @@ export function AdminConsole({
                 <div className="w-full sm:w-[240px]">
                   <Select
                     onValueChange={(value) => {
-                      if (value) setSelectedPeriod(value);
+                      if (value) {
+                        setSelectedPeriod(value);
+                        clearUploadPreview();
+                        setUploadState('idle');
+                        setUploadMessage('');
+                      }
                     }}
                     value={selectedPeriod}
                   >
@@ -3005,6 +3196,7 @@ export function AdminConsole({
                             setUploadMode(
                               event.target.checked ? 'bulk' : 'single',
                             );
+                            clearUploadPreview();
                             setUploadState('idle');
                             setUploadMessage('');
                           }}
@@ -3020,7 +3212,12 @@ export function AdminConsole({
                             </span>
                             <Select
                               onValueChange={(value) => {
-                                if (value) setSelectedClient(value);
+                                if (value) {
+                                  setSelectedClient(value);
+                                  clearUploadPreview();
+                                  setUploadState('idle');
+                                  setUploadMessage('');
+                                }
                               }}
                               value={selectedClient}
                             >
@@ -3055,7 +3252,12 @@ export function AdminConsole({
                         </span>
                         <Select
                           onValueChange={(value) => {
-                            if (value) setSelectedPeriod(value);
+                            if (value) {
+                              setSelectedPeriod(value);
+                              clearUploadPreview();
+                              setUploadState('idle');
+                              setUploadMessage('');
+                            }
                           }}
                           value={selectedPeriod}
                         >
@@ -3092,6 +3294,7 @@ export function AdminConsole({
                               value === 'replace'
                             ) {
                               setImportStrategy(value);
+                              clearUploadPreview();
                               setUploadState('idle');
                               setUploadMessage('');
                             }
@@ -3138,6 +3341,7 @@ export function AdminConsole({
                         type="file"
                         onChange={(event) => {
                           setSelectedFile(event.target.files?.[0] ?? null);
+                          clearUploadPreview();
                           setUploadState('idle');
                           setUploadMessage('');
                         }}
@@ -3219,16 +3423,17 @@ export function AdminConsole({
                       className="mt-4 h-10 w-full bg-[#071118] text-white hover:bg-[#111827]"
                       disabled={
                         validation.state !== 'ready' ||
+                        uploadState === 'previewing' ||
                         uploadState === 'uploading'
                       }
                       onClick={requestWorkbookUpload}
                     >
-                      <FolderLock className="size-4" />
-                      {uploadState === 'uploading'
-                        ? 'Đang lưu...'
-                        : uploadMode === 'bulk'
-                          ? `${importStrategyLabel(importStrategy)} file tổng`
-                          : importStrategyLabel(importStrategy)}
+                      <ShieldCheck className="size-4" />
+                      {uploadState === 'previewing'
+                        ? 'Đang kiểm tra...'
+                        : uploadState === 'uploading'
+                          ? 'Đang nhập dữ liệu...'
+                          : 'Kiểm tra trước khi nhập'}
                     </Button>
                     {uploadMessage ? (
                       <p
@@ -3424,6 +3629,9 @@ export function AdminConsole({
                                   }
                                   isSuperAdmin={isSuperAdmin}
                                   onDelete={setStatementDeleteTarget}
+                                  onHistory={(target) => {
+                                    void openUploadHistory(target);
+                                  }}
                                   onPrepareUpload={prepareStatementUpload}
                                   onUpdate={(target, action) => {
                                     void updateStatement(target, action);
@@ -3683,8 +3891,8 @@ export function AdminConsole({
                       </Select>
                     </div>
 
-                    <div className="overflow-hidden rounded-lg border border-border">
-                      <Table>
+                    <div className="overflow-x-auto rounded-lg border border-border">
+                      <Table className="min-w-[720px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead>Client</TableHead>
@@ -4357,37 +4565,274 @@ export function AdminConsole({
               </TabsContent>
             </Tabs>
 
+            <Dialog
+              onOpenChange={(open) => {
+                if (uploadState !== 'uploading') setUploadPreviewOpen(open);
+              }}
+              open={uploadPreviewOpen}
+            >
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+                <DialogHeader>
+                  <DialogTitle>Kiểm tra trước khi nhập dữ liệu</DialogTitle>
+                </DialogHeader>
+
+                {uploadPreview ? (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge className="rounded-lg bg-[#e7fbf7] text-[#00796f]">
+                        {importStrategyLabel(uploadPreview.importStrategy)}
+                      </Badge>
+                      <span className="text-muted-foreground">
+                        {uploadPreview.filename} · {selectedPeriodLabel} ·{' '}
+                        {formatNumber(uploadPreview.clientCount)} khách hàng
+                      </span>
+                    </div>
+
+                    {uploadPreview.destructive ? (
+                      <div className="flex gap-3 rounded-lg border border-[#f0c67b] bg-[#fff9ec] p-3 text-sm text-[#7a5100]">
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                        <p>
+                          Ghi đè sẽ thay toàn bộ dữ liệu hiện tại. Hệ thống sẽ
+                          lưu snapshot để có thể hoàn tác phiên bản này.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <PreviewMetric
+                        label="Dòng sau nhập"
+                        value={formatNumber(uploadPreview.totals.nextRows)}
+                        helper={formatSignedNumber(
+                          uploadPreview.totals.rowDelta,
+                        )}
+                      />
+                      <PreviewMetric
+                        label="Doanh thu sau nhập"
+                        value={formatMoney(uploadPreview.totals.nextRevenue)}
+                        helper={formatSignedMoney(
+                          uploadPreview.totals.revenueDelta,
+                        )}
+                      />
+                      <PreviewMetric
+                        label="Khấu trừ GM dự kiến"
+                        value={formatMoney(
+                          uploadPreview.totals.guaranteeRecouped,
+                        )}
+                        helper="Chưa ghi dữ liệu"
+                      />
+                      <PreviewMetric
+                        label="Thực nhận dự kiến"
+                        value={formatMoney(uploadPreview.totals.nextPayable)}
+                        helper={`${formatNumber(uploadPreview.totals.royaltyRuleRows)} dòng dùng tỷ lệ riêng`}
+                      />
+                    </div>
+
+                    <div className="overflow-hidden rounded-lg border border-border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Khách hàng</TableHead>
+                            <TableHead className="text-right">Dòng</TableHead>
+                            <TableHead className="text-right">
+                              Doanh thu hiện tại
+                            </TableHead>
+                            <TableHead className="text-right">
+                              Doanh thu sau nhập
+                            </TableHead>
+                            <TableHead className="text-right">
+                              Thực nhận dự kiến
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {uploadPreview.customers.map((customer) => (
+                            <PreviewCustomerRow
+                              customer={customer}
+                              key={customer.clientId}
+                            />
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {uploadPreview.warnings.length > 0 ? (
+                      <div className="rounded-lg border border-[#f0c67b] bg-[#fff9ec] p-3">
+                        <p className="text-sm font-medium text-[#7a5100]">
+                          Cần lưu ý
+                        </p>
+                        <ul className="mt-2 space-y-1 text-sm text-[#7a5100]">
+                          {uploadPreview.warnings.map((warning) => (
+                            <li key={warning}>• {warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <DialogFooter>
+                  <Button
+                    disabled={uploadState === 'uploading'}
+                    onClick={() => setUploadPreviewOpen(false)}
+                    type="button"
+                    variant="outline"
+                  >
+                    Kiểm tra lại
+                  </Button>
+                  <Button
+                    className="bg-[#00796f] text-white hover:bg-[#00665d]"
+                    disabled={
+                      !uploadPreviewToken || uploadState === 'uploading'
+                    }
+                    onClick={() => void uploadWorkbook()}
+                    type="button"
+                  >
+                    <ShieldCheck className="size-4" />
+                    {uploadState === 'uploading'
+                      ? 'Đang nhập...'
+                      : 'Xác nhận nhập dữ liệu'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              onOpenChange={(open) => {
+                if (!open && uploadHistoryState !== 'rolling_back') {
+                  setHistoryTarget(null);
+                  setUploadHistory([]);
+                  setUploadHistoryState('idle');
+                  setUploadHistoryMessage('');
+                }
+              }}
+              open={Boolean(historyTarget)}
+            >
+              <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Lịch sử dữ liệu statement</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-muted-foreground">
+                  {historyTarget?.clientName} · {historyTarget?.periodLabel}
+                </p>
+
+                {uploadHistoryMessage ? (
+                  <p className="rounded-lg border border-[#f0b7b2] bg-[#fff2f0] px-3 py-2 text-sm text-[#a53a30]">
+                    {uploadHistoryMessage}
+                  </p>
+                ) : null}
+
+                {uploadHistoryState === 'loading' ? (
+                  <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw className="size-4 animate-spin" />
+                    Đang tải lịch sử...
+                  </div>
+                ) : uploadHistory.length > 0 ? (
+                  <div className="space-y-2">
+                    {uploadHistory.map((item) => (
+                      <div
+                        className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                        key={item.id}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="truncate text-sm font-medium">
+                              {item.filename}
+                            </p>
+                            {item.isCurrent ? (
+                              <Badge className="rounded-lg bg-[#e7fbf7] text-[#00796f]">
+                                Đang sử dụng
+                              </Badge>
+                            ) : item.status === 'rolled_back' ? (
+                              <Badge className="rounded-lg" variant="secondary">
+                                Đã hoàn tác
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {importStrategyLabel(item.importStrategy)} ·{' '}
+                            {formatNumber(item.rowCount)} dòng ·{' '}
+                            {formatFileSize(item.byteSize)} ·{' '}
+                            {formatAccountDate(item.createdAt)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Người nhập: {item.uploaderEmail ?? 'Không rõ'}
+                          </p>
+                        </div>
+                        {item.canRollback ? (
+                          <Button
+                            disabled={uploadHistoryState === 'rolling_back'}
+                            onClick={() => setRollbackTarget(item)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <Undo2 className="size-4" />
+                            Hoàn tác
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : uploadHistoryState === 'ready' ? (
+                  <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                    Chưa có lịch sử import cho statement này.
+                  </p>
+                ) : null}
+
+                <DialogFooter>
+                  <Button
+                    disabled={uploadHistoryState === 'rolling_back'}
+                    onClick={() => setHistoryTarget(null)}
+                    type="button"
+                    variant="outline"
+                  >
+                    Đóng
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <AlertDialog
-              onOpenChange={setReplaceConfirmOpen}
-              open={replaceConfirmOpen}
+              onOpenChange={(open) => {
+                if (!open && uploadHistoryState !== 'rolling_back') {
+                  setRollbackTarget(null);
+                }
+              }}
+              open={Boolean(rollbackTarget)}
             >
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogMedia className="bg-[#fff7e6] text-[#9a6200]">
-                    <AlertTriangle className="size-5" />
+                    <Undo2 className="size-5" />
                   </AlertDialogMedia>
                   <AlertDialogTitle>
-                    Ghi đè statement hiện tại?
+                    Hoàn tác lần nhập gần nhất?
                   </AlertDialogTitle>
                   <AlertDialogDescription>
-                    Toàn bộ dữ liệu và biểu đồ của{' '}
-                    {uploadMode === 'bulk'
-                      ? 'các khách hàng khớp trong file tổng'
-                      : (activeClient?.name ?? 'khách hàng đã chọn')}{' '}
-                    trong {selectedPeriodLabel} sẽ được thay bằng file mới.
+                    Dữ liệu, biểu đồ và số dư GM sẽ trở về trạng thái ngay trước
+                    khi nhập file {rollbackTarget?.filename}. Thao tác được ghi
+                    vào nhật ký quản trị.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Huỷ</AlertDialogCancel>
+                  <AlertDialogCancel
+                    disabled={uploadHistoryState === 'rolling_back'}
+                  >
+                    Huỷ
+                  </AlertDialogCancel>
                   <AlertDialogAction
                     className="bg-[#a26400] text-white hover:bg-[#845100]"
-                    disabled={uploadState === 'uploading'}
-                    onClick={() => {
-                      setReplaceConfirmOpen(false);
-                      void uploadWorkbook();
+                    disabled={uploadHistoryState === 'rolling_back'}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (rollbackTarget) {
+                        void rollbackUploadVersion(rollbackTarget);
+                      }
                     }}
                   >
-                    Ghi đè
+                    {uploadHistoryState === 'rolling_back'
+                      ? 'Đang hoàn tác...'
+                      : 'Xác nhận hoàn tác'}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -4464,6 +4909,71 @@ export function AdminConsole({
         </section>
       </div>
     </main>
+  );
+}
+
+function PreviewMetric({
+  helper,
+  label,
+  value,
+}: {
+  helper: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-white p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 truncate text-lg font-semibold tabular-nums">
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+    </div>
+  );
+}
+
+function PreviewCustomerRow({
+  customer,
+}: {
+  customer: StatementImportPreviewCustomer;
+}) {
+  return (
+    <TableRow>
+      <TableCell>
+        <span className="block font-medium">{customer.clientName}</span>
+        <span className="text-xs text-muted-foreground">
+          {customer.clientCode}
+        </span>
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        <span className="block">{formatNumber(customer.nextRows)}</span>
+        <span className="text-xs text-muted-foreground">
+          {formatSignedNumber(customer.rowDelta)}
+        </span>
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-right tabular-nums">
+        {formatMoney(customer.currentRevenue)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        <span className="block whitespace-nowrap">
+          {formatMoney(customer.nextRevenue)}
+        </span>
+        <span
+          className={`text-xs ${
+            customer.revenueDelta < 0
+              ? 'text-[#a53a30]'
+              : 'text-muted-foreground'
+          }`}
+        >
+          {formatSignedMoney(customer.revenueDelta)}
+        </span>
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">
+        {formatMoney(customer.nextPayable)}
+      </TableCell>
+    </TableRow>
   );
 }
 
