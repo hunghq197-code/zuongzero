@@ -105,6 +105,8 @@ function activityActionLabel(action: string) {
     track_guarantee_archive: 'Archive GM',
     track_guarantee_created: 'Tạo GM',
     track_guarantee_reactivate: 'Kích hoạt GM',
+    track_royalty_rule_created: 'Tạo tỷ lệ chia',
+    track_royalty_rule_updated: 'Cập nhật tỷ lệ chia',
   };
 
   return labels[action] ?? action.replace(/_/g, ' ');
@@ -191,6 +193,19 @@ function activitySummary(
   }
 
   if (
+    action === 'track_royalty_rule_created' ||
+    action === 'track_royalty_rule_updated'
+  ) {
+    return compactParts([
+      readString(metadata.trackTitle),
+      readString(metadata.trackExternalId),
+      formatPercentBps(metadata.royaltyRateBps),
+      readString(metadata.effectiveFromPeriod),
+      readString(metadata.status),
+    ]);
+  }
+
+  if (
     action === 'settlement_reminder_dry_run' ||
     action === 'settlement_reminder_retry' ||
     action === 'settlement_reminder_sent'
@@ -249,4 +264,12 @@ function formatMoney(value: unknown) {
     maximumFractionDigits: 0,
     style: 'currency',
   }).format(amount);
+}
+
+function formatPercentBps(value: unknown) {
+  const bps = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(bps) || bps < 0) return null;
+  return `${new Intl.NumberFormat('vi-VN', {
+    maximumFractionDigits: 2,
+  }).format(bps / 100)}%`;
 }

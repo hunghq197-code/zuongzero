@@ -348,6 +348,15 @@ export const statementLineItems = sqliteTable(
     grossIncome: real('gross_income'),
     royaltyRate: real('royalty_rate'),
     netPayable: real('net_payable').notNull(),
+    sourceRoyaltyRate: real('source_royalty_rate'),
+    sourceNetPayable: real('source_net_payable'),
+    calculationMode: text('calculation_mode', {
+      enum: ['excel', 'track_rule'],
+    })
+      .notNull()
+      .default('excel'),
+    royaltyRuleId: text('royalty_rule_id'),
+    appliedRoyaltyRateBps: integer('applied_royalty_rate_bps'),
     currency: text('currency').notNull(),
     createdAt: text('created_at').notNull(),
   },
@@ -359,6 +368,43 @@ export const statementLineItems = sqliteTable(
     ),
     index('idx_statement_line_items_upload').on(table.sourceUploadId),
     index('idx_statement_line_items_isrc').on(table.clientId, table.isrc),
+  ],
+);
+
+export const trackRoyaltyRules = sqliteTable(
+  'track_royalty_rules',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => clients.id),
+    trackTitle: text('track_title').notNull(),
+    trackExternalId: text('track_external_id').notNull(),
+    trackExternalKey: text('track_external_key').notNull(),
+    royaltyRateBps: integer('royalty_rate_bps').notNull(),
+    effectiveFromPeriod: text('effective_from_period').notNull(),
+    effectiveToPeriod: text('effective_to_period'),
+    status: text('status', { enum: ['active', 'inactive'] })
+      .notNull()
+      .default('active'),
+    notes: text('notes'),
+    createdByUserId: text('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('idx_track_royalty_rules_client_status').on(
+      table.clientId,
+      table.status,
+    ),
+    index('idx_track_royalty_rules_track_period').on(
+      table.clientId,
+      table.trackExternalKey,
+      table.effectiveFromPeriod,
+      table.effectiveToPeriod,
+    ),
   ],
 );
 

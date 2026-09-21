@@ -5,6 +5,7 @@ import {
   Activity,
   Archive,
   AlertTriangle,
+  BadgePercent,
   BarChart3,
   BellRing,
   CheckCircle2,
@@ -62,6 +63,7 @@ import {
   type ConsoleRailItem,
 } from '@/components/music-brand';
 import { Progress } from '@/components/ui/progress';
+import { RoyaltyRulesPanel } from '@/components/royalty-rules-panel';
 import {
   NativeSelect,
   NativeSelectOptGroup,
@@ -147,6 +149,7 @@ type AdminTab =
   | 'customers'
   | 'accounts'
   | 'statements'
+  | 'royalty_rules'
   | 'guarantees'
   | 'reminders'
   | 'email';
@@ -156,6 +159,7 @@ const adminTabs = new Set<AdminTab>([
   'customers',
   'accounts',
   'statements',
+  'royalty_rules',
   'guarantees',
   'reminders',
   'email',
@@ -853,6 +857,7 @@ export function AdminConsole({
       { icon: BarChart3, id: 'overview', label: 'Tổng quan' },
       { icon: Users, id: 'customers', label: 'Khách hàng' },
       { icon: FileSpreadsheet, id: 'statements', label: 'Statement' },
+      { icon: BadgePercent, id: 'royalty_rules', label: 'Tỷ lệ chia' },
       { icon: WalletCards, id: 'guarantees', label: 'GM' },
       { icon: BellRing, id: 'reminders', label: 'Nhắc lịch' },
       { icon: Mail, id: 'email', label: 'Email' },
@@ -2114,6 +2119,13 @@ export function AdminConsole({
                   >
                     <FileSpreadsheet className="size-4" />
                     Statement
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
+                    value="royalty_rules"
+                  >
+                    <BadgePercent className="size-4" />
+                    Tỷ lệ chia
                   </TabsTrigger>
                   <TabsTrigger
                     className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
@@ -3438,6 +3450,11 @@ export function AdminConsole({
                     <TablePagination {...statementPage} itemLabel="statement" />
                   </section>
                 </section>
+                <ActivityLogPanel activityRows={activityRows} />
+              </TabsContent>
+
+              <TabsContent className="space-y-5" value="royalty_rules">
+                <RoyaltyRulesPanel customers={customers} />
                 <ActivityLogPanel activityRows={activityRows} />
               </TabsContent>
 

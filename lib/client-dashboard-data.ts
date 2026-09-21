@@ -225,6 +225,11 @@ export async function getClientDashboardData({
              li.gross_income AS grossIncome,
              li.royalty_rate AS royaltyRate,
              li.net_payable AS netPayable,
+             li.source_royalty_rate AS sourceRoyaltyRate,
+             li.source_net_payable AS sourceNetPayable,
+             li.calculation_mode AS calculationMode,
+             li.royalty_rule_id AS royaltyRuleId,
+             li.applied_royalty_rate_bps AS appliedRoyaltyRateBps,
              li.currency
            FROM statement_line_items li
            JOIN report_periods rp
@@ -322,6 +327,13 @@ function mapLineItemsByPeriod(rows: StatementLineItemSqlRow[]) {
     const items = (result[row.period] ??= []);
     items.push({
       accountNo: row.accountNo,
+      appliedRoyaltyRateBps:
+        row.appliedRoyaltyRateBps === null ||
+        row.appliedRoyaltyRateBps === undefined
+          ? null
+          : Number(row.appliedRoyaltyRateBps) || 0,
+      calculationMode:
+        row.calculationMode === 'track_rule' ? 'track_rule' : 'excel',
       configuration: row.configuration,
       contractName: row.contractName,
       contentType: row.contentType,
@@ -338,9 +350,20 @@ function mapLineItemsByPeriod(rows: StatementLineItemSqlRow[]) {
       releaseTitle: row.releaseTitle,
       royaltyRate:
         row.royaltyRate === null ? null : Number(row.royaltyRate) || 0,
+      royaltyRuleId: row.royaltyRuleId ?? null,
       rowIndex: Number(row.rowIndex) || 0,
       sales: Number(row.sales) || 0,
       salesPeriod: row.salesPeriod,
+      sourceNetPayable:
+        row.sourceNetPayable === null || row.sourceNetPayable === undefined
+          ? Number(row.netPayable) || 0
+          : Number(row.sourceNetPayable) || 0,
+      sourceRoyaltyRate:
+        row.sourceRoyaltyRate === null || row.sourceRoyaltyRate === undefined
+          ? row.royaltyRate === null
+            ? null
+            : Number(row.royaltyRate) || 0
+          : Number(row.sourceRoyaltyRate) || 0,
       startDate: row.startDate,
       territory: row.territory,
       trackArtist: row.trackArtist,

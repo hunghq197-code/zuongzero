@@ -32,6 +32,8 @@ export type StandardStatementColumn = {
 
 export type StatementLineItem = {
   accountNo: string;
+  appliedRoyaltyRateBps?: number | null;
+  calculationMode?: 'excel' | 'track_rule';
   configuration: string | null;
   contractName: string | null;
   contentType: string | null;
@@ -46,9 +48,12 @@ export type StatementLineItem = {
   releaseLabel: string | null;
   releaseTitle: string | null;
   royaltyRate: number | null;
+  royaltyRuleId?: string | null;
   rowIndex: number;
   sales: number;
   salesPeriod: string | null;
+  sourceNetPayable?: number | null;
+  sourceRoyaltyRate?: number | null;
   startDate: string | null;
   territory: string | null;
   trackArtist: string | null;
@@ -336,8 +341,22 @@ function lineItemValuesEqual(
   return (
     roundMergeMoney(left.sales) === roundMergeMoney(right.sales) &&
     roundMergeMoney(left.netPayable) === roundMergeMoney(right.netPayable) &&
+    optionalNumberEqual(
+      left.sourceNetPayable ?? null,
+      right.sourceNetPayable ?? null,
+    ) &&
     optionalNumberEqual(left.grossIncome, right.grossIncome) &&
-    optionalNumberEqual(left.royaltyRate, right.royaltyRate)
+    optionalNumberEqual(left.royaltyRate, right.royaltyRate) &&
+    optionalNumberEqual(
+      left.sourceRoyaltyRate ?? null,
+      right.sourceRoyaltyRate ?? null,
+    ) &&
+    (left.calculationMode ?? 'excel') === (right.calculationMode ?? 'excel') &&
+    (left.royaltyRuleId ?? null) === (right.royaltyRuleId ?? null) &&
+    optionalNumberEqual(
+      left.appliedRoyaltyRateBps ?? null,
+      right.appliedRoyaltyRateBps ?? null,
+    )
   );
 }
 

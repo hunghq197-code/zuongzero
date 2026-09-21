@@ -42,6 +42,11 @@ const checks = [
   },
   {
     expected: [401],
+    label: 'admin royalty rules requires auth',
+    path: '/api/admin/royalty-rules',
+  },
+  {
+    expected: [401],
     label: 'admin statements requires auth',
     path: '/api/admin/statements',
   },

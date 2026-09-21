@@ -214,6 +214,11 @@ export async function getStatementExportData(
                gross_income AS grossIncome,
                royalty_rate AS royaltyRate,
                net_payable AS netPayable,
+               source_royalty_rate AS sourceRoyaltyRate,
+               source_net_payable AS sourceNetPayable,
+               calculation_mode AS calculationMode,
+               royalty_rule_id AS royaltyRuleId,
+               applied_royalty_rate_bps AS appliedRoyaltyRateBps,
                currency
              FROM statement_line_items
              WHERE report_period_id = ?
@@ -419,12 +424,25 @@ function buildStatementWorkbook(data: StatementExportData) {
   ];
 
   const sourceRows = [
-    standardStatementColumns.map((column) => column.label),
-    ...data.lineItems.map((row) =>
-      standardStatementColumns.map((column) =>
+    [
+      ...standardStatementColumns.map((column) => column.label),
+      'Nguồn tính',
+      'Net Payable gốc',
+      'Royalty Rate áp dụng',
+    ],
+    ...data.lineItems.map((row) => [
+      ...standardStatementColumns.map((column) =>
         exportLineItemValue(row, column.key),
       ),
-    ),
+      row.calculationMode === 'track_rule'
+        ? 'Tỷ lệ riêng theo bài hát'
+        : 'Theo file Excel',
+      row.sourceNetPayable ?? row.netPayable,
+      row.appliedRoyaltyRateBps === null ||
+      row.appliedRoyaltyRateBps === undefined
+        ? ''
+        : row.appliedRoyaltyRateBps / 100,
+    ]),
   ];
 
   const workbook = `<?xml version="1.0" encoding="UTF-8"?>
@@ -616,6 +634,13 @@ function nullableNumberValue(value: unknown) {
 function normalizeExportLineItem(row: StatementExportLineItemRow) {
   return {
     accountNo: row.accountNo,
+    appliedRoyaltyRateBps:
+      row.appliedRoyaltyRateBps === null ||
+      row.appliedRoyaltyRateBps === undefined
+        ? null
+        : numberValue(row.appliedRoyaltyRateBps),
+    calculationMode:
+      row.calculationMode === 'track_rule' ? 'track_rule' : 'excel',
     configuration: row.configuration,
     contractName: row.contractName,
     contentType: row.contentType,
@@ -630,9 +655,15 @@ function normalizeExportLineItem(row: StatementExportLineItemRow) {
     releaseLabel: row.releaseLabel,
     releaseTitle: row.releaseTitle,
     royaltyRate: nullableNumberValue(row.royaltyRate),
+    royaltyRuleId: row.royaltyRuleId ?? null,
     rowIndex: numberValue(row.rowIndex),
     sales: numberValue(row.sales),
     salesPeriod: row.salesPeriod,
+    sourceNetPayable:
+      nullableNumberValue(row.sourceNetPayable) ?? numberValue(row.netPayable),
+    sourceRoyaltyRate:
+      nullableNumberValue(row.sourceRoyaltyRate) ??
+      nullableNumberValue(row.royaltyRate),
     startDate: row.startDate,
     territory: row.territory,
     trackArtist: row.trackArtist,

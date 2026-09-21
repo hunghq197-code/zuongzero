@@ -282,10 +282,16 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 5 - Email production: DEPLOYED. Da co tab Email/API de verify Resend domain, SPF/DKIM, DMARC va gui email test that; can admin dang nhap va bam gui test de xac nhan mailbox nhan mail.
 - Phase 6 - Test va van hanh production: DONE. Da co unit/contract test va production smoke test de kiem auth, upload single/bulk contract, publish/delete guard, GM recoup/reverse, dashboard client/admin va domain production.
 - Phase 7 - Bao cao/export doi soat: DEPLOYED. Da co export PDF/Excel statement theo quy cho client/admin va download audit; con nen tach tiep lich su thanh toan/payment marking thanh buoc tiep theo neu can van hanh doi soat that.
-- Phase 8 - Data chuan 22 cot: WORKER DEPLOYED, D1 MIGRATION PENDING. Da merge file `test.xlsx` lam schema chuan, UI admin/client hien mapping/detail, export co sheet `Source Rows`; Worker co guard khi bang chua ton tai. Can apply migration 0010 de bat luu du detail rows vao `statement_line_items`.
-- Payment marking toi gian: CODE DONE, LOCAL DB READY. Chi co `unpaid`/`paid`, paid date va actor; khong them partial payment, chung tu hay bang lich su rieng.
+- Phase 8 - Data chuan 22 cot: DEPLOYED. Da merge file `test.xlsx` lam schema chuan, luu detail vao `statement_line_items`, UI client hien insight va export co sheet `Source Rows`; migration 0010 da co tren D1 production.
+- Payment marking toi gian: DEPLOYED. Chi co `unpaid`/`paid`, paid date va actor; khong them partial payment, chung tu hay bang lich su rieng.
 - 2026-09-19: CLIENT DASHBOARD FINANCIAL UX DEPLOYED. Da deploy len `https://artistportal.zuongzeroent.com` voi Worker version `5bae66af-dbeb-47e9-bbf8-4d459a3fc490`; `npm run test:production` dat 10/10 kiem tra (cac trang auth tra 200, API bao ve tra 401 khi chua dang nhap).
 - 2026-09-19: CLIENT FINANCIAL SUMMARY SIMPLIFIED AND DEPLOYED. Da gom 11 the tai chinh thanh mot khoi tong quan gom doanh thu, tong giam tru, thuc nhan va ba chi so thanh toan; GM, du phong va so du duoc thu gon trong `Chi tiet cach tinh`. Da kiem tra desktop/mobile, `npm test`, `npm run build` va production smoke 10/10; Worker version `4c2b554f-3add-4300-b2b7-c429f14aca40`.
+- 2026-09-21: PHASE 9 TRACK ROYALTY RULES DEPLOYED. Them quan tri ty le chia theo `client + ISRC + khoang quy`; chi dong khop rule moi tinh `Net Payable = Gross Income x ty le`, dong khong co rule giu nguyen `Net Payable` tu Excel. GM tiep tuc khau tru sau buoc nay.
+- 2026-09-21: Migration `0012_track_royalty_rules.sql` tao bang rule va them snapshot `source_royalty_rate`, `source_net_payable`, `calculation_mode`, `royalty_rule_id`, `applied_royalty_rate_bps` vao line item. Rule trung ISRC va khoang hieu luc bi chan; dong co rule nhung thieu Gross Income bi chan import.
+- 2026-09-21: Admin co tab `Ty le chia` de tao/sua/tam dung rule; danh sach co tim kiem, loc va phan trang. Excel export them nguon tinh, Net Payable goc va ty le da ap dung de audit.
+- 2026-09-21: Local va remote D1 da apply migration `0012_track_royalty_rules.sql`; remote da xac minh co bang `track_royalty_rules`, du 5 cot audit va khoi tao 0 rule nen khong thay doi du lieu cu.
+- 2026-09-21: `npm test` qua 28 unit + 11 contract tests; targeted `oxlint` sach; `npm run build` thanh cong. Da test truc quan form/list/edit tren desktop 1440px va mobile 390px.
+- 2026-09-21: Deploy production thanh cong tai `https://artistportal.zuongzeroent.com`, Worker version `8a71baef-9486-4253-a7ab-c08e2050638b`. `npm run test:production` qua 11/11 kiem tra, gom auth pages 200 va API `royalty-rules` cung cac API nhay cam tra 401 khi chua dang nhap.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 
@@ -303,3 +309,4 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Test nghiep vu thuc te Phase 3 voi data cua admin: tao GM 100.000.000 VND cho mot track, upload statement co track do, doi chieu GM recoup va payable/carry forward.
 - Test flow nhac doi soat bang email that voi mot client co statement published, gom dry-run, gui ngay va retry loi.
 - Test demo local payment marking tai tab Statement; neu dat, apply `drizzle/0011_statement_payment_status.sql` len D1 remote roi deploy Worker.
+- Test nghiep vu Phase 9 tren production bang file co Gross Income: tao mot rule theo ISRC, import vao mot client/quy test, doi chieu dong co rule duoc tinh lai va dong khong co rule giu nguyen Net Payable tu Excel.

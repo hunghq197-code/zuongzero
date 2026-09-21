@@ -740,9 +740,12 @@ function buildStatementLineItem({
   const accountNo =
     parseClientCode(readCell(row, headers.clientCode)) ||
     (clientCode === 'single-client' ? '' : clientCode);
+  const royaltyRate = parseNumber(readCell(row, headers.royaltyRate));
 
   return {
     accountNo,
+    appliedRoyaltyRateBps: null,
+    calculationMode: 'excel',
     configuration: normalizeOptionalLabel(readCell(row, headers.configuration)),
     contractName: normalizeOptionalLabel(readCell(row, headers.contractName)),
     contentType: normalizeOptionalLabel(readCell(row, headers.contentType)),
@@ -758,10 +761,13 @@ function buildStatementLineItem({
     releaseArtist: normalizeOptionalLabel(readCell(row, headers.releaseArtist)),
     releaseLabel: normalizeOptionalLabel(readCell(row, headers.label)),
     releaseTitle: normalizeOptionalLabel(readCell(row, headers.release)),
-    royaltyRate: parseNumber(readCell(row, headers.royaltyRate)),
+    royaltyRate,
+    royaltyRuleId: null,
     rowIndex: row.index,
     sales: units,
     salesPeriod: normalizeOptionalLabel(readCell(row, headers.salesPeriod)),
+    sourceNetPayable: roundMoney(amount),
+    sourceRoyaltyRate: royaltyRate,
     startDate: normalizeDateCell(readCell(row, headers.startDate)),
     territory: normalizeOptionalLabel(readCell(row, headers.territory)),
     trackArtist: normalizeOptionalLabel(readCell(row, headers.artist)),

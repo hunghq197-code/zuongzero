@@ -31,6 +31,11 @@ import {
   summarizeSettlement,
 } from '@/lib/settlements';
 import { planTrackGuaranteeRecoupments } from '@/lib/guarantees';
+import {
+  applyTrackRoyaltyRules,
+  listApplicableTrackRoyaltyRules,
+  type RoyaltyRuleApplicationStats,
+} from '@/lib/royalty-rules';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
@@ -61,6 +66,7 @@ type UploadTarget = {
   incomingRowCount: number;
   mergeStats: StatementLineItemMergeStats | null;
   parsedStatements: ParsedCurrencyStatement[];
+  royaltyRuleStats: RoyaltyRuleApplicationStats;
   rowCount: number;
   uploadId: string;
 };
@@ -136,6 +142,13 @@ async function uploadResponse(request: Request) {
   });
   if (resolvedTargets instanceof Response) return resolvedTargets;
 
+  const ruleAppliedTargets = await applyRoyaltyRulesToTargets({
+    db: env.DB,
+    period,
+    targets: resolvedTargets,
+  });
+  if (ruleAppliedTargets instanceof Response) return ruleAppliedTargets;
+
   const bulkUploadId = crypto.randomUUID();
   const now = new Date().toISOString();
   const storeLineItems = await hasStatementLineItemsTable(env.DB);
@@ -144,7 +157,7 @@ async function uploadResponse(request: Request) {
     importStrategy,
     period,
     storeLineItems,
-    targets: resolvedTargets,
+    targets: ruleAppliedTargets,
   });
   if (uploadTargets instanceof Response) return uploadTargets;
   const uploader = await ensureUserRecord(env.DB, {
@@ -188,6 +201,7 @@ async function uploadResponse(request: Request) {
           importStrategy,
           mergeStats: target.mergeStats,
           rowCount: target.rowCount,
+          royaltyRuleStats: target.royaltyRuleStats,
           storeLineItems,
           totalRowCount: parsedWorkbook.rowCount,
           uploadMode,
@@ -231,6 +245,7 @@ async function uploadResponse(request: Request) {
       (total, target) => total + target.rowCount,
       0,
     ),
+    royaltyRuleStats: sumRoyaltyRuleStats(uploadTargets),
     status: 'imported',
     uploadId:
       uploadMode === 'single' ? uploadTargets[0]?.uploadId : bulkUploadId,
@@ -265,6 +280,7 @@ function buildImportSummary({
   importStrategy,
   mergeStats,
   rowCount,
+  royaltyRuleStats,
   storeLineItems,
   totalRowCount,
   uploadMode,
@@ -275,6 +291,7 @@ function buildImportSummary({
   importStrategy: ImportStrategy;
   mergeStats: StatementLineItemMergeStats | null;
   rowCount: number;
+  royaltyRuleStats: RoyaltyRuleApplicationStats;
   storeLineItems: boolean;
   totalRowCount: number;
   uploadMode: UploadMode;
@@ -291,6 +308,7 @@ function buildImportSummary({
     malwareScan: 'pending',
     periodPolicy: 'Gregorian quarter YYYY-Qn, Asia/Bangkok UTC+7',
     rowCount,
+    royaltyRuleStats,
     settlementPolicy: `payable >= ${SETTLEMENT_THRESHOLD_VND} VND is paid; lower balances carry forward`,
     signature: 'zip',
     lineItemStorage: storeLineItems ? 'enabled' : 'pending-migration',
@@ -341,6 +359,7 @@ async function resolveUploadTargets({
         incomingRowCount: rowCount,
         mergeStats: null,
         parsedStatements,
+        royaltyRuleStats: emptyRoyaltyRuleStats(),
         rowCount,
         uploadId: crypto.randomUUID(),
       },
@@ -372,6 +391,7 @@ async function resolveUploadTargets({
       incomingRowCount: group.rowCount,
       mergeStats: null,
       parsedStatements: group.statements,
+      royaltyRuleStats: emptyRoyaltyRuleStats(),
       rowCount: group.rowCount,
       uploadId: crypto.randomUUID(),
     });
@@ -385,6 +405,96 @@ async function resolveUploadTargets({
   }
 
   return targets;
+}
+
+async function applyRoyaltyRulesToTargets({
+  db,
+  period,
+  targets,
+}: {
+  db: D1Database;
+  period: string;
+  targets: UploadTarget[];
+}): Promise<UploadTarget[] | Response> {
+  const appliedTargets: UploadTarget[] = [];
+
+  for (const target of targets) {
+    const rules = await listApplicableTrackRoyaltyRules(
+      db,
+      target.client.id,
+      period,
+    );
+    const parsedStatements: ParsedCurrencyStatement[] = [];
+    const stats = emptyRoyaltyRuleStats();
+    const issues: Array<{
+      isrc: string;
+      rowIndex: number;
+      trackTitle: string;
+    }> = [];
+
+    for (const parsedStatement of target.parsedStatements) {
+      const applied = applyTrackRoyaltyRules(parsedStatement.lineItems, rules);
+      stats.excelRows += applied.stats.excelRows;
+      stats.ruleRows += applied.stats.ruleRows;
+      stats.ruleGrossIncome = roundMoney(
+        stats.ruleGrossIncome + applied.stats.ruleGrossIncome,
+      );
+      stats.ruleNetPayable = roundMoney(
+        stats.ruleNetPayable + applied.stats.ruleNetPayable,
+      );
+      issues.push(...applied.issues);
+      parsedStatements.push(summarizeStatementLineItems(applied.items));
+    }
+
+    if (issues.length > 0) {
+      const examples = issues
+        .slice(0, 8)
+        .map(
+          (issue) =>
+            `dòng ${issue.rowIndex} (${issue.isrc || issue.trackTitle || 'không rõ bài'})`,
+        )
+        .join(', ');
+      return jsonError(
+        `${target.client.name} có ${issues.length} dòng khớp tỷ lệ riêng nhưng thiếu Gross Income: ${examples}. Hãy bổ sung Gross Income trước khi import.`,
+        400,
+      );
+    }
+
+    appliedTargets.push({
+      ...target,
+      parsedStatements,
+      royaltyRuleStats: stats,
+      rowCount: parsedStatements.reduce(
+        (total, statement) => total + statement.rowCount,
+        0,
+      ),
+    });
+  }
+
+  return appliedTargets;
+}
+
+function emptyRoyaltyRuleStats(): RoyaltyRuleApplicationStats {
+  return {
+    excelRows: 0,
+    ruleGrossIncome: 0,
+    ruleNetPayable: 0,
+    ruleRows: 0,
+  };
+}
+
+function sumRoyaltyRuleStats(targets: UploadTarget[]) {
+  return targets.reduce<RoyaltyRuleApplicationStats>((total, target) => {
+    total.excelRows += target.royaltyRuleStats.excelRows;
+    total.ruleRows += target.royaltyRuleStats.ruleRows;
+    total.ruleGrossIncome = roundMoney(
+      total.ruleGrossIncome + target.royaltyRuleStats.ruleGrossIncome,
+    );
+    total.ruleNetPayable = roundMoney(
+      total.ruleNetPayable + target.royaltyRuleStats.ruleNetPayable,
+    );
+    return total;
+  }, emptyRoyaltyRuleStats());
 }
 
 async function prepareUploadTargets({
@@ -512,7 +622,7 @@ async function findExistingStatement(db: D1Database, reportPeriodId: string) {
 async function readStoredStatementLineItems(
   db: D1Database,
   reportPeriodId: string,
-) {
+): Promise<StatementLineItem[]> {
   const rows = await db
     .prepare(
       `SELECT
@@ -525,6 +635,11 @@ async function readStoredStatementLineItems(
          gross_income AS grossIncome,
          isrc,
          net_payable AS netPayable,
+         source_net_payable AS sourceNetPayable,
+         source_royalty_rate AS sourceRoyaltyRate,
+         calculation_mode AS calculationMode,
+         royalty_rule_id AS royaltyRuleId,
+         applied_royalty_rate_bps AS appliedRoyaltyRateBps,
          partner,
          period_end_date AS periodEndDate,
          release_artist AS releaseArtist,
@@ -547,15 +662,36 @@ async function readStoredStatementLineItems(
     .bind(reportPeriodId)
     .all<StatementLineItem>();
 
-  return rows.results.map((row) => ({
-    ...row,
-    currency: 'VND' as const,
-    grossIncome: row.grossIncome === null ? null : Number(row.grossIncome) || 0,
-    netPayable: Number(row.netPayable) || 0,
-    royaltyRate: row.royaltyRate === null ? null : Number(row.royaltyRate) || 0,
-    rowIndex: Number(row.rowIndex) || 0,
-    sales: Number(row.sales) || 0,
-  }));
+  return rows.results.map(
+    (row): StatementLineItem => ({
+      ...row,
+      currency: 'VND' as const,
+      grossIncome:
+        row.grossIncome === null ? null : Number(row.grossIncome) || 0,
+      netPayable: Number(row.netPayable) || 0,
+      sourceNetPayable:
+        row.sourceNetPayable === null || row.sourceNetPayable === undefined
+          ? Number(row.netPayable) || 0
+          : Number(row.sourceNetPayable) || 0,
+      sourceRoyaltyRate:
+        row.sourceRoyaltyRate === null || row.sourceRoyaltyRate === undefined
+          ? row.royaltyRate === null
+            ? null
+            : Number(row.royaltyRate) || 0
+          : Number(row.sourceRoyaltyRate) || 0,
+      appliedRoyaltyRateBps:
+        row.appliedRoyaltyRateBps === null ||
+        row.appliedRoyaltyRateBps === undefined
+          ? null
+          : Number(row.appliedRoyaltyRateBps) || 0,
+      calculationMode:
+        row.calculationMode === 'track_rule' ? 'track_rule' : 'excel',
+      royaltyRate:
+        row.royaltyRate === null ? null : Number(row.royaltyRate) || 0,
+      rowIndex: Number(row.rowIndex) || 0,
+      sales: Number(row.sales) || 0,
+    }),
+  );
 }
 
 async function buildImportStatements({
@@ -964,10 +1100,15 @@ function buildStatementLineItemStatements({
            gross_income,
            royalty_rate,
            net_payable,
+           source_royalty_rate,
+           source_net_payable,
+           calculation_mode,
+           royalty_rule_id,
+           applied_royalty_rate_bps,
            currency,
            created_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         crypto.randomUUID(),
@@ -996,6 +1137,11 @@ function buildStatementLineItemStatements({
         item.grossIncome,
         item.royaltyRate,
         item.netPayable,
+        item.sourceRoyaltyRate ?? item.royaltyRate,
+        item.sourceNetPayable ?? item.netPayable,
+        item.calculationMode ?? 'excel',
+        item.royaltyRuleId ?? null,
+        item.appliedRoyaltyRateBps ?? null,
         item.currency,
         now,
       ),
@@ -1131,6 +1277,11 @@ function importSuccessMessage({
     uploadMode === 'bulk'
       ? `${targets.length} khách hàng`
       : (targets[0]?.client.name ?? 'khách hàng');
+  const royaltyStats = sumRoyaltyRuleStats(targets);
+  const royaltyMessage =
+    royaltyStats.ruleRows > 0
+      ? ` Đã áp dụng tỷ lệ riêng cho ${royaltyStats.ruleRows} dòng; ${royaltyStats.excelRows} dòng còn lại giữ Net Payable từ Excel.`
+      : '';
 
   if (importStrategy === 'sync') {
     const stats = targets.reduce<StatementLineItemMergeStats>(
@@ -1144,11 +1295,15 @@ function importSuccessMessage({
       { added: 0, previous: 0, total: 0, unchanged: 0, updated: 0 },
     );
 
-    return `Đã đồng bộ ${subject}, ${periodDisplayLabel(period)}: ${stats.total} dòng tổng, ${stats.added} thêm mới, ${stats.updated} cập nhật, ${stats.unchanged} không đổi.`;
+    return `Đã đồng bộ ${subject}, ${periodDisplayLabel(period)}: ${stats.total} dòng tổng, ${stats.added} thêm mới, ${stats.updated} cập nhật, ${stats.unchanged} không đổi.${royaltyMessage}`;
   }
 
   const verb = importStrategy === 'replace' ? 'ghi đè' : 'tạo mới';
-  return `Đã ${verb} và publish ${totalRows} dòng cho ${subject}, ${periodDisplayLabel(period)} (VNĐ).`;
+  return `Đã ${verb} và publish ${totalRows} dòng cho ${subject}, ${periodDisplayLabel(period)} (VNĐ).${royaltyMessage}`;
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 async function findUploadClient(

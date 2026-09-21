@@ -21,6 +21,7 @@ test('all admin API routes require signed-in admin authorization', () => {
     'app/api/admin/guarantees/route.ts',
     'app/api/admin/overview/route.ts',
     'app/api/admin/reminders/route.ts',
+    'app/api/admin/royalty-rules/route.ts',
     'app/api/admin/statements/route.ts',
     'app/api/admin/statements/[reportPeriodId]/export/route.ts',
     'app/api/admin/uploads/route.ts',
@@ -217,6 +218,36 @@ test('track guarantees keep an external song id for tracking', () => {
   assert.match(adminConsole, /ID bài hát/);
   assert.match(adminConsole, /setGuaranteeTrackExternalId/);
   assert.match(clientDashboard, /trackExternalId/);
+});
+
+test('song royalty rules only override configured ISRC rows before GM recoupment', () => {
+  const route = readSource('app/api/admin/royalty-rules/route.ts');
+  const rules = readSource('lib/royalty-rules.ts');
+  const uploads = readSource('app/api/admin/uploads/route.ts');
+  const adminConsole = readSource('components/admin-console.tsx');
+  const panel = readSource('components/royalty-rules-panel.tsx');
+  const migration = readSource('drizzle/0012_track_royalty_rules.sql');
+
+  assert.match(route, /findOverlappingRule/);
+  assert.match(route, /track_external_key/);
+  assert.match(rules, /grossIncome \* rule\.royaltyRateBps/);
+  assert.match(rules, /calculationMode: 'excel'/);
+  assert.match(rules, /calculationMode: 'track_rule'/);
+  assert.match(uploads, /applyRoyaltyRulesToTargets/);
+  assert.ok(
+    uploads.indexOf(
+      'const ruleAppliedTargets = await applyRoyaltyRulesToTargets',
+    ) <
+      uploads.indexOf(
+        'const guaranteePlan = await planTrackGuaranteeRecoupments',
+      ),
+  );
+  assert.match(adminConsole, /value="royalty_rules"/);
+  assert.match(panel, /Tỷ lệ khách hàng nhận/);
+  assert.match(panel, /ISRC \/ ID bài hát/);
+  assert.match(migration, /CREATE TABLE `track_royalty_rules`/);
+  assert.match(migration, /`source_net_payable`/);
+  assert.match(migration, /`calculation_mode`/);
 });
 
 test('login requires an email OTP before creating a session', () => {
