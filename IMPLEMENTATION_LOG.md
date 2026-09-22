@@ -313,7 +313,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 ## Statement export redesign - 2026-09-22
 
-Trang thai: DEPLOYED PRODUCTION.
+Trang thai: DEPLOYED PRODUCTION (da sua su co 1102, xem muc ben duoi).
 
 - PDF statement da doi sang bao cao doi soat A4 mot trang, ho tro day du tieng Viet, gom thong tin khach hang/ky, dong tien tu gross den thuc nhan, trang thai thanh toan, units, rows va nguon doanh thu noi bat.
 - Excel khong con la XML `.xls`. File tai xuong la `.xlsx` that. Neu upload single-client va R2 con file, admin/client nhan dung byte + ten file goc. Neu upload bulk, admin duoc tai file tong goc; client chi nhan workbook chi tiet 22 cot da loc theo client de khong ro ri data khach hang khac.
@@ -321,6 +321,17 @@ Trang thai: DEPLOYED PRODUCTION.
 - Van giu auth scope, published-only cho client va audit log moi lan tai. Ten file/Content-Disposition duoc sanitize va ho tro UTF-8.
 - Da them unit test OOXML/PDF, doc workbook bang `openpyxl`, render PDF thanh PNG bang Poppler va kiem tra truc quan khong tran/cat. `npm test` qua 32 unit + 13 contract tests, targeted `oxlint`, `git diff --check` va `npm run build` thanh cong.
 - Da deploy production tai `https://artistportal.zuongzeroent.com`, Cloudflare Worker version `db2fe80e-7067-43b5-aef1-e02dc08e78ee`. `npm run test:production` qua 13/13 checks, bao gom auth guard cho ca export PDF va Excel.
+
+## Su co Worker 1102 va khac phuc - 2026-09-22
+
+Trang thai: DEPLOYED PRODUCTION, can test tai file that voi phien dang nhap.
+
+- Nguoi dung bao production hien Cloudflare Error 1102 `Worker exceeded resource limits` (Ray ID `a3f0644d89468ca6`). Ban export moi nap `pdf-lib`, `fontkit`, font TTF va tao PDF/Excel ngay trong Worker; day la nguyen nhan kha nghi nhung chua co metric CPU/memory tu Ray ID de ket luan tuyet doi.
+- Da rollback production ve Worker version on dinh `ccef7e86-f28a-45bb-b2fe-3e30d0232794`; `/login` va `/login/verify` tro lai HTTP 200. Khong rollback D1/R2.
+- Da sua luong export: Worker chi kiem tra quyen, lay du lieu theo tung trang 500 dong va tra JSON; file goc tren R2 duoc stream. PDF va workbook fallback duoc tao trong trinh duyet sau khi bam tai, khong nap thu vien PDF/font vao export API Worker. Scope client, published-only va audit van giu nguyen.
+- `npm test` qua 32 unit + 13 contract, `npx tsc --noEmit`, targeted `oxlint` va `npm run build` dat. Toan repo `npm run lint` con 17 loi co san o `components/ui/*` va `hooks/use-mobile.ts`, khong phai cac file vua sua.
+- Da deploy staging version `eb5cba4f-3a00-49cf-8e33-375289bf1114`: smoke 13/13 va 30 request trang cong khai lien tiep dat. Da deploy production version `7b02b4dc-3813-4b0b-a7ba-a38730765c57`: smoke 13/13 va 40 request trang cong khai lien tiep dat, khong tai hien 1102.
+- Chua test tai PDF/Excel bang phien admin/client that tren staging vi khong co phien dang nhap/OTP trong task. Can thu mot statement co du lieu, doi chieu PDF mot trang va Excel tai lai voi file upload, sau do theo doi Worker Logs neu su co tai hien.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 

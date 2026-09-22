@@ -183,6 +183,7 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
 test('statement exports require scoped access and write audit logs', () => {
   const exportBuilder = readSource('lib/statement-export.ts');
   const exportFiles = readSource('lib/statement-export-files.ts');
+  const exportDownload = readSource('lib/statement-export-download.ts');
   const adminExportRoute = readSource(
     'app/api/admin/statements/[reportPeriodId]/export/route.ts',
   );
@@ -191,8 +192,13 @@ test('statement exports require scoped access and write audit logs', () => {
   );
   const activity = readSource('lib/admin-activity.ts');
 
-  assert.match(exportBuilder, /buildDetailedStatementXlsx/);
-  assert.match(exportBuilder, /buildStatementInvoicePdf/);
+  assert.match(exportBuilder, /getOriginalStatementWorkbook/);
+  assert.match(exportBuilder, /statementPdfPayload/);
+  assert.match(exportBuilder, /statementExcelPayload/);
+  assert.doesNotMatch(exportBuilder, /import \{[^}]*buildStatementInvoicePdf/s);
+  assert.match(exportDownload, /import\('@\/lib\/statement-export-files'\)/);
+  assert.match(exportDownload, /buildStatementInvoicePdf/);
+  assert.match(exportDownload, /buildDetailedStatementXlsx/);
   assert.match(exportBuilder, /auditStatementExport/);
   assert.match(exportBuilder, /statement_export_/);
   assert.match(exportBuilder, /statement_line_items/);
@@ -207,11 +213,14 @@ test('statement exports require scoped access and write audit logs', () => {
   assert.match(adminExportRoute, /auditStatementExport/);
   assert.match(adminExportRoute, /allowBulkSource: true/);
   assert.match(adminExportRoute, /files: env\.FILES/);
+  assert.match(adminExportRoute, /EXPORT_PAGE_SIZE = 500/);
+  assert.match(adminExportRoute, /kind: 'pdf'/);
   assert.match(clientExportRoute, /getClientPortalAccess/);
   assert.match(clientExportRoute, /clientId: access\.clientId/);
   assert.match(clientExportRoute, /publishedOnly: true/);
   assert.match(clientExportRoute, /auditStatementExport/);
   assert.match(clientExportRoute, /allowBulkSource: false/);
+  assert.match(clientExportRoute, /EXPORT_PAGE_SIZE = 500/);
   assert.match(activity, /Tải PDF statement/);
   assert.match(activity, /Tải Excel statement/);
 });

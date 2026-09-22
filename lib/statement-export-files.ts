@@ -85,7 +85,7 @@ const colors = {
 };
 
 export function buildDetailedStatementXlsx(
-  data: ExportStatementFileData,
+  data: Pick<ExportStatementFileData, 'lineItems'>,
   columns: StatementWorkbookColumn[],
 ) {
   const rows = data.lineItems.map((item) =>

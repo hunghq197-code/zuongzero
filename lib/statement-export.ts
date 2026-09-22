@@ -1,9 +1,5 @@
 import { periodDisplayLabel } from '@/lib/reporting-periods';
 import {
-  buildDetailedStatementXlsx,
-  buildStatementInvoicePdf,
-} from '@/lib/statement-export-files';
-import {
   summarizeSettlement,
   summarizeStatementPayment,
   type StatementPaymentStatus,
@@ -13,8 +9,7 @@ import {
   standardStatementColumns,
   type StatementLineItem,
 } from '@/lib/statement-line-items';
-
-import robotoFontDataUrl from '@/assets/fonts/Roboto-Vietnamese.ttf?inline';
+import type { ExportStatementFileData } from '@/lib/statement-export-files';
 
 export type StatementExportFormat = 'excel' | 'pdf';
 
@@ -113,7 +108,12 @@ export async function getStatementExportData(
   reportPeriodId: string,
   options: {
     clientId?: string | null;
+    includeBreakdowns?: boolean;
+    includeLineItems?: boolean;
+    lineItemLimit?: number;
+    lineItemOffset?: number;
     publishedOnly?: boolean;
+    summaryOnly?: boolean;
   } = {},
 ): Promise<StatementExportData | null> {
   const statement = await db
@@ -166,11 +166,15 @@ export async function getStatementExportData(
 
   if (!statement) return null;
 
-  const lineItemsTableReady = await hasStatementLineItemsTable(db);
+  const lineItemsTableReady =
+    options.includeLineItems !== false &&
+    (await hasStatementLineItemsTable(db));
   const [breakdowns, recoupments, lineItems] = await Promise.all([
-    db
-      .prepare(
-        `SELECT
+    options.includeBreakdowns === false
+      ? Promise.resolve({ results: [] as StatementExportBreakdown[] })
+      : db
+          .prepare(
+            `SELECT
            dimension,
            label,
            value,
@@ -179,14 +183,17 @@ export async function getStatementExportData(
            row_count AS rowCount
          FROM revenue_breakdowns
          WHERE report_period_id = ?
+         ${options.summaryOnly ? "AND dimension IN ('source', 'track')" : ''}
          ORDER BY dimension ASC, abs(value) DESC, label ASC
-         LIMIT 2500`,
-      )
-      .bind(reportPeriodId)
-      .all<StatementExportBreakdown>(),
-    db
-      .prepare(
-        `SELECT
+         LIMIT ${options.summaryOnly ? 50 : 2500}`,
+          )
+          .bind(reportPeriodId)
+          .all<StatementExportBreakdown>(),
+    options.summaryOnly
+      ? Promise.resolve({ results: [] as StatementExportRecoupment[] })
+      : db
+          .prepare(
+            `SELECT
            r.track_title AS trackTitle,
            tg.track_external_id AS trackExternalId,
            r.revenue_amount AS revenueAmount,
@@ -199,9 +206,9 @@ export async function getStatementExportData(
          WHERE r.report_period_id = ?
          ORDER BY abs(r.amount) DESC, r.track_title ASC
          LIMIT 500`,
-      )
-      .bind(reportPeriodId)
-      .all<StatementExportRecoupment>(),
+          )
+          .bind(reportPeriodId)
+          .all<StatementExportRecoupment>(),
     lineItemsTableReady
       ? db
           .prepare(
@@ -236,9 +243,14 @@ export async function getStatementExportData(
                currency
              FROM statement_line_items
              WHERE report_period_id = ?
-             ORDER BY row_index ASC`,
+             ORDER BY row_index ASC
+             LIMIT ? OFFSET ?`,
           )
-          .bind(reportPeriodId)
+          .bind(
+            reportPeriodId,
+            options.lineItemLimit ?? 100_000,
+            options.lineItemOffset ?? 0,
+          )
           .all<StatementExportLineItemRow>()
       : Promise.resolve({ results: [] as StatementExportLineItemRow[] }),
   ]);
@@ -319,24 +331,13 @@ export function statementExportFilename(
   return `${safeFilenamePart(data.clientCode)}_${data.period}_doi-soat.${extension}`;
 }
 
-export async function buildStatementExportFile(
+export async function getOriginalStatementWorkbook(
   data: StatementExportData,
-  format: StatementExportFormat,
   options: {
     allowBulkSource?: boolean;
     files?: R2Bucket | null;
   } = {},
 ) {
-  if (format === 'pdf') {
-    return {
-      body: toArrayBuffer(
-        await buildStatementInvoicePdf(data, decodeDataUrl(robotoFontDataUrl)),
-      ),
-      contentType: 'application/pdf',
-      filename: statementExportFilename(data, format),
-    };
-  }
-
   const canReturnOriginal =
     Boolean(data.sourceObjectKey && options.files) &&
     (options.allowBulkSource === true || data.sourceUploadMode === 'single');
@@ -345,13 +346,13 @@ export async function buildStatementExportFile(
       const source = await options.files.get(data.sourceObjectKey);
       if (source) {
         return {
-          body: await source.arrayBuffer(),
+          body: source.body,
           contentType:
             data.sourceContentType ||
             source.httpMetadata?.contentType ||
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           filename: safeDownloadFilename(
-            data.filename ?? statementExportFilename(data, format),
+            data.filename ?? statementExportFilename(data, 'excel'),
           ),
         };
       }
@@ -362,18 +363,35 @@ export async function buildStatementExportFile(
       });
     }
   }
+  return null;
+}
 
-  const workbook = buildDetailedStatementXlsx(
-    data,
-    standardStatementColumns.map((column) => ({
+export function statementPdfPayload(
+  data: StatementExportData,
+): ExportStatementFileData {
+  return {
+    breakdowns: data.breakdowns,
+    clientCode: data.clientCode,
+    clientName: data.clientName,
+    currency: data.currency,
+    legalName: data.legalName,
+    lineItems: [],
+    period: data.period,
+    periodLabel: data.periodLabel,
+    publishedAt: data.publishedAt,
+    reportPeriodId: data.reportPeriodId,
+    settlement: data.settlement,
+    statement: data.statement,
+  };
+}
+
+export function statementExcelPayload(data: StatementExportData) {
+  return {
+    columns: standardStatementColumns.map((column) => ({
       key: column.key,
       label: column.label,
     })),
-  );
-  return {
-    body: toArrayBuffer(workbook.body),
-    contentType: workbook.contentType,
-    filename: statementExportFilename(data, format),
+    lineItems: data.lineItems,
   };
 }
 
@@ -460,18 +478,6 @@ function parseSourceUploadMode(value: string | null) {
   }
 }
 
-function decodeDataUrl(value: string) {
-  const encoded = value.includes(',')
-    ? value.slice(value.indexOf(',') + 1)
-    : value;
-  const binary = atob(encoded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 function safeDownloadFilename(value: string) {
   const clean = value
     .replaceAll('\r', '')
@@ -481,13 +487,6 @@ function safeDownloadFilename(value: string) {
     .trim()
     .slice(0, 180);
   return clean || 'statement.xlsx';
-}
-
-function toArrayBuffer(value: Uint8Array) {
-  return value.buffer.slice(
-    value.byteOffset,
-    value.byteOffset + value.byteLength,
-  ) as ArrayBuffer;
 }
 
 function normalizeExportLineItem(row: StatementExportLineItemRow) {

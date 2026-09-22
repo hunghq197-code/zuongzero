@@ -90,6 +90,7 @@ import {
   usePaginatedRows,
 } from '@/components/table-pagination';
 import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
+import { downloadStatementExport } from '@/lib/statement-export-download';
 import { type AdminActivityRow } from '@/lib/admin-activity';
 import {
   emptyAdminOverviewData,
@@ -454,6 +455,7 @@ function StatementActionsMenu({
   busy,
   isSuperAdmin,
   onDelete,
+  onExport,
   onHistory,
   onPrepareUpload,
   onUpdate,
@@ -462,6 +464,7 @@ function StatementActionsMenu({
   busy: boolean;
   isSuperAdmin: boolean;
   onDelete: (statement: AdminStatementRow) => void;
+  onExport: (statement: AdminStatementRow, format: 'excel' | 'pdf') => void;
   onHistory: (statement: AdminStatementRow) => void;
   onPrepareUpload: (
     statement: AdminStatementRow,
@@ -472,9 +475,7 @@ function StatementActionsMenu({
 }) {
   function runAction(action: string) {
     if (action === 'pdf' || action === 'excel') {
-      window.location.assign(
-        adminStatementExportUrl(statement.reportPeriodId, action),
-      );
+      onExport(statement, action);
       return;
     }
 
@@ -790,6 +791,7 @@ export function AdminConsole({
     useState<CustomerStatusFilter>('all');
   const [activeCustomerActionId, setActiveCustomerActionId] = useState('');
   const [activeStatementActionId, setActiveStatementActionId] = useState('');
+  const [exportingStatementId, setExportingStatementId] = useState('');
   const [statementSearch, setStatementSearch] = useState('');
   const [statementStatusFilter, setStatementStatusFilter] =
     useState<StatementStatusFilter>('all');
@@ -2017,6 +2019,30 @@ export function AdminConsole({
       setStatementActionState('failed');
     } finally {
       setActiveStatementActionId('');
+    }
+  }
+
+  async function exportStatement(
+    statement: AdminStatementRow,
+    format: 'excel' | 'pdf',
+  ) {
+    if (exportingStatementId) return;
+    setExportingStatementId(statement.reportPeriodId);
+    setStatementActionState('idle');
+    setStatementActionMessage('Đang chuẩn bị file tải xuống...');
+    try {
+      await downloadStatementExport(
+        adminStatementExportUrl(statement.reportPeriodId, format),
+        format,
+      );
+      setStatementActionMessage('');
+    } catch (error) {
+      setStatementActionState('failed');
+      setStatementActionMessage(
+        error instanceof Error ? error.message : 'Không thể tải báo cáo.',
+      );
+    } finally {
+      setExportingStatementId('');
     }
   }
 
@@ -3511,10 +3537,15 @@ export function AdminConsole({
                                 <StatementActionsMenu
                                   busy={
                                     activeStatementActionId ===
-                                    statement.reportPeriodId
+                                      statement.reportPeriodId ||
+                                    exportingStatementId ===
+                                      statement.reportPeriodId
                                   }
                                   isSuperAdmin={isSuperAdmin}
                                   onDelete={setStatementDeleteTarget}
+                                  onExport={(target, format) => {
+                                    void exportStatement(target, format);
+                                  }}
                                   onHistory={(target) => {
                                     void openUploadHistory(target);
                                   }}

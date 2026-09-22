@@ -64,6 +64,7 @@ import {
 import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
 import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
+import { downloadStatementExport } from '@/lib/statement-export-download';
 import type { TrackGuaranteeRow } from '@/lib/guarantees';
 import { type StatementLineItem } from '@/lib/statement-line-items';
 
@@ -428,6 +429,8 @@ export function RoyaltyDashboard({
   const [selectedPeriod, setSelectedPeriod] = useState(
     clientPeriods[0]?.period ?? defaultPeriod,
   );
+  const [exportingStatementId, setExportingStatementId] = useState('');
+  const [exportMessage, setExportMessage] = useState('');
   const resolvedSelectedPeriod = availablePeriods.includes(selectedPeriod)
     ? selectedPeriod
     : (availablePeriods[0] ?? defaultPeriod);
@@ -472,6 +475,28 @@ export function RoyaltyDashboard({
   const statementPreviewPage = usePaginatedRows(clientPeriods);
   const guaranteePage = usePaginatedRows(activeGuarantees);
   const ledgerPage = usePaginatedRows(clientPeriods);
+
+  async function exportStatement(
+    reportPeriodId: string,
+    format: 'excel' | 'pdf',
+  ) {
+    if (exportingStatementId) return;
+    setExportingStatementId(reportPeriodId);
+    setExportMessage('Đang chuẩn bị file tải xuống...');
+    try {
+      await downloadStatementExport(
+        statementExportUrl(reportPeriodId, format),
+        format,
+      );
+      setExportMessage('');
+    } catch (error) {
+      setExportMessage(
+        error instanceof Error ? error.message : 'Không thể tải báo cáo.',
+      );
+    } finally {
+      setExportingStatementId('');
+    }
+  }
 
   useEffect(() => {
     const context =
@@ -774,6 +799,13 @@ export function RoyaltyDashboard({
               className="grid scroll-mt-24 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]"
               id="client-statements"
             >
+              {exportMessage ? (
+                <output
+                  className="col-span-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
+                >
+                  {exportMessage}
+                </output>
+              ) : null}
               <section className="music-card p-4 md:p-5">
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold">Xu hướng theo quý</h2>
@@ -806,20 +838,28 @@ export function RoyaltyDashboard({
                           {settlementHelper(period)}
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <a
+                          <button
                             className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
-                            href={statementExportUrl(period.id, 'pdf')}
+                            disabled={Boolean(exportingStatementId)}
+                            onClick={() =>
+                              void exportStatement(period.id, 'pdf')
+                            }
+                            type="button"
                           >
                             <Download className="size-3.5" />
                             PDF
-                          </a>
-                          <a
+                          </button>
+                          <button
                             className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
-                            href={statementExportUrl(period.id, 'excel')}
+                            disabled={Boolean(exportingStatementId)}
+                            onClick={() =>
+                              void exportStatement(period.id, 'excel')
+                            }
+                            type="button"
                           >
                             <FileSpreadsheet className="size-3.5" />
                             Excel
-                          </a>
+                          </button>
                         </div>
                       </div>
                     ))
@@ -1021,20 +1061,28 @@ export function RoyaltyDashboard({
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-2">
-                              <a
+                              <button
                                 className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
-                                href={statementExportUrl(period.id, 'pdf')}
+                                disabled={Boolean(exportingStatementId)}
+                                onClick={() =>
+                                  void exportStatement(period.id, 'pdf')
+                                }
+                                type="button"
                               >
                                 <Download className="size-3.5" />
                                 PDF
-                              </a>
-                              <a
+                              </button>
+                              <button
                                 className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-2.5 text-xs font-medium transition-colors hover:bg-muted"
-                                href={statementExportUrl(period.id, 'excel')}
+                                disabled={Boolean(exportingStatementId)}
+                                onClick={() =>
+                                  void exportStatement(period.id, 'excel')
+                                }
+                                type="button"
                               >
                                 <FileSpreadsheet className="size-3.5" />
                                 Excel
-                              </a>
+                              </button>
                             </div>
                           </TableCell>
                         </TableRow>

@@ -5,10 +5,13 @@ import { getAdminAccess } from '@/lib/admin-auth';
 import { ensureUserRecord } from '@/lib/user-records';
 import {
   auditStatementExport,
-  buildStatementExportFile,
   contentDispositionAttachment,
   getStatementExportData,
+  getOriginalStatementWorkbook,
   parseStatementExportFormat,
+  statementExcelPayload,
+  statementExportFilename,
+  statementPdfPayload,
 } from '@/lib/statement-export';
 
 type RouteContext = {
@@ -16,6 +19,7 @@ type RouteContext = {
 };
 
 export const dynamic = 'force-dynamic';
+const EXPORT_PAGE_SIZE = 500;
 
 export async function GET(request: Request, context: RouteContext) {
   try {
@@ -41,36 +45,94 @@ export async function GET(request: Request, context: RouteContext) {
 
     const url = new URL(request.url);
     const format = parseStatementExportFormat(url.searchParams.get('format'));
-    const data = await getStatementExportData(env.DB, reportPeriodId);
+    const offset =
+      format === 'excel' ? readOffset(url.searchParams.get('offset')) : 0;
+    if (offset === null) {
+      return jsonError('Vị trí dữ liệu không hợp lệ.', 400);
+    }
+    const data = await getStatementExportData(env.DB, reportPeriodId, {
+      includeBreakdowns: format === 'pdf',
+      includeLineItems: false,
+      summaryOnly: true,
+    });
     if (!data) {
       return jsonError('Không tìm thấy statement.', 404);
     }
 
-    const actor = await ensureUserRecord(env.DB, {
-      displayName: user.displayName,
-      email: user.email,
-      lastSeenAt: new Date().toISOString(),
-      role: access.role,
-      userId: user.userId,
-    });
-    await auditStatementExport(env.DB, {
-      actorUserId: actor.id,
-      data,
-      format,
-    });
+    if (offset === 0) {
+      const actor = await ensureUserRecord(env.DB, {
+        displayName: user.displayName,
+        email: user.email,
+        lastSeenAt: new Date().toISOString(),
+        role: access.role,
+        userId: user.userId,
+      });
+      await auditStatementExport(env.DB, {
+        actorUserId: actor.id,
+        data,
+        format,
+      });
+    }
 
-    const file = await buildStatementExportFile(data, format, {
-      allowBulkSource: true,
-      files: env.FILES,
+    if (format === 'pdf') {
+      return Response.json(
+        {
+          kind: 'pdf',
+          data: statementPdfPayload(data),
+          filename: statementExportFilename(data, format),
+        },
+        { headers: privateHeaders() },
+      );
+    }
+
+    if (offset === 0) {
+      const file = await getOriginalStatementWorkbook(data, {
+        allowBulkSource: true,
+        files: env.FILES,
+      });
+      if (file) {
+        return new Response(file.body, {
+          headers: {
+            ...privateHeaders(),
+            'Content-Disposition': contentDispositionAttachment(file.filename),
+            'Content-Type': file.contentType,
+          },
+        });
+      }
+    }
+
+    const detail = await getStatementExportData(env.DB, reportPeriodId, {
+      includeBreakdowns: false,
+      lineItemLimit: EXPORT_PAGE_SIZE + 1,
+      lineItemOffset: offset,
+      summaryOnly: true,
     });
-    return new Response(file.body, {
-      headers: {
-        'Cache-Control': 'private, no-store',
-        'Content-Disposition': contentDispositionAttachment(file.filename),
-        'Content-Type': file.contentType,
-        'X-Content-Type-Options': 'nosniff',
+    if (!detail) return jsonError('Không tìm thấy statement.', 404);
+    if (
+      offset === 0 &&
+      detail.statement.rowCount > 0 &&
+      !detail.lineItems.length
+    ) {
+      return jsonError(
+        'Chưa có dữ liệu chi tiết để xuất Excel cho khách hàng này.',
+        409,
+      );
+    }
+
+    const payload = statementExcelPayload(detail);
+    return Response.json(
+      {
+        kind: 'excel',
+        columns: payload.columns,
+        filename: statementExportFilename(data, format),
+        nextOffset:
+          payload.lineItems.length > EXPORT_PAGE_SIZE
+            ? offset + EXPORT_PAGE_SIZE
+            : null,
+        rows: payload.lineItems.slice(0, EXPORT_PAGE_SIZE),
       },
-    });
+      { headers: privateHeaders() },
+    );
   } catch (error) {
     return serverErrorResponse(error);
   }
@@ -78,6 +140,21 @@ export async function GET(request: Request, context: RouteContext) {
 
 function cleanId(value: unknown) {
   return typeof value === 'string' ? value.trim().slice(0, 160) : '';
+}
+
+function readOffset(value: string | null) {
+  if (value === null) return 0;
+  const offset = Number(value);
+  return Number.isSafeInteger(offset) && offset >= 0 && offset <= 1_000_000
+    ? offset
+    : null;
+}
+
+function privateHeaders() {
+  return {
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  };
 }
 
 function jsonError(message: string, status: number) {
