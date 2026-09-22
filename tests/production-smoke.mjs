@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 const baseUrl = new URL(
-  process.env.PRODUCTION_URL ?? 'https://artistportal.zuongzeroent.com',
+  process.argv[2] ??
+    process.env.PRODUCTION_URL ??
+    'https://artistportal.zuongzeroent.com',
 );
 
 const checks = [

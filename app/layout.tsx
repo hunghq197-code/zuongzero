@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:workers';
 import type { Metadata } from 'next';
 import './globals.css';
 
@@ -14,7 +15,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi">
-      <body>{children}</body>
+      <body>
+        {env.DEPLOYMENT_ENV === 'staging' && (
+          <div className="bg-amber-100 px-4 py-2 text-center text-sm font-semibold text-amber-950">
+            Môi trường thử nghiệm
+          </div>
+        )}
+        {children}
+      </body>
     </html>
   );
 }

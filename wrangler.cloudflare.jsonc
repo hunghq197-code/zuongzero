@@ -32,5 +32,34 @@
       "bucket_name": "royalty-dashboard-files",
     },
   ],
+  "env": {
+    "staging": {
+      "name": "royalty-dashboard-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "triggers": {
+        "crons": [],
+      },
+      "vars": {
+        "AUTH_PROVIDER": "app-session",
+        "APP_BASE_URL": "https://royalty-dashboard-staging.hung-hq197.workers.dev",
+        "DEPLOYMENT_ENV": "staging",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "royalty-dashboard-staging-db",
+          "database_id": "16451bff-d426-4ef1-a08e-d33c4d21dd27",
+          "migrations_dir": "drizzle",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "FILES",
+          "bucket_name": "royalty-dashboard-staging-files",
+        },
+      ],
+    },
+  },
   "rules": [{ "type": "ESModule", "globs": ["**/*.js", "**/*.mjs"] }],
 }

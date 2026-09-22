@@ -53,9 +53,6 @@ export default async function AccountPage({
         <div className="flex min-w-0 items-center gap-3">
           <BrandMark />
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Account
-            </p>
             <h1 className="font-display truncate text-2xl font-semibold md:text-3xl">
               Thông tin cá nhân
             </h1>
@@ -68,7 +65,7 @@ export default async function AccountPage({
               href="/admin"
             >
               <ArrowLeft className="size-4" />
-              Admin
+              Quản trị
             </a>
           ) : null}
           {clientAccess.allowed ? (
@@ -77,7 +74,7 @@ export default async function AccountPage({
               href="/"
             >
               <ArrowLeft className="size-4" />
-              Dashboard
+              Trang khách hàng
             </a>
           ) : null}
           <a
@@ -105,7 +102,6 @@ export default async function AccountPage({
           </div>
           <div className="bg-[#071118] p-5 text-white">
             <EqualizerBars />
-            <p className="mt-6 text-sm text-white/62">Secure profile</p>
           </div>
         </div>
       </section>
@@ -115,9 +111,6 @@ export default async function AccountPage({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">Hồ sơ</h2>
-              <p className="mt-1 break-all text-sm text-muted-foreground">
-                {profile.email}
-              </p>
             </div>
             <Badge className="rounded-lg bg-primary/10 text-primary">
               {roleLabel(profile.role)}

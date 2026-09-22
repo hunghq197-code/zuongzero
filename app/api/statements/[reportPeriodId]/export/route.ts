@@ -6,9 +6,9 @@ import { ensureUserRecord } from '@/lib/user-records';
 import {
   auditStatementExport,
   buildStatementExportFile,
+  contentDispositionAttachment,
   getStatementExportData,
   parseStatementExportFormat,
-  statementExportFilename,
 } from '@/lib/statement-export';
 
 type RouteContext = {
@@ -62,11 +62,14 @@ export async function GET(request: Request, context: RouteContext) {
       format,
     });
 
-    const file = buildStatementExportFile(data, format);
+    const file = await buildStatementExportFile(data, format, {
+      allowBulkSource: false,
+      files: env.FILES,
+    });
     return new Response(file.body, {
       headers: {
         'Cache-Control': 'private, no-store',
-        'Content-Disposition': `attachment; filename="${statementExportFilename(data, format)}"`,
+        'Content-Disposition': contentDispositionAttachment(file.filename),
         'Content-Type': file.contentType,
         'X-Content-Type-Options': 'nosniff',
       },

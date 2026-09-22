@@ -255,7 +255,6 @@ type SourceInsights = {
   financeRows: Array<{
     label: string;
     value: string;
-    helper: string;
   }>;
   releaseArtists: AggregatedLineItem[];
   salesPeriods: AggregatedLineItem[];
@@ -287,12 +286,10 @@ function makeSourceInsights(items: StatementLineItem[]): SourceInsights {
     contracts: aggregateLineItems(items, (item) => item.contractName),
     financeRows: [
       {
-        helper: `${formatNumber(grossIncomeRows.length)} dòng có thu nhập gộp`,
         label: 'Thu nhập gộp',
         value: grossIncomeRows.length > 0 ? formatMoney(grossIncome) : '-',
       },
       {
-        helper: `${formatNumber(royaltyRateRows.length)} dòng có tỷ lệ bản quyền`,
         label: 'Tỷ lệ bản quyền trung bình',
         value: formatRate(averageRoyaltyRate),
       },
@@ -532,9 +529,6 @@ export function RoyaltyDashboard({
               <div className="flex min-w-0 items-center gap-3">
                 <BrandMark className="lg:hidden" />
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Cổng thông tin nghệ sĩ
-                  </p>
                   <h1 className="font-display break-words text-xl font-semibold leading-tight md:truncate md:text-3xl">
                     Cổng thông tin nghệ sĩ Zuong Zero
                   </h1>
@@ -606,9 +600,6 @@ export function RoyaltyDashboard({
                       <h2 className="font-display mt-4 truncate text-2xl font-semibold md:text-3xl">
                         {assignedClient.name}
                       </h2>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        Báo cáo {vietnamesePeriodLabel(activePeriod.period)}
-                      </p>
                     </div>
                     <div className="flex min-w-[170px] items-center justify-between gap-3 rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-2 text-sm font-medium text-[#047a70]">
                       <CheckCircle2 className="size-4" />
@@ -690,20 +681,20 @@ export function RoyaltyDashboard({
               className="music-card overflow-hidden"
             >
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 md:px-5">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Tổng quan tài chính
-                  </p>
-                  <h2
-                    className="mt-1 text-lg font-semibold"
-                    id="financial-summary-title"
-                  >
+                <h2
+                  className="text-lg font-semibold"
+                  id="financial-summary-title"
+                >
+                  Tổng quan tài chính
+                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="rounded-lg" variant="outline">
                     {vietnamesePeriodLabel(activePeriod.period)}
-                  </h2>
+                  </Badge>
+                  <Badge className={settlementBadgeClass(activePeriod)}>
+                    {settlementStatusLabel(activePeriod)}
+                  </Badge>
                 </div>
-                <Badge className={settlementBadgeClass(activePeriod)}>
-                  {settlementStatusLabel(activePeriod)}
-                </Badge>
               </div>
 
               <div className="grid md:grid-cols-3 md:divide-x md:divide-border">
@@ -785,14 +776,7 @@ export function RoyaltyDashboard({
             >
               <section className="music-card p-4 md:p-5">
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Doanh thu
-                    </p>
-                    <h2 className="mt-1 text-lg font-semibold">
-                      Xu hướng theo quý
-                    </h2>
-                  </div>
+                  <h2 className="text-lg font-semibold">Xu hướng theo quý</h2>
                   <TrendingUp className="size-5 text-primary" />
                 </div>
                 <RevenueTrendChart data={trendData} />
@@ -801,14 +785,7 @@ export function RoyaltyDashboard({
               <section className="music-card p-4 md:p-5">
                 <div className="flex items-start gap-3">
                   <BarChart3 className="mt-0.5 size-5 text-primary" />
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Báo cáo
-                    </p>
-                    <h2 className="mt-1 text-lg font-semibold">
-                      Báo cáo gần đây
-                    </h2>
-                  </div>
+                  <h2 className="text-lg font-semibold">Báo cáo gần đây</h2>
                 </div>
                 <div className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border">
                   {clientPeriods.length > 0 ? (
@@ -867,14 +844,9 @@ export function RoyaltyDashboard({
             {activeGuarantees.length > 0 ? (
               <section className="music-card p-4 md:p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      GM
-                    </p>
-                    <h2 className="mt-1 text-lg font-semibold">
-                      Khoản đảm bảo tối thiểu
-                    </h2>
-                  </div>
+                  <h2 className="text-lg font-semibold">
+                    Khoản đảm bảo tối thiểu
+                  </h2>
                   <WalletCards className="size-5 text-[#ff4d6d]" />
                 </div>
                 <div className="overflow-hidden rounded-lg border border-border">
@@ -931,14 +903,7 @@ export function RoyaltyDashboard({
               value={activeTab}
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Phân tích
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold">
-                    Phân tích doanh thu
-                  </h2>
-                </div>
+                <h2 className="text-lg font-semibold">Phân tích doanh thu</h2>
                 <TabsList className="h-auto flex-wrap justify-start">
                   {breakdownSections.map((section) => (
                     <TabsTrigger key={section.id} value={section.id}>
@@ -962,7 +927,6 @@ export function RoyaltyDashboard({
                 {sourceInsights.salesPeriods.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.salesPeriods}
-                    eyebrow="Kỳ phát sinh"
                     title="Doanh thu theo tháng phát sinh"
                   />
                 ) : null}
@@ -970,7 +934,6 @@ export function RoyaltyDashboard({
                 {sourceInsights.releaseArtists.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.releaseArtists}
-                    eyebrow="Nghệ sĩ phát hành"
                     title="Nghệ sĩ phát hành nổi bật"
                   />
                 ) : null}
@@ -978,7 +941,6 @@ export function RoyaltyDashboard({
                 {sourceInsights.contentTypes.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.contentTypes}
-                    eyebrow="Loại nội dung"
                     title="Loại nội dung"
                   />
                 ) : null}
@@ -986,14 +948,12 @@ export function RoyaltyDashboard({
                 {sourceInsights.configurations.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.configurations}
-                    eyebrow="Cấu hình khai thác"
                     title="Cấu hình khai thác bổ sung"
                   />
                 ) : null}
 
                 {sourceInsights.contracts.length > 0 ? (
                   <MiniTablePanel
-                    eyebrow="Hợp đồng"
                     rows={sourceInsights.contracts}
                     title="Hợp đồng trong báo cáo"
                   />
@@ -1009,14 +969,7 @@ export function RoyaltyDashboard({
 
             <section className="music-card p-4 md:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Sổ báo cáo
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold">
-                    Lịch sử báo cáo
-                  </h2>
-                </div>
+                <h2 className="text-lg font-semibold">Lịch sử báo cáo</h2>
                 <Users className="size-5 text-primary" />
               </div>
 
@@ -1129,7 +1082,13 @@ function FinancialSummaryValue({
   );
 }
 
-function PaymentSummaryValue({ label, value }: { label: string; value: string }) {
+function PaymentSummaryValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -1138,7 +1097,13 @@ function PaymentSummaryValue({ label, value }: { label: string; value: string })
   );
 }
 
-function FinancialDetailValue({ label, value }: { label: string; value: string }) {
+function FinancialDetailValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0 sm:border-r md:px-5">
       <dt className="text-sm text-muted-foreground">{label}</dt>
@@ -1169,22 +1134,15 @@ function parseScopeInput(input: unknown, periods: string[]) {
 
 function MiniBreakdownPanel({
   data,
-  eyebrow,
   title,
 }: {
   data: AggregatedLineItem[];
-  eyebrow: string;
   title: string;
 }) {
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            {eyebrow}
-          </p>
-          <h2 className="mt-1 text-lg font-semibold">{title}</h2>
-        </div>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <Badge className="rounded-lg" variant="outline">
           {Math.min(data.length, 8)} mục nổi bật
         </Badge>
@@ -1197,11 +1155,9 @@ function MiniBreakdownPanel({
 }
 
 function MiniTablePanel({
-  eyebrow,
   rows,
   title,
 }: {
-  eyebrow: string;
   rows: AggregatedLineItem[];
   title: string;
 }) {
@@ -1210,12 +1166,7 @@ function MiniTablePanel({
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            {eyebrow}
-          </p>
-          <h2 className="mt-1 text-lg font-semibold">{title}</h2>
-        </div>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <Badge className="rounded-lg" variant="outline">
           {formatNumber(rows.length)} mục
         </Badge>
@@ -1253,12 +1204,7 @@ function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            ISRC / Phiên bản
-          </p>
-          <h2 className="mt-1 text-lg font-semibold">Theo dõi bài hát</h2>
-        </div>
+        <h2 className="text-lg font-semibold">Theo dõi bài hát</h2>
         <Badge className="rounded-lg" variant="outline">
           {formatNumber(rows.length)} bài hát nổi bật
         </Badge>
@@ -1299,19 +1245,13 @@ function SourceFinancePanel({ rows }: { rows: SourceInsights['financeRows'] }) {
 
   return (
     <section className="music-card p-4 md:p-5">
-      <div className="mb-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          Doanh thu / Bản quyền
-        </p>
-        <h2 className="mt-1 text-lg font-semibold">Chỉ số tài chính bổ sung</h2>
-      </div>
+      <h2 className="mb-4 text-lg font-semibold">Chỉ số tài chính bổ sung</h2>
       <div className="overflow-hidden rounded-lg border border-border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Chỉ số</TableHead>
               <TableHead>Giá trị</TableHead>
-              <TableHead>Ghi chú</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1319,9 +1259,6 @@ function SourceFinancePanel({ rows }: { rows: SourceInsights['financeRows'] }) {
               <TableRow key={row.label}>
                 <TableCell className="font-medium">{row.label}</TableCell>
                 <TableCell>{row.value}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {row.helper}
-                </TableCell>
               </TableRow>
             ))}
           </TableBody>

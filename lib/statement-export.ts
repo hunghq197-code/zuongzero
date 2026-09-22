@@ -1,5 +1,9 @@
 import { periodDisplayLabel } from '@/lib/reporting-periods';
 import {
+  buildDetailedStatementXlsx,
+  buildStatementInvoicePdf,
+} from '@/lib/statement-export-files';
+import {
   summarizeSettlement,
   summarizeStatementPayment,
   type StatementPaymentStatus,
@@ -7,9 +11,10 @@ import {
 import {
   hasStatementLineItemsTable,
   standardStatementColumns,
-  type StandardStatementColumnKey,
   type StatementLineItem,
 } from '@/lib/statement-line-items';
+
+import robotoFontDataUrl from '@/assets/fonts/Roboto-Vietnamese.ttf?inline';
 
 export type StatementExportFormat = 'excel' | 'pdf';
 
@@ -27,6 +32,9 @@ export type StatementExportData = {
   publishedAt: string | null;
   recoupments: StatementExportRecoupment[];
   reportPeriodId: string;
+  sourceContentType: string | null;
+  sourceObjectKey: string | null;
+  sourceUploadMode: 'bulk' | 'single' | null;
   settlement: {
     carryForward: number;
     paidAt: string | null;
@@ -86,6 +94,9 @@ type StatementExportRow = {
   period: string;
   publishedAt: string | null;
   reportPeriodId: string;
+  sourceContentType: string | null;
+  sourceObjectKey: string | null;
+  sourceValidationSummary: string | null;
   reservesReleased: number;
   reservesWithheld: number;
   rowCount: number;
@@ -120,6 +131,9 @@ export async function getStatementExportData(
          c.display_name AS clientName,
          c.legal_name AS legalName,
          u.original_filename AS filename,
+         u.object_key AS sourceObjectKey,
+         u.content_type AS sourceContentType,
+         u.validation_summary AS sourceValidationSummary,
          s.opening_balance AS openingBalance,
          s.gross_revenue AS grossRevenue,
          s.net_revenue AS netRevenue,
@@ -222,8 +236,7 @@ export async function getStatementExportData(
                currency
              FROM statement_line_items
              WHERE report_period_id = ?
-             ORDER BY row_index ASC
-             LIMIT 20000`,
+             ORDER BY row_index ASC`,
           )
           .bind(reportPeriodId)
           .all<StatementExportLineItemRow>()
@@ -272,6 +285,9 @@ export async function getStatementExportData(
       trackTitle: row.trackTitle,
     })),
     reportPeriodId: statement.reportPeriodId,
+    sourceContentType: statement.sourceContentType,
+    sourceObjectKey: statement.sourceObjectKey,
+    sourceUploadMode: parseSourceUploadMode(statement.sourceValidationSummary),
     settlement: {
       carryForward: settlement.carryForward,
       paidAt: payment.status === 'paid' ? statement.paidAt : null,
@@ -299,25 +315,81 @@ export function statementExportFilename(
   data: StatementExportData,
   format: StatementExportFormat,
 ) {
-  const extension = format === 'pdf' ? 'pdf' : 'xls';
-  return `${safeFilenamePart(data.clientCode)}_${data.period}_statement.${extension}`;
+  const extension = format === 'pdf' ? 'pdf' : 'xlsx';
+  return `${safeFilenamePart(data.clientCode)}_${data.period}_doi-soat.${extension}`;
 }
 
-export function buildStatementExportFile(
+export async function buildStatementExportFile(
   data: StatementExportData,
   format: StatementExportFormat,
+  options: {
+    allowBulkSource?: boolean;
+    files?: R2Bucket | null;
+  } = {},
 ) {
   if (format === 'pdf') {
     return {
-      body: buildStatementPdf(data),
+      body: toArrayBuffer(
+        await buildStatementInvoicePdf(data, decodeDataUrl(robotoFontDataUrl)),
+      ),
       contentType: 'application/pdf',
+      filename: statementExportFilename(data, format),
     };
   }
 
+  const canReturnOriginal =
+    Boolean(data.sourceObjectKey && options.files) &&
+    (options.allowBulkSource === true || data.sourceUploadMode === 'single');
+  if (canReturnOriginal && data.sourceObjectKey && options.files) {
+    try {
+      const source = await options.files.get(data.sourceObjectKey);
+      if (source) {
+        return {
+          body: await source.arrayBuffer(),
+          contentType:
+            data.sourceContentType ||
+            source.httpMetadata?.contentType ||
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          filename: safeDownloadFilename(
+            data.filename ?? statementExportFilename(data, format),
+          ),
+        };
+      }
+    } catch (error) {
+      console.warn('[statement-export] source file unavailable', {
+        error: error instanceof Error ? error.message : String(error),
+        reportPeriodId: data.reportPeriodId,
+      });
+    }
+  }
+
+  const workbook = buildDetailedStatementXlsx(
+    data,
+    standardStatementColumns.map((column) => ({
+      key: column.key,
+      label: column.label,
+    })),
+  );
   return {
-    body: buildStatementWorkbook(data),
-    contentType: 'application/vnd.ms-excel; charset=utf-8',
+    body: toArrayBuffer(workbook.body),
+    contentType: workbook.contentType,
+    filename: statementExportFilename(data, format),
   };
+}
+
+export function contentDispositionAttachment(filename: string) {
+  const clean = safeDownloadFilename(filename);
+  const fallback =
+    clean
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'statement';
+  const encoded = encodeURIComponent(clean).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 export async function auditStatementExport(
@@ -365,261 +437,6 @@ export async function auditStatementExport(
     .run();
 }
 
-function buildStatementWorkbook(data: StatementExportData) {
-  const rows = [
-    ['Zuong Zero Artist Portal'],
-    ['Royalty statement export'],
-    [],
-    ['Client', data.clientName],
-    ['Client code', data.clientCode],
-    ['Legal name', data.legalName],
-    ['Period', data.periodLabel],
-    ['Currency', data.currency],
-    ['Status', data.status],
-    ['Published at', data.publishedAt ?? '-'],
-    ['Source file', data.filename ?? '-'],
-    [],
-    ['Opening balance', data.statement.openingBalance],
-    ['Net revenue', data.statement.netRevenue],
-    ['GM recouped', data.statement.netCosts],
-    ['Payable', data.settlement.payable],
-    ['Paid amount', data.settlement.paidAmount],
-    ['Payment status', data.settlement.paymentStatus],
-    ['Paid at', data.settlement.paidAt ?? '-'],
-    ['Carry forward', data.settlement.carryForward],
-    ['Settlement status', data.settlement.status],
-    ['Units', data.statement.units],
-    ['Source rows', data.statement.rowCount],
-  ];
-
-  const breakdownRows = [
-    ['Dimension', 'Label', 'Revenue', 'Units', 'Rows', 'Share %'],
-    ...data.breakdowns.map((row) => [
-      dimensionLabel(row.dimension),
-      row.label,
-      row.value,
-      row.units,
-      row.rowCount,
-      row.percentage,
-    ]),
-  ];
-
-  const recoupmentRows = [
-    [
-      'Track',
-      'Track ID',
-      'Track revenue',
-      'Recouped amount',
-      'Initial GM',
-      'Balance',
-    ],
-    ...data.recoupments.map((row) => [
-      row.trackTitle,
-      row.trackExternalId ?? '',
-      row.revenueAmount,
-      row.amount,
-      row.initialAmount ?? '',
-      row.balanceAmount ?? '',
-    ]),
-  ];
-
-  const sourceRows = [
-    [
-      ...standardStatementColumns.map((column) => column.label),
-      'Nguồn tính',
-      'Net Payable gốc',
-      'Royalty Rate áp dụng',
-    ],
-    ...data.lineItems.map((row) => [
-      ...standardStatementColumns.map((column) =>
-        exportLineItemValue(row, column.key),
-      ),
-      row.calculationMode === 'track_rule'
-        ? 'Tỷ lệ riêng theo bài hát'
-        : 'Theo file Excel',
-      row.sourceNetPayable ?? row.netPayable,
-      row.appliedRoyaltyRateBps === null ||
-      row.appliedRoyaltyRateBps === undefined
-        ? ''
-        : row.appliedRoyaltyRateBps / 100,
-    ]),
-  ];
-
-  const workbook = `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-${worksheetXml('Summary', rows)}
-${worksheetXml('Breakdowns', breakdownRows)}
-${worksheetXml('GM Recoupment', recoupmentRows)}
-${worksheetXml('Source Rows', sourceRows)}
-</Workbook>`;
-
-  return new TextEncoder().encode(workbook);
-}
-
-function buildStatementPdf(data: StatementExportData) {
-  const lines = [
-    'ZUONG ZERO ARTIST PORTAL',
-    'ROYALTY STATEMENT',
-    '',
-    `Client: ${data.clientName}`,
-    `Client code: ${data.clientCode}`,
-    `Period: ${data.periodLabel}`,
-    `Currency: ${data.currency}`,
-    `Status: ${data.status}`,
-    `Published at: ${data.publishedAt ?? '-'}`,
-    '',
-    'SUMMARY',
-    `Opening balance: ${formatMoneyPlain(data.statement.openingBalance)}`,
-    `Net revenue: ${formatMoneyPlain(data.statement.netRevenue)}`,
-    `GM recouped: ${formatMoneyPlain(data.statement.netCosts)}`,
-    `Payable: ${formatMoneyPlain(data.settlement.payable)}`,
-    `Paid amount: ${formatMoneyPlain(data.settlement.paidAmount)}`,
-    `Payment status: ${data.settlement.paymentStatus}`,
-    `Paid at: ${data.settlement.paidAt ?? '-'}`,
-    `Carry forward: ${formatMoneyPlain(data.settlement.carryForward)}`,
-    `Units: ${formatInteger(data.statement.units)}`,
-    `Rows: ${formatInteger(data.statement.rowCount)}`,
-    '',
-    'TOP BREAKDOWNS',
-    ...topBreakdownLines(data),
-    '',
-    'GM RECOUPMENT',
-    ...(data.recoupments.length
-      ? data.recoupments
-          .slice(0, 18)
-          .map((row) =>
-            [
-              row.trackTitle,
-              row.trackExternalId ? `ID ${row.trackExternalId}` : null,
-              formatMoneyPlain(row.amount),
-            ]
-              .filter(Boolean)
-              .join(' / '),
-          )
-      : ['No GM recoupment in this period.']),
-    '',
-    'SOURCE ROWS',
-    ...(data.lineItems.length
-      ? data.lineItems
-          .slice(0, 18)
-          .map((row) =>
-            [
-              row.isrc ? `ISRC ${row.isrc}` : null,
-              row.trackTitle,
-              row.trackVersion,
-              row.partner,
-              formatInteger(row.sales),
-              formatMoneyPlain(row.netPayable),
-            ]
-              .filter(Boolean)
-              .join(' / '),
-          )
-      : ['No source rows stored for this statement.']),
-  ].map(asciiPdfText);
-
-  return renderSimplePdf(lines);
-}
-
-function worksheetXml(
-  name: string,
-  rows: Array<Array<string | number | null>>,
-) {
-  return `<Worksheet ss:Name="${xmlEscape(name)}"><Table>${rows
-    .map(
-      (row) =>
-        `<Row>${row
-          .map((cell) => {
-            const isNumber =
-              typeof cell === 'number' && Number.isFinite(cell as number);
-            return `<Cell><Data ss:Type="${isNumber ? 'Number' : 'String'}">${xmlEscape(String(cell ?? ''))}</Data></Cell>`;
-          })
-          .join('')}</Row>`,
-    )
-    .join('')}</Table></Worksheet>`;
-}
-
-function topBreakdownLines(data: StatementExportData) {
-  const lines: string[] = [];
-  const dimensions = Array.from(
-    new Set(data.breakdowns.map((row) => row.dimension)),
-  );
-
-  for (const dimension of dimensions) {
-    lines.push(dimensionLabel(dimension).toUpperCase());
-    for (const row of data.breakdowns
-      .filter((entry) => entry.dimension === dimension)
-      .slice(0, 6)) {
-      lines.push(
-        `- ${row.label}: ${formatMoneyPlain(row.value)} / ${formatInteger(row.units)} units / ${formatPercentage(row.percentage)}`,
-      );
-    }
-  }
-
-  return lines.slice(0, 90);
-}
-
-function renderSimplePdf(lines: string[]) {
-  const pageLineCount = 48;
-  const pages = chunk(lines, pageLineCount);
-  const objects: string[] = [];
-  const pageRefs: number[] = [];
-
-  objects.push('<< /Type /Catalog /Pages 2 0 R >>');
-  objects.push('');
-
-  for (const pageLines of pages) {
-    const content = renderPageContent(pageLines);
-    const contentNumber = objects.length + 2;
-    const pageNumber = objects.length + 1;
-    pageRefs.push(pageNumber);
-    objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${pages.length * 2 + 3} 0 R >> >> /Contents ${contentNumber} 0 R >>`,
-    );
-    objects.push(
-      `<< /Length ${new TextEncoder().encode(content).length} >>\nstream\n${content}\nendstream`,
-    );
-  }
-
-  objects[1] = `<< /Type /Pages /Kids [${pageRefs.map((page) => `${page} 0 R`).join(' ')}] /Count ${pageRefs.length} >>`;
-  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-
-  const encoder = new TextEncoder();
-  let output = '%PDF-1.4\n';
-  const offsets = [0];
-
-  objects.forEach((object, index) => {
-    offsets.push(encoder.encode(output).length);
-    output += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  });
-
-  const xrefOffset = encoder.encode(output).length;
-  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  output += offsets
-    .slice(1)
-    .map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`)
-    .join('');
-  output += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return encoder.encode(output);
-}
-
-function renderPageContent(lines: string[]) {
-  const escapedLines = lines.map((line) => `(${pdfEscape(line)}) Tj T*`);
-  return `BT\n/F1 10 Tf\n42 792 Td\n14 TL\n${escapedLines.join('\n')}\nET`;
-}
-
-function chunk<T>(items: T[], size: number) {
-  const pages: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    pages.push(items.slice(index, index + size));
-  }
-  return pages.length ? pages : [[]];
-}
-
 function numberValue(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -629,6 +446,48 @@ function nullableNumberValue(value: unknown) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function parseSourceUploadMode(value: string | null) {
+  if (!value) return null;
+  try {
+    const summary = JSON.parse(value) as { uploadMode?: unknown };
+    return summary.uploadMode === 'bulk' || summary.uploadMode === 'single'
+      ? summary.uploadMode
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeDataUrl(value: string) {
+  const encoded = value.includes(',')
+    ? value.slice(value.indexOf(',') + 1)
+    : value;
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function safeDownloadFilename(value: string) {
+  const clean = value
+    .replaceAll('\r', '')
+    .replaceAll('\n', '')
+    .replaceAll(String.fromCharCode(0), '')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .trim()
+    .slice(0, 180);
+  return clean || 'statement.xlsx';
+}
+
+function toArrayBuffer(value: Uint8Array) {
+  return value.buffer.slice(
+    value.byteOffset,
+    value.byteOffset + value.byteLength,
+  ) as ArrayBuffer;
 }
 
 function normalizeExportLineItem(row: StatementExportLineItemRow) {
@@ -670,68 +529,6 @@ function normalizeExportLineItem(row: StatementExportLineItemRow) {
     trackTitle: row.trackTitle,
     trackVersion: row.trackVersion,
   } satisfies StatementLineItem;
-}
-
-function exportLineItemValue(
-  item: StatementLineItem,
-  key: StandardStatementColumnKey,
-) {
-  const value = item[key];
-  if (value === null || value === undefined) return '';
-  return value;
-}
-
-function formatMoneyPlain(value: number) {
-  return `${formatInteger(value)} VND`;
-}
-
-function formatInteger(value: number) {
-  return new Intl.NumberFormat('vi-VN', {
-    maximumFractionDigits: 0,
-  }).format(Math.round(value));
-}
-
-function formatPercentage(value: number) {
-  return `${value.toFixed(2)}%`;
-}
-
-function dimensionLabel(value: string) {
-  const labels: Record<string, string> = {
-    artist: 'Artist',
-    channel: 'Channel',
-    configuration: 'Distribution Channel',
-    label: 'Label',
-    release: 'Release',
-    source: 'Partner',
-    sub_source: 'Sub Source',
-    territory: 'Territory',
-    track: 'Track',
-  };
-
-  return labels[value] ?? value;
-}
-
-function xmlEscape(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function pdfEscape(value: string) {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
-}
-
-function asciiPdfText(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\x20-\x7E]/g, '?')
-    .slice(0, 160);
 }
 
 function safeFilenamePart(value: string) {

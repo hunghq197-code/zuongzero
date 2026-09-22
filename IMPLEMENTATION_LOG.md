@@ -282,6 +282,13 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Da test end-to-end local create -> rollback -> replace -> rollback, xac nhan phuc hoi statement, source upload, line items va audit log; data/file/session test da duoc don sach sau kiem tra.
 - Da test UX desktop 1440px va mobile 390px; preview table dung cuon ngang co kiem soat tren mobile. `npm test` qua 30 unit + 12 contract tests, targeted `oxlint`, `npx tsc --noEmit` va `npm run build` thanh cong.
 - Da deploy Cloudflare Worker version `47fc2bc7-e2e6-435e-8a62-cac7a045ef75` len `https://artistportal.zuongzeroent.com` bang `npx wrangler deploy --config wrangler.cloudflare.jsonc`; `npm run test:production` qua 13/13 checks (trang auth va auth guard API), chua test import/rollback co dang nhap tren production. Phase 10 khong can migration D1 moi; snapshot dung R2 hien co va status `rolled_back` la gia tri text tuong thich schema hien tai.
+- 2026-09-21: Nguoi dung xac nhan so lieu da dung sau khi nhap du lieu; chua xac nhan rollback tren production.
+
+## Phase 11 - Isolated staging
+
+- 2026-09-21: STAGING INFRA DEPLOYED tai `https://royalty-dashboard-staging.hung-hq197.workers.dev`, Worker version `72a10e46-2b4c-452f-9b93-b2206b307509`. D1 `royalty-dashboard-staging-db` va R2 `royalty-dashboard-staging-files` moi, tach khoi production; D1 da apply du 13 migration va xac nhan 0 clients, 0 users, 0 statements.
+- `wrangler.cloudflare.jsonc` co `env.staging` voi binding rieng, `AUTH_PROVIDER=app-session`, `DEPLOYMENT_ENV=staging` va `crons=[]`; UI hien nhan `Moi truong thu nghiem`. `npm run deploy:staging` va `npm run test:staging` dung env/URL staging; smoke qua 13/13 checks va build/test local qua 30 unit + 13 contract tests.
+- 2026-09-21: Da xac nhan staging co du ten bon secrets (`SUPER_ADMIN_EMAILS`, `SUPER_ADMIN_PASSWORD`, `EMAIL_FROM`, `RESEND_API_KEY`) bang `npx wrangler secret list --config wrangler.cloudflare.jsonc --env staging`; khong doc duoc gia tri. `npm run test:staging` va `npm run test:production` deu qua 13/13 checks. Chua xac nhan email OTP thuc nhan hay test import/rollback co dang nhap tren staging. Huong dan trong `STAGING.md`; khong copy du lieu production.
 
 ## Roadmap cac phase
 
@@ -293,6 +300,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Phase 6 - Test va van hanh production: DONE. Da co unit/contract test va production smoke test de kiem auth, upload single/bulk contract, publish/delete guard, GM recoup/reverse, dashboard client/admin va domain production.
 - Phase 7 - Bao cao/export doi soat: DEPLOYED. Da co export PDF/Excel statement theo quy cho client/admin va download audit; con nen tach tiep lich su thanh toan/payment marking thanh buoc tiep theo neu can van hanh doi soat that.
 - Phase 8 - Data chuan 22 cot: DEPLOYED. Da merge file `test.xlsx` lam schema chuan, luu detail vao `statement_line_items`, UI client hien insight va export co sheet `Source Rows`; migration 0010 da co tren D1 production.
+- Phase 11 - Staging tach rieng: DEPLOYED infra va da co du ten secrets; dang cho kiem thu OTP/import/rollback co dang nhap.
 - Payment marking toi gian: DEPLOYED. Chi co `unpaid`/`paid`, paid date va actor; khong them partial payment, chung tu hay bang lich su rieng.
 - 2026-09-19: CLIENT DASHBOARD FINANCIAL UX DEPLOYED. Da deploy len `https://artistportal.zuongzeroent.com` voi Worker version `5bae66af-dbeb-47e9-bbf8-4d459a3fc490`; `npm run test:production` dat 10/10 kiem tra (cac trang auth tra 200, API bao ve tra 401 khi chua dang nhap).
 - 2026-09-19: CLIENT FINANCIAL SUMMARY SIMPLIFIED AND DEPLOYED. Da gom 11 the tai chinh thanh mot khoi tong quan gom doanh thu, tong giam tru, thuc nhan va ba chi so thanh toan; GM, du phong va so du duoc thu gon trong `Chi tiet cach tinh`. Da kiem tra desktop/mobile, `npm test`, `npm run build` va production smoke 10/10; Worker version `4c2b554f-3add-4300-b2b7-c429f14aca40`.
@@ -303,6 +311,17 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - 2026-09-21: `npm test` qua 28 unit + 11 contract tests; targeted `oxlint` sach; `npm run build` thanh cong. Da test truc quan form/list/edit tren desktop 1440px va mobile 390px.
 - 2026-09-21: Deploy production thanh cong tai `https://artistportal.zuongzeroent.com`, Worker version `8a71baef-9486-4253-a7ab-c08e2050638b`. `npm run test:production` qua 11/11 kiem tra, gom auth pages 200 va API `royalty-rules` cung cac API nhay cam tra 401 khi chua dang nhap.
 
+## Statement export redesign - 2026-09-22
+
+Trang thai: DEPLOYED PRODUCTION.
+
+- PDF statement da doi sang bao cao doi soat A4 mot trang, ho tro day du tieng Viet, gom thong tin khach hang/ky, dong tien tu gross den thuc nhan, trang thai thanh toan, units, rows va nguon doanh thu noi bat.
+- Excel khong con la XML `.xls`. File tai xuong la `.xlsx` that. Neu upload single-client va R2 con file, admin/client nhan dung byte + ten file goc. Neu upload bulk, admin duoc tai file tong goc; client chi nhan workbook chi tiet 22 cot da loc theo client de khong ro ri data khach hang khac.
+- Workbook sinh lai giu thu tu dong, gia tri `Royalty Rate`/`Net Payable` goc truoc rule, co dong header co dinh, auto-filter va dinh dang so. Export khong cat o 20.000 dong; neu R2 tam loi thi fallback sang workbook chi tiet tu D1.
+- Van giu auth scope, published-only cho client va audit log moi lan tai. Ten file/Content-Disposition duoc sanitize va ho tro UTF-8.
+- Da them unit test OOXML/PDF, doc workbook bang `openpyxl`, render PDF thanh PNG bang Poppler va kiem tra truc quan khong tran/cat. `npm test` qua 32 unit + 13 contract tests, targeted `oxlint`, `git diff --check` va `npm run build` thanh cong.
+- Da deploy production tai `https://artistportal.zuongzeroent.com`, Cloudflare Worker version `db2fe80e-7067-43b5-aef1-e02dc08e78ee`. `npm run test:production` qua 13/13 checks, bao gom auth guard cho ca export PDF va Excel.
+
 ## Nguyen tac ghi log cho cac lan tiep theo
 
 - Moi phase moi hoac viec dang lam phai cap nhat file nay truoc khi ket thuc task.
@@ -312,6 +331,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 
 ## Viec tiep theo nen lam
 
+- Dang nhap staging bang email super admin va mat khau rieng, xac nhan OTP den mailbox thu nghiem, sau do test import -> sync/replace -> rollback tren staging.
 - Dang nhap admin, vao tab Email, bam `Gửi test` toi email that va xac nhan mailbox nhan duoc.
 - Neu tab Email bao DMARC missing, them TXT `_dmarc.<domain>` trong DNS domain gui mail.
 - Test flow tao tai khoan client bang email that: tao tai khoan, nhan mail, kich hoat, doi mat khau, vao dashboard.
@@ -321,3 +341,42 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Test demo local payment marking tai tab Statement; neu dat, apply `drizzle/0011_statement_payment_status.sql` len D1 remote roi deploy Worker.
 - Test nghiep vu Phase 9 tren production bang file co Gross Income: tao mot rule theo ISRC, import vao mot client/quy test, doi chieu dong co rule duoc tinh lai va dong khong co rule giu nguyen Net Payable tu Excel.
 - Test nghiep vu Phase 10 bang mot file Excel that tren production voi tai khoan admin: xem preview, import, mo lich su, rollback va doi chieu so lieu. Chi dung client/quy test de tranh anh huong du lieu that.
+
+## Ban giao tam dung - staging OTP (2026-09-21)
+
+Trang thai: IN PROGRESS tu 2026-09-22 theo yeu cau tiep tuc cua nguoi dung. Chua sua ma ung dung, chua thay doi secret, chua deploy staging hay production trong luot xu ly moi. File nay la tom tat ban giao cac yeu cau, quyet dinh va bang chung hien co; khong phai ban chep nguyen van toan bo hoi thoai.
+
+### Boi canh va yeu cau da thong nhat
+
+- Cong production chinh la `https://artistportal.zuongzeroent.com`; staging rieng la `https://royalty-dashboard-staging.hung-hq197.workers.dev` voi D1/R2/secrets rieng. Moi thay doi nghiep vu phai duoc test tren demo/staging truoc khi can nhac deploy production.
+- Bao mat la uu tien hang dau. Khach hang chi xem dashboard/statement da publish; admin/super admin quan ly khach hang, tai Excel, doi soat, GM, ty le chia theo ISRC, thanh toan, tai khoan va email. Form dang nhap co OTP gui email. Khong chia se mat khau, OTP, API key hay request body email.
+- Nguoi dung da yeu cau tam dung va chua deploy ban hien tai. Khong chay `wrangler secret put` khi chua can thiet vi lenh nay tao version Worker moi va deploy ngay, du chi nham staging.
+
+### Bang chung vua nhan va phan tich
+
+- Dang nhap staging sau khi nhap mat khau hop le hien `Khong the gui ma OTP luc nay. Vui long thu lai sau it phut.`. Day la thong bao chung cua login flow; chua chung minh loi nam o Resend hay secret nao.
+- Anh Resend Logs `GET /domains` tra HTTP 401 `restricted_api_key`: key `Onboarding` co quyen `Sending access`, chi duoc gui email. Day la han che dung quyen khi tab chan doan email truy van domains; khong tu no chung minh `POST /emails` gui OTP bi loi. Khong nang key len Full access chi de het loi chan doan.
+- Anh Resend Domains chi thay `mail.zuongzeroent.com` o trang thai Verified. Sender phai thuoc domain nay. Anh Resend `POST /emails` HTTP 200 la email `Test email - Zuong Zero Artist Portal`, from `Zuong Zero Artist Portal <no-reply@mail.zuongzeroent.com>`; Resend da chap nhan email test. Anh cho thay noi dung co portal `artistportal...`, nen khong the coi day la bang chung email OTP staging da gui thanh cong. HTTP 200 cua Resend cung chua tu no xac nhan email da vao inbox.
+- Code `app/api/auth/login/route.ts` tao challenge sau khi xac thuc mat khau, goi `sendLoginOtpEmail`, va redirect voi `otp_delivery` neu ket qua khac `sent`. `lib/email.ts` gui OTP qua `POST https://api.resend.com/emails`; neu thieu `RESEND_API_KEY`/`EMAIL_FROM`, Resend tu choi, hoac fetch loi thi UI cung co the hien thong bao chung.
+- Staging da co ten cac secrets `SUPER_ADMIN_EMAILS`, `SUPER_ADMIN_PASSWORD`, `EMAIL_FROM`, `RESEND_API_KEY`, nhung gia tri duoc an va chua duoc xac nhan. Secrets staging khong ke thua production. Chua co log `POST /emails` mang tieu de OTP cua lan dang nhap staging, va chua co Worker log chi ra nguyen nhan cu the.
+- Da thu `wrangler tail` staging de bat log, nhung phien Wrangler OAuth refresh bi loi `400 Bad Request`/yeu cau dang nhap; khong thu duoc log. Cac tien trinh tail/OAuth do luot thu da duoc dung, khong de chay nen.
+
+### Buoc tiep theo khi tiep tuc
+
+1. Khong deploy production. Mo Cloudflare Dashboard > Workers & Pages > `royalty-dashboard-staging` > Logs > Live, sau do thu dang nhap staging dung mot lan.
+2. Tim `[email:login-otp] resend rejected request`, `[email:login-otp] delivery failed`, hoac `[login-otp] delivery failed`. Chi luu/chia se HTTP status va thong bao loi da loai bo thong tin nhay cam.
+3. Doi chieu Resend Logs cung thoi diem: tim `POST /emails` voi tieu de `Ma OTP dang nhap Zuong Zero Artist Portal`, khong nham voi `Test email` hay `GET /domains`. Khong chia se request body vi chua OTP.
+4. Neu khong co `POST /emails`, kiem tra nhánh `not_configured`/Worker fetch va gia tri secrets staging mot cach an toan. Neu co POST loi, dung status + `name`/`message` de sua dung nguyen nhan. Neu POST 200, kiem tra email delivery/inbox/spam va flow challenge. Sau khi ro nguyen nhan moi quyet dinh can sua code hay secret staging; test lai staging truoc moi de xuat production.
+
+### Tiep tuc 2026-09-22
+
+- `npx wrangler whoami` van tra `Failed to fetch auth token: 400 Bad Request` va `Not logged in`; CLI khong the doc Worker logs. Co them canh bao sandbox khong ghi duoc Wrangler debug log o AppData, nhung loi chinh la xac thuc Cloudflare.
+- Da mo Cloudflare Dashboard de nguoi dung tu dang nhap an toan, khong nhan mat khau/OTP qua chat. Trang browser hien van o `/login`; dang cho phien dang nhap de xem log `royalty-dashboard-staging`.
+- Da doi chieu `app/api/auth/login/route.ts` va `lib/email.ts`: sau khi password dung va tao challenge, email OTP duoc gui bang `POST /emails`; `not_configured`, HTTP khac 2xx hoac network error deu dua ve thong bao giao dien chung. Chua co bang chung de xac dinh nhanh nao xay ra tren staging.
+- Khong thay doi secret, schema, ma ung dung hay moi truong Cloudflare. Khong deploy production; chi cap nhat file ban giao nay.
+
+### Ket qua log OTP staging (2026-09-22)
+
+- Nguoi dung lay duoc Live logs cho `royalty-dashboard-staging`, request `POST /api/auth/login`. Log `[email:login-otp] resend rejected request` cho thay Resend tra HTTP 401 `validation_error` voi message `API key is invalid`; log `[login-otp] delivery failed` la he qua. Day la loi cua gia tri `RESEND_API_KEY` tren staging, khong phai loi quyen `Sending access` o request `GET /domains` truoc do.
+- Chua co thay doi secret hay deploy de khac phuc. Can tao mot Resend API key moi cho staging voi `Sending access`, gioi han domain `mail.zuongzeroent.com` neu UI cho phep; nhap key truc tiep vao secret `RESEND_API_KEY` cua Worker staging. Khong gui key qua chat, khong ghi vao Git. Cloudflare Dashboard se yeu cau Deploy de ap dung secret len staging; khong thay code hay production.
+- Sau khi secret staging duoc cap nhat, thu dang nhap staging lai mot lan. Neu Resend chap nhan OTP ma van loi, kiem tra Live logs/Resend POST `/emails` moi nhat; xac nhan `EMAIL_FROM` staging thuoc domain `mail.zuongzeroent.com`. Sau do moi test luong import/rollback tren staging.

@@ -160,7 +160,7 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
   assert.match(adminDashboard, /trendingTracks/);
   assert.match(adminDashboard, /trendingArtists/);
   assert.match(adminDashboard, /emptyAdminOverviewData/);
-  assert.match(adminConsole, /Admin dashboard tổng/);
+  assert.match(adminConsole, /Tổng quan hệ thống/);
   assert.match(adminConsole, /isInitialLoading/);
   assert.match(adminConsole, /emptyAdminOverviewData\(initialPeriod\)/);
   assert.doesNotMatch(adminConsole, /fallbackCustomers/);
@@ -182,6 +182,7 @@ test('client and admin dashboard regressions keep empty states and aggregate vie
 
 test('statement exports require scoped access and write audit logs', () => {
   const exportBuilder = readSource('lib/statement-export.ts');
+  const exportFiles = readSource('lib/statement-export-files.ts');
   const adminExportRoute = readSource(
     'app/api/admin/statements/[reportPeriodId]/export/route.ts',
   );
@@ -190,18 +191,27 @@ test('statement exports require scoped access and write audit logs', () => {
   );
   const activity = readSource('lib/admin-activity.ts');
 
-  assert.match(exportBuilder, /buildStatementWorkbook/);
-  assert.match(exportBuilder, /buildStatementPdf/);
+  assert.match(exportBuilder, /buildDetailedStatementXlsx/);
+  assert.match(exportBuilder, /buildStatementInvoicePdf/);
   assert.match(exportBuilder, /auditStatementExport/);
   assert.match(exportBuilder, /statement_export_/);
   assert.match(exportBuilder, /statement_line_items/);
-  assert.match(exportBuilder, /Source Rows/);
+  assert.match(exportBuilder, /sourceObjectKey/);
+  assert.match(exportBuilder, /sourceUploadMode === 'single'/);
+  assert.match(exportBuilder, /contentDispositionAttachment/);
+  assert.doesNotMatch(exportBuilder, /LIMIT 20000/);
+  assert.match(exportFiles, /application\/vnd\.openxmlformats/);
+  assert.match(exportFiles, /BÁO CÁO ĐỐI SOÁT BẢN QUYỀN/);
+  assert.match(exportFiles, /sourceNetPayable \?\? item\.netPayable/);
   assert.match(adminExportRoute, /getAdminAccess/);
   assert.match(adminExportRoute, /auditStatementExport/);
+  assert.match(adminExportRoute, /allowBulkSource: true/);
+  assert.match(adminExportRoute, /files: env\.FILES/);
   assert.match(clientExportRoute, /getClientPortalAccess/);
   assert.match(clientExportRoute, /clientId: access\.clientId/);
   assert.match(clientExportRoute, /publishedOnly: true/);
   assert.match(clientExportRoute, /auditStatementExport/);
+  assert.match(clientExportRoute, /allowBulkSource: false/);
   assert.match(activity, /Tải PDF statement/);
   assert.match(activity, /Tải Excel statement/);
 });

@@ -90,7 +90,6 @@ import {
   usePaginatedRows,
 } from '@/components/table-pagination';
 import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
-import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import { type AdminActivityRow } from '@/lib/admin-activity';
 import {
   emptyAdminOverviewData,
@@ -99,7 +98,6 @@ import {
   type AdminTrendItem,
 } from '@/lib/admin-dashboard';
 import type { TrackGuaranteeRow, TrackGuaranteeStatus } from '@/lib/guarantees';
-import { standardStatementColumns } from '@/lib/statement-line-items';
 import type {
   StatementImportPreview,
   StatementImportPreviewCustomer,
@@ -292,16 +290,6 @@ function formatFileSize(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function standardColumnStorageLabel(storage: 'matched' | 'added') {
-  return storage === 'matched' ? 'Đã map' : 'Bổ sung';
-}
-
-function standardColumnStorageClass(storage: 'matched' | 'added') {
-  return storage === 'matched'
-    ? 'rounded-lg bg-[#e7fbf7] text-[#00796f]'
-    : 'rounded-lg bg-[#eef4ff] text-[#2f5da8]';
-}
-
 function accountRoleLabel(role: ManagedAccountRow['role']) {
   const labels: Record<ManagedAccountRow['role'], string> = {
     admin: 'Quản lý',
@@ -355,11 +343,11 @@ function formatAccountDate(value: string) {
 }
 
 function customerStatusLabel(status: string) {
-  if (status === 'active') return 'Active';
-  if (status === 'locked') return 'Locked';
-  if (status === 'archived') return 'Archived';
+  if (status === 'active') return 'Đang hoạt động';
+  if (status === 'locked') return 'Đã khóa';
+  if (status === 'archived') return 'Đã lưu trữ';
 
-  return status || 'Active';
+  return status || 'Đang hoạt động';
 }
 
 function customerStatusFilterLabel(status: CustomerStatusFilter) {
@@ -368,11 +356,11 @@ function customerStatusFilterLabel(status: CustomerStatusFilter) {
 }
 
 function statementStatusLabel(status: AdminStatementRow['status']) {
-  if (status === 'published') return 'Published';
-  if (status === 'locked') return 'Locked';
-  if (status === 'replaced') return 'Hidden';
-  if (status === 'validating') return 'Validating';
-  return 'Draft';
+  if (status === 'published') return 'Đã phát hành';
+  if (status === 'locked') return 'Đã khóa';
+  if (status === 'replaced') return 'Đã ẩn';
+  if (status === 'validating') return 'Đang kiểm tra';
+  return 'Bản nháp';
 }
 
 function importStrategyLabel(strategy: ImportStrategy) {
@@ -381,20 +369,8 @@ function importStrategyLabel(strategy: ImportStrategy) {
   return 'Tạo statement mới';
 }
 
-function importStrategyDescription(strategy: ImportStrategy) {
-  if (strategy === 'sync') {
-    return 'Giữ dữ liệu cũ, thêm dòng mới và cập nhật dòng trùng khóa nghiệp vụ.';
-  }
-
-  if (strategy === 'replace') {
-    return 'Thay toàn bộ dữ liệu, biểu đồ và số liệu của khách hàng trong quý đã chọn.';
-  }
-
-  return 'Chỉ tạo khi khách hàng chưa có statement trong quý đã chọn.';
-}
-
 function statementStatusFilterLabel(status: StatementStatusFilter) {
-  if (status === 'all') return 'Tất cả status';
+  if (status === 'all') return 'Tất cả trạng thái';
   return statementStatusLabel(status);
 }
 
@@ -914,7 +890,7 @@ export function AdminConsole({
     () => [
       { icon: BarChart3, id: 'overview', label: 'Tổng quan' },
       { icon: Users, id: 'customers', label: 'Khách hàng' },
-      { icon: FileSpreadsheet, id: 'statements', label: 'Statement' },
+      { icon: FileSpreadsheet, id: 'statements', label: 'Báo cáo' },
       { icon: BadgePercent, id: 'royalty_rules', label: 'Tỷ lệ chia' },
       { icon: WalletCards, id: 'guarantees', label: 'GM' },
       { icon: BellRing, id: 'reminders', label: 'Nhắc lịch' },
@@ -2205,11 +2181,8 @@ export function AdminConsole({
               <div className="flex min-w-0 items-center gap-3">
                 <BrandMark className="lg:hidden" />
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Zuong Zero Artist Portal
-                  </p>
                   <h1 className="font-display truncate text-2xl font-semibold md:text-3xl">
-                    Admin Operations
+                    Quản trị hệ thống
                   </h1>
                 </div>
               </div>
@@ -2244,7 +2217,7 @@ export function AdminConsole({
                   }}
                   type="button"
                 >
-                  Client portal
+                  Trang khách hàng
                 </button>
                 <button
                   className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-medium hover:bg-muted"
@@ -2267,9 +2240,6 @@ export function AdminConsole({
                   <RefreshCw className="mx-auto size-8 animate-spin text-primary" />
                   <p className="mt-4 text-sm font-semibold">
                     Đang tải dashboard admin
-                  </p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Hệ thống đang đọc dữ liệu khách hàng, statement và GM.
                   </p>
                 </div>
               </section>
@@ -2304,7 +2274,7 @@ export function AdminConsole({
                     value="statements"
                   >
                     <FileSpreadsheet className="size-4" />
-                    Statement
+                    Báo cáo
                   </TabsTrigger>
                   <TabsTrigger
                     className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
@@ -2381,19 +2351,12 @@ export function AdminConsole({
                   <div className="grid lg:grid-cols-[minmax(0,1fr)_360px]">
                     <div className="p-4 md:p-5">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                          className="rounded-lg bg-[#e7fbf7] text-[#00796f]"
-                          variant="secondary"
-                        >
-                          <Disc3 className="size-3.5" />
-                          Music catalog ops
-                        </Badge>
                         <Badge className="rounded-lg" variant="outline">
                           {overview.periodLabel}
                         </Badge>
                       </div>
                       <h2 className="font-display mt-4 text-2xl font-semibold md:text-3xl">
-                        Admin dashboard tổng
+                        Tổng quan hệ thống
                       </h2>
                       {operationsMessage ? (
                         <p className="mt-3 rounded-lg border border-[#f0b7b2] bg-[#fff2f0] px-3 py-2 text-sm text-[#a53a30]">
@@ -2404,7 +2367,7 @@ export function AdminConsole({
                         <div className="border-t border-border pt-3">
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                              Active clients
+                              Khách hàng
                             </span>
                             <Users className="size-4 text-primary" />
                           </div>
@@ -2421,7 +2384,7 @@ export function AdminConsole({
                         <div className="border-t border-border pt-3">
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                              Statements
+                              Báo cáo
                             </span>
                             <FileSpreadsheet className="size-4 text-[#7c3aed]" />
                           </div>
@@ -2429,14 +2392,15 @@ export function AdminConsole({
                             {formatNumber(uploadedQuarterCount)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {formatNumber(overview.summary.trackCount)} tracks /{' '}
-                            {formatNumber(overview.summary.artistCount)} artists
+                            {formatNumber(overview.summary.trackCount)} bài hát
+                            / {formatNumber(overview.summary.artistCount)} nghệ
+                            sĩ
                           </p>
                         </div>
                         <div className="border-t border-border pt-3">
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                              Revenue
+                              Doanh thu
                             </span>
                             <WalletCards className="size-4 text-[#ff4d6d]" />
                           </div>
@@ -2447,25 +2411,20 @@ export function AdminConsole({
                       </div>
                     </div>
                     <div className="border-t border-white/10 bg-[#071118] p-5 text-white lg:border-l lg:border-t-0">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 text-sm font-semibold">
-                          <RadioTower className="size-4 text-[#00b8a9]" />
-                          Upload pipeline
-                        </div>
-                        <Badge className="rounded-lg border-white/15 bg-white/10 text-white">
-                          Secure
-                        </Badge>
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <RadioTower className="size-4 text-[#00b8a9]" />
+                        Dữ liệu quý
                       </div>
                       <EqualizerBars className="mt-7" />
                       <div className="mt-7 grid grid-cols-2 gap-4 text-sm">
                         <div>
-                          <p className="text-white/55">Quarter</p>
+                          <p className="text-white/55">Quý</p>
                           <p className="mt-1 truncate text-lg font-semibold">
                             {overview.periodLabel}
                           </p>
                         </div>
                         <div>
-                          <p className="text-white/55">Usage</p>
+                          <p className="text-white/55">Lượt khai thác</p>
                           <p className="mt-1 text-lg font-semibold">
                             {formatNumber(overview.summary.units)}
                           </p>
@@ -2479,10 +2438,7 @@ export function AdminConsole({
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          System revenue
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
+                        <h2 className="text-lg font-semibold">
                           Doanh thu toàn bộ khách hàng
                         </h2>
                       </div>
@@ -2494,10 +2450,7 @@ export function AdminConsole({
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Customer ranking
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
+                        <h2 className="text-lg font-semibold">
                           Top khách hàng quý này
                         </h2>
                       </div>
@@ -2511,22 +2464,22 @@ export function AdminConsole({
                   <TrendList
                     icon={<Music2 className="size-5 text-primary" />}
                     items={overview.trendingTracks}
-                    title="Track đang trend"
+                    title="Bài hát nổi bật"
                   />
                   <TrendList
                     icon={<Mic2 className="size-5 text-[#7c3aed]" />}
                     items={overview.trendingArtists}
-                    title="Artist đang trend"
+                    title="Nghệ sĩ nổi bật"
                   />
                   <TrendList
                     icon={<RadioTower className="size-5 text-[#f59e0b]" />}
                     items={overview.topSources}
-                    title="Top partner"
+                    title="Đối tác nổi bật"
                   />
                   <TrendList
                     icon={<Disc3 className="size-5 text-[#ff4d6d]" />}
                     items={overview.topTerritories}
-                    title="Top territory"
+                    title="Thị trường nổi bật"
                   />
                 </section>
 
@@ -3178,15 +3131,8 @@ export function AdminConsole({
 
                     <div className="mt-5 grid gap-3">
                       <label className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white px-3 py-3">
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium">
-                            File tổng nhiều khách hàng
-                          </span>
-                          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                            Bật khi Excel có cột Account No. / Mã khách hàng.
-                            Ngưỡng thanh toán{' '}
-                            {formatMoney(SETTLEMENT_THRESHOLD_VND)}.
-                          </span>
+                        <span className="block text-sm font-medium">
+                          File tổng nhiều khách hàng
                         </span>
                         <input
                           aria-label="File tổng nhiều khách hàng"
@@ -3238,12 +3184,7 @@ export function AdminConsole({
                               </SelectContent>
                             </Select>
                           </>
-                        ) : (
-                          <div className="rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-3 text-sm leading-6 text-[#047a70]">
-                            Hệ thống sẽ tự match từng dòng theo mã khách hàng đã
-                            có trong mục Tài khoản/Khách hàng.
-                          </div>
-                        )}
+                        ) : null}
                       </div>
 
                       <div className="space-y-2">
@@ -3321,9 +3262,6 @@ export function AdminConsole({
                             </SelectItem>
                           </SelectContent>
                         </Select>
-                        <p className="text-xs leading-5 text-muted-foreground">
-                          {importStrategyDescription(importStrategy)}
-                        </p>
                       </div>
                     </div>
 
@@ -3370,55 +3308,6 @@ export function AdminConsole({
                       </p>
                     </div>
 
-                    <div className="mt-4 overflow-hidden rounded-lg border border-border bg-white">
-                      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-                        <span className="text-sm font-medium">
-                          Cột dữ liệu chuẩn
-                        </span>
-                        <Badge className="rounded-lg" variant="outline">
-                          {standardStatementColumns.length} cột
-                        </Badge>
-                      </div>
-                      <div className="max-h-[360px] overflow-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Cột</TableHead>
-                              <TableHead>Map</TableHead>
-                              <TableHead>Status</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {standardStatementColumns.map((column) => (
-                              <TableRow key={column.key}>
-                                <TableCell className="font-medium">
-                                  <span className="block">{column.label}</span>
-                                  {column.required ? (
-                                    <span className="mt-1 block text-xs text-[#a26400]">
-                                      Bắt buộc
-                                    </span>
-                                  ) : null}
-                                </TableCell>
-                                <TableCell className="min-w-[180px] text-xs leading-5 text-muted-foreground">
-                                  {column.mapping}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge
-                                    className={standardColumnStorageClass(
-                                      column.storage,
-                                    )}
-                                    variant="secondary"
-                                  >
-                                    {standardColumnStorageLabel(column.storage)}
-                                  </Badge>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-
                     <Button
                       className="mt-4 h-10 w-full bg-[#071118] text-white hover:bg-[#111827]"
                       disabled={
@@ -3450,14 +3339,7 @@ export function AdminConsole({
 
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Statement ledger
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Quản lý statement
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">Quản lý báo cáo</h2>
                       <RefreshCw
                         className={`size-5 text-primary ${
                           operationsState === 'loading' ? 'animate-spin' : ''
@@ -3515,12 +3397,16 @@ export function AdminConsole({
                           </span>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">Tất cả status</SelectItem>
-                          <SelectItem value="published">Published</SelectItem>
-                          <SelectItem value="locked">Locked</SelectItem>
-                          <SelectItem value="replaced">Hidden</SelectItem>
-                          <SelectItem value="draft">Draft</SelectItem>
-                          <SelectItem value="validating">Validating</SelectItem>
+                          <SelectItem value="all">Tất cả trạng thái</SelectItem>
+                          <SelectItem value="published">
+                            Đã phát hành
+                          </SelectItem>
+                          <SelectItem value="locked">Đã khóa</SelectItem>
+                          <SelectItem value="replaced">Đã ẩn</SelectItem>
+                          <SelectItem value="draft">Bản nháp</SelectItem>
+                          <SelectItem value="validating">
+                            Đang kiểm tra
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -3529,7 +3415,7 @@ export function AdminConsole({
                       <TableHeader>
                         <TableRow>
                           <TableHead className="min-w-[112px]">
-                            Client
+                            Khách hàng
                           </TableHead>
                           <TableHead className="min-w-[88px]">Kỳ</TableHead>
                           <TableHead className="min-w-[120px]">
@@ -3566,7 +3452,7 @@ export function AdminConsole({
                                 <dl className="space-y-1 text-xs">
                                   <div className="flex items-center justify-between gap-3">
                                     <dt className="text-muted-foreground">
-                                      Rows
+                                      Số dòng
                                     </dt>
                                     <dd className="font-medium tabular-nums">
                                       {formatNumber(statement.rowCount)}
@@ -3574,7 +3460,7 @@ export function AdminConsole({
                                   </div>
                                   <div className="flex items-center justify-between gap-3">
                                     <dt className="text-muted-foreground">
-                                      Units
+                                      Lượt khai thác
                                     </dt>
                                     <dd className="font-medium tabular-nums">
                                       {formatNumber(statement.units)}
@@ -3670,14 +3556,9 @@ export function AdminConsole({
                 <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section className="music-card p-4 md:p-5">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Guaranteed Minimum
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Tạo GM theo bài hát
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">
+                        Tạo GM theo bài hát
+                      </h2>
                       <Music2 className="size-6 text-primary" />
                     </div>
 
@@ -3807,23 +3688,18 @@ export function AdminConsole({
 
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          GM ledger
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Theo dõi recoup
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">
+                        Theo dõi khấu trừ GM
+                      </h2>
                       <Badge className="rounded-lg bg-[#e7fbf7] text-[#00796f]">
-                        {formatNumber(activeGuaranteeCount)} active
+                        {formatNumber(activeGuaranteeCount)} đang hoạt động
                       </Badge>
                     </div>
 
                     <div className="mb-4 grid gap-3 md:grid-cols-3">
                       <div className="border-t border-border pt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Balance
+                          Còn lại
                         </p>
                         <p className="font-display mt-2 truncate text-xl font-semibold">
                           {formatMoney(totalGuaranteeBalance)}
@@ -3831,7 +3707,7 @@ export function AdminConsole({
                       </div>
                       <div className="border-t border-border pt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Recouped
+                          Đã khấu trừ
                         </p>
                         <p className="font-display mt-2 truncate text-xl font-semibold">
                           {formatMoney(totalGuaranteeRecouped)}
@@ -3839,7 +3715,7 @@ export function AdminConsole({
                       </div>
                       <div className="border-t border-border pt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          GM Count
+                          Số khoản GM
                         </p>
                         <p className="font-display mt-2 text-xl font-semibold">
                           {formatNumber(guarantees.length)}
@@ -4022,14 +3898,9 @@ export function AdminConsole({
                 <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section className="music-card p-4 md:p-5">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Settlement reminder
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Nhắc đối soát ngày 15
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">
+                        Nhắc đối soát ngày 15
+                      </h2>
                       <BellRing className="size-6 text-primary" />
                     </div>
 
@@ -4071,7 +3942,7 @@ export function AdminConsole({
                         variant="outline"
                       >
                         <EyeOff className="size-4" />
-                        Dry-run
+                        Xem trước
                       </Button>
                       <Button
                         className="h-10 justify-center bg-[#071118] text-white hover:bg-[#111827]"
@@ -4105,7 +3976,7 @@ export function AdminConsole({
                         variant="outline"
                       >
                         <RefreshCw className="size-4" />
-                        Retry lỗi
+                        Gửi lại email lỗi
                       </Button>
                     </div>
 
@@ -4135,16 +4006,11 @@ export function AdminConsole({
 
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Recipient preview
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Danh sách nhận email
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">
+                        Danh sách nhận email
+                      </h2>
                       <Badge className="rounded-lg bg-[#e7fbf7] text-[#00796f]">
-                        {formatNumber(reminderRecipients.length)} accounts
+                        {formatNumber(reminderRecipients.length)} tài khoản
                       </Badge>
                     </div>
 
@@ -4152,11 +4018,11 @@ export function AdminConsole({
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Client</TableHead>
-                            <TableHead>Account</TableHead>
-                            <TableHead>Statement</TableHead>
-                            <TableHead>Payable</TableHead>
-                            <TableHead>Settlement</TableHead>
+                            <TableHead>Khách hàng</TableHead>
+                            <TableHead>Tài khoản</TableHead>
+                            <TableHead>Báo cáo</TableHead>
+                            <TableHead>Phải trả</TableHead>
+                            <TableHead>Đối soát</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -4225,7 +4091,7 @@ export function AdminConsole({
                                 className="h-24 text-center text-sm text-muted-foreground"
                                 colSpan={5}
                               >
-                                Chưa có tài khoản client active.
+                                Chưa có tài khoản khách hàng đang hoạt động.
                               </TableCell>
                             </TableRow>
                           )}
@@ -4241,14 +4107,9 @@ export function AdminConsole({
 
                 <section className="music-card p-4 md:p-5">
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Send log
-                      </p>
-                      <h2 className="mt-1 text-lg font-semibold">
-                        Lịch sử reminder
-                      </h2>
-                    </div>
+                    <h2 className="text-lg font-semibold">
+                      Lịch sử gửi nhắc đối soát
+                    </h2>
                     <Mail className="size-5 text-primary" />
                   </div>
 
@@ -4259,11 +4120,11 @@ export function AdminConsole({
                           <TableHead>Thời gian</TableHead>
                           <TableHead>Loại</TableHead>
                           <TableHead>Kỳ</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Target</TableHead>
-                          <TableHead>Sent</TableHead>
-                          <TableHead>Failed</TableHead>
-                          <TableHead>Missing config</TableHead>
+                          <TableHead>Trạng thái</TableHead>
+                          <TableHead>Người nhận</TableHead>
+                          <TableHead>Đã gửi</TableHead>
+                          <TableHead>Lỗi</TableHead>
+                          <TableHead>Thiếu cấu hình</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -4305,7 +4166,7 @@ export function AdminConsole({
                               className="h-24 text-center text-sm text-muted-foreground"
                               colSpan={8}
                             >
-                              Chưa có lịch sử reminder.
+                              Chưa có lịch sử gửi nhắc đối soát.
                             </TableCell>
                           </TableRow>
                         )}
@@ -4322,14 +4183,9 @@ export function AdminConsole({
                 <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section className="music-card p-4 md:p-5">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Email production
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Trạng thái gửi mail
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">
+                        Trạng thái gửi email
+                      </h2>
                       {emailStatus?.productionReady ? (
                         <CheckCircle2 className="size-6 text-[#00796f]" />
                       ) : (
@@ -4341,7 +4197,7 @@ export function AdminConsole({
                       <div className="border-t border-border pt-3">
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            Production
+                            Hệ thống chính
                           </span>
                           <Badge
                             className={emailReadyClass(
@@ -4362,7 +4218,7 @@ export function AdminConsole({
 
                       <div className="border-t border-border pt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          From
+                          Địa chỉ gửi
                         </p>
                         <p className="mt-2 truncate text-sm font-medium">
                           {emailStatus?.fromAddress ?? 'Chưa cấu hình'}
@@ -4384,8 +4240,8 @@ export function AdminConsole({
                             variant="secondary"
                           >
                             {emailStatus?.apiKeyConfigured
-                              ? 'Configured'
-                              : 'Missing'}
+                              ? 'Đã cấu hình'
+                              : 'Chưa cấu hình'}
                           </Badge>
                         </div>
                       </div>
@@ -4429,14 +4285,9 @@ export function AdminConsole({
 
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          Domain health
-                        </p>
-                        <h2 className="mt-1 text-lg font-semibold">
-                          Resend, SPF/DKIM/DMARC
-                        </h2>
-                      </div>
+                      <h2 className="text-lg font-semibold">
+                        Resend, SPF/DKIM/DMARC
+                      </h2>
                       <Badge
                         className={emailReadyClass(
                           Boolean(emailStatus?.sendingReady),
@@ -4444,15 +4295,15 @@ export function AdminConsole({
                         variant="secondary"
                       >
                         {emailStatus?.sendingReady
-                          ? 'Sending ready'
-                          : 'Check needed'}
+                          ? 'Sẵn sàng gửi'
+                          : 'Cần kiểm tra'}
                       </Badge>
                     </div>
 
                     <div className="mb-4 grid gap-3 md:grid-cols-3">
                       <div className="border-t border-border pt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Resend domain
+                          Tên miền Resend
                         </p>
                         <p className="mt-2 truncate text-sm font-medium">
                           {emailStatus?.resendDomain?.name ?? '-'}
@@ -4470,7 +4321,7 @@ export function AdminConsole({
                       </div>
                       <div className="border-t border-border pt-3">
                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Sending
+                          Trạng thái gửi
                         </p>
                         <p className="mt-2 text-sm font-medium">
                           {emailStatus?.resendDomain?.sending ?? '-'}
@@ -4987,12 +4838,7 @@ function ActivityLogPanel({
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Audit trail
-          </p>
-          <h2 className="mt-1 text-lg font-semibold">Hoạt động gần đây</h2>
-        </div>
+        <h2 className="text-lg font-semibold">Hoạt động gần đây</h2>
         <Activity className="size-5 text-primary" />
       </div>
 
