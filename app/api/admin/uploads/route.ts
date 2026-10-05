@@ -1,4 +1,8 @@
 import { env } from 'cloudflare:workers';
+import {
+  findFinalizedSuccessor,
+  readOpeningBalance as readPreviousClosingBalance,
+} from '@/lib/statement-balances';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
@@ -602,6 +606,18 @@ async function prepareUploadTargets({
       const existing = await findExistingStatement(db, reportPeriodId);
       const statementExists = Boolean(existing?.sourceUploadId);
 
+      const successor = await findFinalizedSuccessor(
+        db,
+        target.client.id,
+        period,
+      );
+      if (successor) {
+        return jsonError(
+          `${target.client.name}: kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi thay đổi số dư kỳ trước.`,
+          409,
+        );
+      }
+
       if (existing?.status === 'locked') {
         return jsonError(
           `${target.client.name}, ${periodDisplayLabel(period)} đang bị khóa. Hãy mở khóa trước khi thay đổi dữ liệu.`,
@@ -1044,9 +1060,9 @@ async function buildImportStatements({
       reservesWithheld,
       revenue: parsedStatement.revenue,
     });
-    const closing = settlement.carryForward;
+    const closing = settlement.payable;
     settlementResults.push({
-      carryForward: settlement.carryForward,
+      carryForward: closing,
       currency: parsedStatement.currency,
       guaranteeRecouped: costs,
       guaranteeRecoupments: guaranteePlan.recoupments.map((recoupment) => ({
@@ -1056,7 +1072,7 @@ async function buildImportStatements({
         status: recoupment.status,
         trackTitle: recoupment.trackTitle,
       })),
-      paidAmount: settlement.paidAmount,
+      paidAmount: 0,
       payable: settlement.payable,
       revenue: parsedStatement.revenue,
       status: settlement.status,
@@ -1349,52 +1365,6 @@ async function runBatchInChunks(
   for (let index = 0; index < statements.length; index += IMPORT_BATCH_SIZE) {
     await db.batch(statements.slice(index, index + IMPORT_BATCH_SIZE));
   }
-}
-
-async function readPreviousClosingBalance(
-  db: D1Database,
-  clientId: string,
-  period: string,
-) {
-  const previous = await db
-    .prepare(
-      `SELECT
-         s.opening_balance AS opening,
-         s.net_revenue AS revenue,
-         s.net_costs AS costs,
-         s.reserves_withheld AS reservesWithheld,
-         s.reserves_released AS reservesReleased,
-         s.closing_balance AS closing
-       FROM statements s
-       JOIN report_periods rp
-         ON rp.id = s.report_period_id
-       WHERE s.client_id = ?
-         AND rp.client_id = ?
-         AND rp.currency = 'VND'
-         AND rp.status IN ('published', 'locked')
-         AND rp.period < ?
-       ORDER BY rp.period DESC
-       LIMIT 1`,
-    )
-    .bind(clientId, clientId, period)
-    .first<{
-      closing: number;
-      costs: number;
-      opening: number;
-      reservesReleased: number;
-      reservesWithheld: number;
-      revenue: number;
-    }>();
-
-  if (!previous) return 0;
-
-  return summarizeSettlement({
-    costs: Number(previous.costs) || 0,
-    opening: Number(previous.opening) || 0,
-    reservesReleased: Number(previous.reservesReleased) || 0,
-    reservesWithheld: Number(previous.reservesWithheld) || 0,
-    revenue: Number(previous.revenue) || 0,
-  }).carryForward;
 }
 
 async function readCustomerUploadSummary(db: D1Database, clientId: string) {

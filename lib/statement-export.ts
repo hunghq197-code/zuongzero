@@ -1,4 +1,5 @@
 import { periodDisplayLabel } from '@/lib/reporting-periods';
+import { readStatementBalances } from '@/lib/statement-balances';
 import {
   summarizeSettlement,
   summarizeStatementPayment,
@@ -255,9 +256,14 @@ export async function getStatementExportData(
       : Promise.resolve({ results: [] as StatementExportLineItemRow[] }),
   ]);
 
+  const balance = (await readStatementBalances(db, statement.clientId)).get(
+    reportPeriodId,
+  );
+  const openingBalance =
+    balance?.opening ?? numberValue(statement.openingBalance);
   const settlement = summarizeSettlement({
     costs: numberValue(statement.netCosts),
-    opening: numberValue(statement.openingBalance),
+    opening: openingBalance,
     reservesReleased: numberValue(statement.reservesReleased),
     reservesWithheld: numberValue(statement.reservesWithheld),
     revenue: numberValue(statement.netRevenue),
@@ -301,19 +307,19 @@ export async function getStatementExportData(
     sourceObjectKey: statement.sourceObjectKey,
     sourceUploadMode: parseSourceUploadMode(statement.sourceValidationSummary),
     settlement: {
-      carryForward: settlement.carryForward,
+      carryForward: balance?.closing ?? settlement.carryForward,
       paidAt: payment.status === 'paid' ? statement.paidAt : null,
-      paidAmount: payment.paidAmount,
+      paidAmount: balance?.paid ?? payment.paidAmount,
       paymentStatus: payment.status,
       payable: settlement.payable,
       status: settlement.status,
     },
     statement: {
-      closingBalance: settlement.carryForward,
+      closingBalance: balance?.closing ?? settlement.carryForward,
       grossRevenue: numberValue(statement.grossRevenue),
       netCosts: numberValue(statement.netCosts),
       netRevenue: numberValue(statement.netRevenue),
-      openingBalance: numberValue(statement.openingBalance),
+      openingBalance,
       reservesReleased: numberValue(statement.reservesReleased),
       reservesWithheld: numberValue(statement.reservesWithheld),
       rowCount: numberValue(statement.rowCount),

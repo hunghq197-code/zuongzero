@@ -68,6 +68,10 @@ import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import { downloadStatementExport } from '@/lib/statement-export-download';
 import type { TrackGuaranteeRow } from '@/lib/guarantees';
 import { type StatementLineItem } from '@/lib/statement-line-items';
+import {
+  aggregateSalesPeriods,
+  type SalesPeriodSourceRow,
+} from '@/lib/sales-periods';
 
 declare global {
   interface Document {
@@ -118,12 +122,6 @@ function formatMoney(value: number) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('vi-VN').format(value);
-}
-
-function formatRate(value: number | null) {
-  if (value === null) return '-';
-  const normalized = Math.abs(value) <= 1 ? value * 100 : value;
-  return `${normalized.toFixed(2)}%`;
 }
 
 function vietnamesePeriodLabel(period: string) {
@@ -187,8 +185,6 @@ function makeQuarterFinancialSummary(activePeriod: StatementPeriod) {
     activePeriod.grossRevenue - activePeriod.revenue,
     0,
   );
-  const totalDeductions =
-    revenueReduction + activePeriod.costs + activePeriod.reservesWithheld;
   const quarterNet =
     activePeriod.revenue -
     activePeriod.costs -
@@ -198,8 +194,7 @@ function makeQuarterFinancialSummary(activePeriod: StatementPeriod) {
   return {
     quarterNet,
     revenueReduction,
-    totalDeductions,
-    unpaid: Math.max(activePeriod.payable - activePeriod.paid, 0),
+    totalBalance: activePeriod.opening + quarterNet,
   };
 }
 
@@ -254,50 +249,16 @@ type SourceInsights = {
   configurations: AggregatedLineItem[];
   contentTypes: AggregatedLineItem[];
   contracts: AggregatedLineItem[];
-  financeRows: Array<{
-    label: string;
-    value: string;
-  }>;
   releaseArtists: AggregatedLineItem[];
-  salesPeriods: AggregatedLineItem[];
   trackIdentities: TrackIdentityRow[];
 };
 
 function makeSourceInsights(items: StatementLineItem[]): SourceInsights {
-  const grossIncomeRows = items.filter(
-    (item) => typeof item.grossIncome === 'number',
-  );
-  const royaltyRateRows = items.filter(
-    (item) => typeof item.royaltyRate === 'number',
-  );
-  const grossIncome = grossIncomeRows.reduce(
-    (total, item) => total + (item.grossIncome ?? 0),
-    0,
-  );
-  const averageRoyaltyRate =
-    royaltyRateRows.length > 0
-      ? royaltyRateRows.reduce(
-          (total, item) => total + (item.royaltyRate ?? 0),
-          0,
-        ) / royaltyRateRows.length
-      : null;
-
   return {
     configurations: aggregateLineItems(items, (item) => item.configuration),
     contentTypes: aggregateLineItems(items, (item) => item.contentType),
     contracts: aggregateLineItems(items, (item) => item.contractName),
-    financeRows: [
-      {
-        label: 'Thu nhập gộp',
-        value: grossIncomeRows.length > 0 ? formatMoney(grossIncome) : '-',
-      },
-      {
-        label: 'Tỷ lệ bản quyền trung bình',
-        value: formatRate(averageRoyaltyRate),
-      },
-    ],
     releaseArtists: aggregateLineItems(items, (item) => item.releaseArtist),
-    salesPeriods: aggregateLineItems(items, (item) => item.salesPeriod),
     trackIdentities: makeTrackIdentityRows(items),
   };
 }
@@ -373,9 +334,7 @@ function hasSourceInsights(insights: SourceInsights) {
     insights.contentTypes.length > 0 ||
     insights.contracts.length > 0 ||
     insights.releaseArtists.length > 0 ||
-    insights.salesPeriods.length > 0 ||
-    insights.trackIdentities.length > 0 ||
-    insights.financeRows.some((row) => row.value !== '-')
+    insights.trackIdentities.length > 0
   );
 }
 
@@ -386,6 +345,7 @@ export function RoyaltyDashboard({
   clientName,
   guarantees = [],
   lineItemsByPeriod = {},
+  salesPeriodsByPeriod = {},
   statementPeriods: statementPeriodsProp,
   trend: trendProp,
   userEmail,
@@ -396,6 +356,7 @@ export function RoyaltyDashboard({
   clientName: string;
   guarantees?: TrackGuaranteeRow[];
   lineItemsByPeriod?: Record<string, StatementLineItem[]>;
+  salesPeriodsByPeriod?: Record<string, SalesPeriodSourceRow[]>;
   statementPeriods?: StatementPeriod[];
   trend?: RevenueTrendPoint[];
   userEmail: string;
@@ -465,7 +426,17 @@ export function RoyaltyDashboard({
     () => makeSourceInsights(activeLineItems),
     [activeLineItems],
   );
-  const shouldShowSourceInsights = hasSourceInsights(sourceInsights);
+  const salesPeriods = useMemo(
+    () =>
+      aggregateSalesPeriods(
+        hasStatements
+          ? (salesPeriodsByPeriod[activePeriod.period] ?? activeLineItems)
+          : [],
+      ),
+    [activePeriod.period, hasStatements, salesPeriodsByPeriod, activeLineItems],
+  );
+  const shouldShowSourceInsights =
+    hasSourceInsights(sourceInsights) || salesPeriods.length > 0;
   const trendData = hasStatements ? dashboardTrend : [];
   const activeGuarantees = useMemo(
     () => guarantees.filter((guarantee) => guarantee.status !== 'archived'),
@@ -725,25 +696,32 @@ export function RoyaltyDashboard({
                 </div>
               </div>
 
-              <div className="grid md:grid-cols-3 md:divide-x md:divide-border">
+              <div className="grid sm:grid-cols-2 xl:grid-cols-4 sm:divide-x sm:divide-border">
                 <FinancialSummaryValue
                   label="Tổng doanh thu"
                   value={formatMoney(activePeriod.grossRevenue)}
                 />
                 <FinancialSummaryValue
-                  label="Tổng giảm trừ"
-                  value={formatMoney(financialSummary.totalDeductions)}
+                  label="Số dư kỳ trước chuyển sang"
+                  value={formatMoney(activePeriod.opening)}
+                />
+                <FinancialSummaryValue
+                  label="Thực nhận trong quý"
+                  value={formatMoney(financialSummary.quarterNet)}
                 />
                 <FinancialSummaryValue
                   emphasized
-                  label="Thực nhận trong quý"
-                  value={formatMoney(financialSummary.quarterNet)}
+                  label="Tổng số dư đến kỳ này"
+                  value={formatMoney(financialSummary.totalBalance)}
                 />
               </div>
 
               <div className="border-t border-border bg-muted/25 px-4 py-4 md:px-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-semibold">Thanh toán</p>
+                  <p className="flex items-center gap-2 font-semibold">
+                    <WalletCards className="size-4 text-primary" />
+                    Thanh toán
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     Ngưỡng chuyển khoản {formatMoney(SETTLEMENT_THRESHOLD_VND)}
                   </p>
@@ -758,8 +736,8 @@ export function RoyaltyDashboard({
                     value={formatMoney(activePeriod.paid)}
                   />
                   <PaymentSummaryValue
-                    label="Còn lại"
-                    value={formatMoney(financialSummary.unpaid)}
+                    label="Số dư chuyển kỳ sau"
+                    value={formatMoney(activePeriod.carryForward)}
                   />
                 </dl>
               </div>
@@ -945,9 +923,13 @@ export function RoyaltyDashboard({
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold">Phân tích doanh thu</h2>
-                <TabsList className="h-auto flex-wrap justify-start">
+                <TabsList className="max-w-full flex-wrap justify-start gap-1 group-data-horizontal/tabs:h-auto">
                   {breakdownSections.map((section) => (
-                    <TabsTrigger key={section.id} value={section.id}>
+                    <TabsTrigger
+                      className="h-8 flex-none"
+                      key={section.id}
+                      value={section.id}
+                    >
                       {section.label}
                     </TabsTrigger>
                   ))}
@@ -969,11 +951,24 @@ export function RoyaltyDashboard({
                 className="grid gap-4 xl:grid-cols-2"
                 key={activePeriod.id}
               >
-                {sourceInsights.salesPeriods.length > 0 ? (
-                  <MiniBreakdownPanel
-                    data={sourceInsights.salesPeriods}
-                    title="Doanh thu theo tháng phát sinh"
-                  />
+                {salesPeriods.length > 0 ? (
+                  <section
+                    aria-labelledby="monthly-revenue-title"
+                    className="music-card min-w-0 p-4 md:p-5"
+                  >
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <h2
+                        className="text-lg font-semibold"
+                        id="monthly-revenue-title"
+                      >
+                        Doanh thu theo tháng phát sinh
+                      </h2>
+                      <Badge className="rounded-lg" variant="outline">
+                        Báo cáo {vietnamesePeriodLabel(activePeriod.period)}
+                      </Badge>
+                    </div>
+                    <RankedBreakdown data={salesPeriods} />
+                  </section>
                 ) : null}
 
                 {sourceInsights.releaseArtists.length > 0 ? (
@@ -1007,8 +1002,6 @@ export function RoyaltyDashboard({
                 {sourceInsights.trackIdentities.length > 0 ? (
                   <TrackIdentityPanel rows={sourceInsights.trackIdentities} />
                 ) : null}
-
-                <SourceFinancePanel rows={sourceInsights.financeRows} />
               </section>
             ) : null}
 
@@ -1124,11 +1117,11 @@ function FinancialSummaryValue({
   value: string;
 }) {
   return (
-    <div className={emphasized ? 'bg-[#eafaf7] p-5' : 'p-5'}>
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <div className={emphasized ? 'min-w-0 bg-[#eafaf7] p-5' : 'min-w-0 p-5'}>
+      <p className="text-xs font-semibold uppercase text-muted-foreground">
         {label}
       </p>
-      <p className="font-display mt-2 break-words text-2xl font-semibold leading-tight md:text-3xl">
+      <p className="font-display mt-2 break-words text-2xl font-semibold leading-tight">
         {value}
       </p>
     </div>
@@ -1289,35 +1282,6 @@ function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
           </TableBody>
         </Table>
         <TablePagination {...page} itemLabel="bài hát" />
-      </div>
-    </section>
-  );
-}
-
-function SourceFinancePanel({ rows }: { rows: SourceInsights['financeRows'] }) {
-  const visibleRows = rows.filter((row) => row.value !== '-');
-  if (visibleRows.length === 0) return null;
-
-  return (
-    <section className="music-card p-4 md:p-5">
-      <h2 className="mb-4 text-lg font-semibold">Chỉ số tài chính bổ sung</h2>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Chỉ số</TableHead>
-              <TableHead>Giá trị</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visibleRows.map((row) => (
-              <TableRow key={row.label}>
-                <TableCell className="font-medium">{row.label}</TableCell>
-                <TableCell>{row.value}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
       </div>
     </section>
   );

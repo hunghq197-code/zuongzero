@@ -91,10 +91,17 @@ export function buildDetailedStatementXlsx(
   const rows = data.lineItems.map((item) =>
     columns.map((column) => sourceLineItemValue(item, column.key)),
   );
-  const sheetXml = worksheetXml(
+  return buildTabularXlsx(
     columns.map((column) => column.label),
     rows,
   );
+}
+
+export function buildTabularXlsx(
+  headers: string[],
+  rows: Array<Array<string | number | null | undefined>> = [],
+) {
+  const sheetXml = worksheetXml(headers, rows);
   const now = new Date().toISOString();
   const archive = zipSync(
     {

@@ -1,5 +1,13 @@
 # Product UX regression checks
 
+## Song Rules And Carry-Forward (2026-10-05)
+
+`npm run test:business` runs 13 isolated D1/R2 business regressions, including the real rule-import and statement-payment routes, snapshot conflicts, Gross Income then GM, carry-forward, export/reminder agreement, and a 5,100-row monthly aggregate. Its identity adapter is injected only by the test bundler and is not an application authentication path.
+
+With the component preview below running on port 3212, run `node tests/browser/royalty-workflow.test.mjs`. It covers Q3/Q2 selection, financial labels/values, rule-file validation/preview/commit, and mobile layouts. Screenshots go to ignored `outputs/royalty-workflow-2026-10-05/`. The `financial` and `rules` fixture views contain synthetic data and mock API calls only.
+
+See `TRACK_RULES_AND_BALANCES_2026-10-05.md` for business decisions, file columns, remaining work and rollout status.
+
 This is a component-only local test harness, not an application route or an authentication bypass. The browser test intercepts admin API requests with mock data. Opening the admin harness without the test runner does not connect it to a database.
 
 Start the isolated preview from the repository root:

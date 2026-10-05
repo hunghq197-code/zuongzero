@@ -1,3 +1,4 @@
+import { readStatementBalances } from '@/lib/statement-balances';
 import {
   breakdownsByCurrency,
   clients as fallbackClients,
@@ -250,8 +251,10 @@ export async function listAdminStatements(
     .bind(...bindings)
     .all<AdminStatementSqlRow>();
 
+  const balances = await readStatementBalances(db, filters.clientId);
   return rows.results.map((row) => {
-    const opening = Number(row.opening) || 0;
+    const balance = balances.get(row.reportPeriodId);
+    const opening = balance?.opening ?? (Number(row.opening) || 0);
     const revenue = Number(row.revenue) || 0;
     const costs = Number(row.costs) || 0;
     const settlement = summarizeSettlement({
@@ -268,11 +271,12 @@ export async function listAdminStatements(
 
     return {
       ...row,
-      carryForward: settlement.carryForward,
-      closing: settlement.carryForward,
+      opening,
+      carryForward: balance?.closing ?? settlement.carryForward,
+      closing: balance?.closing ?? settlement.carryForward,
       costs,
       currency: 'VND',
-      paid: payment.paidAmount,
+      paid: balance?.paid ?? payment.paidAmount,
       paidAt: payment.status === 'paid' ? row.paidAt : null,
       paymentStatus: payment.status,
       payable: settlement.payable,

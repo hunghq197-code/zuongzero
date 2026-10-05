@@ -1,4 +1,6 @@
 import { env } from 'cloudflare:workers';
+import { readStatementBalances } from '@/lib/statement-balances';
+import type { SalesPeriodSourceRow } from '@/lib/sales-periods';
 
 import {
   breakdownsByCurrency,
@@ -35,6 +37,7 @@ export type ClientDashboardData = {
   breakdownsByPeriod: DashboardBreakdownsByPeriod;
   guarantees: TrackGuaranteeRow[];
   lineItemsByPeriod: Record<string, StatementLineItem[]>;
+  salesPeriodsByPeriod: Record<string, SalesPeriodSourceRow[]>;
   statementPeriods: StatementPeriod[];
   trend: RevenueTrendPoint[];
 };
@@ -123,8 +126,10 @@ export async function getClientDashboardData({
     }),
   ]);
 
+  const balances = await readStatementBalances(env.DB, clientId);
   const statementPeriods = statementRows.results.map((row) => {
-    const opening = Number(row.opening) || 0;
+    const balance = balances.get(row.id);
+    const opening = balance?.opening ?? (Number(row.opening) || 0);
     const revenue = Number(row.revenue) || 0;
     const costs = Number(row.costs) || 0;
     const settlement = summarizeSettlement({
@@ -140,17 +145,17 @@ export async function getClientDashboardData({
     );
 
     return {
-      carryForward: settlement.carryForward,
+      carryForward: balance?.closing ?? settlement.carryForward,
       clientId,
       clientName: row.clientName || clientName,
-      closing: settlement.carryForward,
+      closing: balance?.closing ?? settlement.carryForward,
       costs,
       currency: row.currency,
       grossRevenue: Number(row.grossRevenue) || 0,
       id: row.id,
       label: periodDisplayLabel(row.period),
       opening,
-      paid: payment.paidAmount,
+      paid: balance?.paid ?? payment.paidAmount,
       paidAt: payment.status === 'paid' ? row.paidAt : null,
       paymentStatus: payment.status,
       payable: settlement.payable,
@@ -170,13 +175,14 @@ export async function getClientDashboardData({
       breakdownsByPeriod: {},
       guarantees,
       lineItemsByPeriod: {},
+      salesPeriodsByPeriod: {},
       statementPeriods: [],
       trend: [],
     };
   }
 
   const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
-  const [breakdownRows, lineItemRows] = await Promise.all([
+  const [breakdownRows, lineItemRows, salesPeriodRows] = await Promise.all([
     env.DB.prepare(
       `SELECT
          rp.period,
@@ -244,12 +250,32 @@ export async function getClientDashboardData({
           .bind(clientId, clientId)
           .all<StatementLineItemSqlRow>()
       : Promise.resolve({ results: [] as StatementLineItemSqlRow[] }),
+    lineItemsTableReady
+      ? env.DB.prepare(`SELECT rp.period, li.sales_period AS salesPeriod,
+          li.period_end_date AS periodEndDate, li.start_date AS startDate,
+          SUM(li.net_payable) AS netPayable, SUM(li.sales) AS sales, COUNT(*) AS rowCount
+        FROM statement_line_items li JOIN report_periods rp ON rp.id = li.report_period_id
+        WHERE li.client_id = ? AND rp.client_id = ?
+          AND rp.status IN ('published', 'locked') AND rp.currency = 'VND'
+        GROUP BY rp.period, li.sales_period, li.period_end_date, li.start_date
+        ORDER BY rp.period DESC, li.sales_period ASC`)
+          .bind(clientId, clientId)
+          .all<SalesPeriodSourceRow & { period: string }>()
+      : Promise.resolve({
+          results: [] as (SalesPeriodSourceRow & { period: string })[],
+        }),
   ]);
+
+  const salesPeriodsByPeriod: Record<string, SalesPeriodSourceRow[]> = {};
+  for (const row of salesPeriodRows.results) {
+    (salesPeriodsByPeriod[row.period] ??= []).push(row);
+  }
 
   return {
     breakdownsByPeriod: mapBreakdownsByPeriod(breakdownRows.results),
     guarantees,
     lineItemsByPeriod: mapLineItemsByPeriod(lineItemRows.results),
+    salesPeriodsByPeriod,
     statementPeriods,
     trend: mapTrend(statementPeriods),
   };
@@ -271,6 +297,7 @@ function staticDashboardData(clientId: string): ClientDashboardData {
         : {},
     guarantees: [],
     lineItemsByPeriod: {},
+    salesPeriodsByPeriod: {},
     statementPeriods,
     trend: statementPeriods.length > 0 ? revenueTrend : [],
   };

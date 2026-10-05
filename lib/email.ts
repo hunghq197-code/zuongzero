@@ -263,7 +263,7 @@ export async function sendSettlementReminderEmail(
   const recipientName = input.displayName || input.email;
   const settlementLine =
     input.settlementStatus === 'paid'
-      ? `Số tiền đủ điều kiện thanh toán: ${formatVnd(input.paidAmount)}.`
+      ? `Tổng đối soát: ${formatVnd(input.payable)}. Đã thanh toán: ${formatVnd(input.paidAmount)}. Số dư chưa thanh toán: ${formatVnd(input.carryForward)}.`
       : `Số dư hiện chuyển sang kỳ sau: ${formatVnd(input.carryForward)}.`;
   const subject = `Nhắc đối soát ${input.periodLabel} - Zuong Zero Artist Portal`;
   const text = [

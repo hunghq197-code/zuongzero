@@ -35,6 +35,7 @@ test('all admin API routes require signed-in admin authorization', () => {
     'app/api/admin/overview/route.ts',
     'app/api/admin/reminders/route.ts',
     'app/api/admin/royalty-rules/route.ts',
+    'app/api/admin/royalty-rules/import/route.ts',
     'app/api/admin/statements/route.ts',
     'app/api/admin/statements/[reportPeriodId]/export/route.ts',
     'app/api/admin/uploads/route.ts',

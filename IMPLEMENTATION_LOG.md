@@ -2,6 +2,36 @@
 
 Cap nhat ngay 2026-10-05, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
+## Phat hanh bai hat va so du len production - 2026-10-05
+
+- DEPLOYED theo yeu cau deploy ban chinh. Chi Cloudflare Worker `royalty-dashboard`, domain `https://artistportal.zuongzeroent.com`; khong deploy ChatGPT Sites, khong doi DNS.
+- Version moi: `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`. Version truoc deploy da doc tu Cloudflare: `e8c5fe1b-a51c-4ce9-bdd8-89239dba0738` (diem rollback code, khong rollback D1/R2).
+- Lenh: `node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`. Giu vars/secrets, bindings D1/R2 va cron `0 2 15 * *`; Worker startup 12 ms.
+- Source la working tree tren commit goc `1ef3e416182814bc16c75ecef3d752c337084e2a`, CHUA commit/push ban nay. SHA256 `dist/server/index.js`: `a81d5dae5a6e57b82b317847215f054b6d94746102b38e5cc934d6e90e59232d`.
+- Truoc deploy: chay lai `npm test` 81/81, TypeScript, lint hai file vua chinh va build dat. Chuyen XLSX template writer sang dynamic import sau auth de khong nap PDF/font library vao moi request; them 2 smoke checks GET/POST import ty le.
+- Sau deploy: `npm run test:production` 16/16 tren domain chinh; 20/20 request trang auth bo sung dat, khong gap trang loi tai nguyen. Hash 3 assets admin/client dashboard/CSS tren domain khop tung byte ban build; HTML login tham chieu CSS moi.
+- Token dung account Cloudflare `2b6f84a024bc49c8d450f9bead71a702`, deploy thanh cong, nhung truy van chi doc schema D1 qua CLI bi tu choi `7403`. Khong co migration moi; khong sua schema/du lieu D1/R2 hay thay secrets. Schema hien co duoc ghi nhan trong lich su phat hanh, chua xac minh lai bang CLI trong luot nay.
+- Chua test lai phien admin/client that, import/mark paid/export co du lieu hay gui OTP/reminder tren production. Kiem thu nghiep vu da chay trong Miniflare rieng va demo desktop/mobile; staging mail va doi chieu workbook that van con trong danh sach viec tiep theo.
+- Ban giao va cac hang muc con lai: `TRACK_RULES_AND_BALANCES_2026-10-05.md`. Can commit/push de may khac lay duoc source dung voi release nay.
+
+## Bai hat, ty le chia va so du chuyen quy - 2026-10-05
+
+- DONE LOCAL: gan truoc khach hang voi ISRC qua `track_royalty_rules`; them tai mau XLSX, preview va xac nhan import hang loat trong tab Ty le chia. Phan tram tinh tren Gross Income, sau do moi tru GM, theo xac nhan cua nguoi dung.
+- DONE LOCAL: bo `Tong giam tru` va `Chi so tai chinh bo sung` tren dashboard client; hien so du ky truoc, thuc nhan quy, tong doi soat va so du chuyen ky sau. Sua tabs mobile bi chong len chart.
+- DONE LOCAL: tach quy bao cao khoi thang phat sinh, chuan hoa thang/date/Excel serial va tong hop SQL tren toan bo dong du lieu cho chart thang (khong con cat o 5.000 dong). Khong doi du lieu phat sinh Q2 thanh Q3 neu file goc ghi Q2.
+- DONE LOCAL: so du chuyen quy dua tren trang thai thanh toan thuc te, khong tu coi khoan du 1 trieu la da tra. Dong bo dashboard admin/client, import, export va reminder. Giu nguyen so tien thanh toan lich su; chan thay doi ky truoc neu ky sau da tra/da khoa.
+- DONE LOCAL: doc XLSX co namespace prefix va format percentage; import ty le kiem tra lai snapshot trong transaction D1, khong luu mot phan khi file loi/preview cu.
+- VERIFIED: `npm test` 81/81 (35 unit + 15 contracts + 18 auth + 13 business); TypeScript, build Cloudflare va 2 browser runners desktop/mobile dat. Lint source thay doi va test moi dat; lint ca file static cu van co `no-floating-promises` ton tai tu truoc.
+- Giai doan trien khai local chua deploy/push/commit. Sau do da deploy theo xac nhan nguoi dung, xem muc phat hanh ngay ben tren; van chua commit/push. Khong gui email that hay sua D1/R2 production.
+- Tai lieu tiep tuc cong viec, dinh dang file, han che va cac viec chua lam: `TRACK_RULES_AND_BALANCES_2026-10-05.md`. Du an local dang chay cong 3213; preview test component cong 3212 khong phai site production.
+
+## Dong bo source va doc tai lieu - 2026-10-05
+
+- DONE: `git pull --ff-only origin main` cap nhat ban clone hien co tu `1af779c` len `1ef3e41`; working tree sach truoc khi ghi nhat ky nay.
+- Da doc day du `IMPLEMENTATION_LOG.md`, `PRODUCT_REVIEW_2026-10-05.md`, `STAGING.md`, `STAGING_TEST_REPORT_2026-09-22.md` va `tests/browser/README.md`.
+- Theo tai lieu phat hanh, ban gioi han xac thuc da deploy production version `e8c5fe1b-a51c-4ce9-bdd8-89239dba0738`, test dat 68/68 va smoke 14/14. Luot dong bo nay khong chay lai test hoac kiem tra Cloudflare truc tiep, khong deploy/commit/push.
+- `lib/xlsx-royalty-parser.ts` khong thay doi so voi `1af779c`. Loi import nguoi dung bao ngay 2026-09-29 van chua duoc xac dinh tren workbook gap loi; can dung dung file de tai hien. Bao cao staging van ghi nhan han che namespace-prefixed OOXML.
+
 ## Muc tieu san pham
 
 Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh vuc media/music. Data khong do khach hang upload. Admin/super admin tai file Excel theo tung khach hang va tung quy; khach hang chi dang nhap de xem dashboard/statement da publish.
@@ -45,7 +75,7 @@ Xay dung Zuong Zero Artist Portal de quan ly royalty cho khach hang trong linh v
 - Ky doi soat dung quy lich duong, timezone UTC+7, ap dung dong bo cho admin va client.
 - Trang khach hang ho tro tim kiem, loc trang thai, sua thong tin, archive, xoa.
 - Trang statement ho tro upload .xlsx theo tung khach hang/quy hoac file tong nhieu ma khach hang, replace neu upload nham, publish/unpublish/lock/delete.
-- Statement tu dong tinh doi soat theo nguong 1.000.000 VND: du nguong thi da thanh toan, chua du nguong thi chuyen so du sang quy sau.
+- Statement tinh nguong 1.000.000 VND de xac dinh du dieu kien thanh toan; chi admin xac nhan moi la da thanh toan. Ban sua local 2026-10-05 chuyen moi so du chua tra sang quy sau, ke ca khoan da du nguong.
 - Tab GM ho tro tao Guaranteed Minimum theo khach hang + bai hat, theo doi tong GM, da recoup, balance con lai, archive/reactivate.
 - Khi upload statement, neu track trong file trung voi GM active thi doanh thu track do duoc tru dan vao balance GM; khoan tru hien thi o cot GM/net costs.
 - Khi replace/xoa statement, recoupment cu cua ky do duoc reverse de balance GM khong bi tru lap.

@@ -4143,7 +4143,7 @@ export function AdminConsole({
                                     </span>
                                     <span className="text-xs text-muted-foreground">
                                       {recipient.settlementStatus === 'paid'
-                                        ? formatMoney(recipient.paidAmount)
+                                        ? formatMoney(recipient.payable)
                                         : formatMoney(recipient.carryForward)}
                                     </span>
                                   </TableCell>

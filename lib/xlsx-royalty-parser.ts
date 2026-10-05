@@ -17,7 +17,73 @@ const BREAKDOWN_LIMIT = 12;
 type SheetRow = {
   cells: string[];
   index: number;
+  metadata?: Record<number, XlsxCellMetadata>;
 };
+
+export type XlsxCellMetadata = {
+  formula: boolean;
+  percentage: boolean;
+  type: string;
+};
+
+// Importers can inspect cell formats without changing the revenue parser's raw values.
+export function readXlsxImportSheets(buffer: ArrayBuffer) {
+  let expandedBytes = 0;
+  let entries = 0;
+  const files = unzipSync(new Uint8Array(buffer), {
+    filter(entry) {
+      expandedBytes += entry.originalSize;
+      entries += 1;
+      if (expandedBytes > 16 * 1024 * 1024 || entries > 200) {
+        throw new Error('Workbook vượt giới hạn giải nén (16 MB / 200 mục).');
+      }
+      return /\.(xml|rels)$/.test(entry.name) && entry.name.startsWith('xl/');
+    },
+  });
+  const sharedStrings = parseSharedStrings(
+    readZipText(files, 'xl/sharedStrings.xml'),
+  );
+  const styles = readZipText(files, 'xl/styles.xml') ?? '';
+  const formats = new Map<number, string>();
+  for (const match of styles.matchAll(
+    /<(?:[\w.-]+:)?numFmt\b([^>]*)\/?\s*>/g,
+  )) {
+    const attrs = parseAttributes(match[1]);
+    formats.set(Number(attrs.numFmtId), attrs.formatCode ?? '');
+  }
+  const percentageStyles = Array.from(
+    (
+      styles.match(
+        /<(?:[\w.-]+:)?cellXfs\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?cellXfs>/,
+      )?.[1] ?? ''
+    ).matchAll(/<(?:[\w.-]+:)?xf\b([^>]*)>/g),
+    (match) => {
+      const formatId = Number(parseAttributes(match[1]).numFmtId);
+      const format = (formats.get(formatId) ?? '').replace(
+        /"[^"]*"|\\.|\[[^\]]*\]/g,
+        '',
+      );
+      return formatId === 9 || formatId === 10 || format.includes('%');
+    },
+  );
+  const paths = findWorksheetPaths(files);
+  if (!paths.length || paths.length > 10) {
+    throw new Error('Workbook phải có từ 1 đến 10 sheet dữ liệu.');
+  }
+  const workbook = readZipText(files, 'xl/workbook.xml') ?? '';
+  const names = Array.from(
+    workbook.matchAll(/<(?:[\w.-]+:)?sheet\b([^>]*)>/g),
+    (match) => parseAttributes(match[1]).name,
+  );
+  return paths.map((path, index) => ({
+    name: names[index] || `Sheet ${index + 1}`,
+    rows: parseWorksheetRows(
+      readZipText(files, path) ?? '',
+      sharedStrings,
+      percentageStyles,
+    ),
+  }));
+}
 
 type HeaderMap = Record<FieldKey, number | undefined>;
 
@@ -543,7 +609,7 @@ function findWorksheetPaths(files: Record<string, Uint8Array>) {
   if (workbookXml && relationshipXml) {
     const relationships = new Map<string, string>();
     for (const relationshipTag of relationshipXml.matchAll(
-      /<Relationship\b([^>]*)\/?>/g,
+      /<(?:[\w.-]+:)?Relationship\b([^>]*)\/?>/g,
     )) {
       const attrs = parseAttributes(relationshipTag[1]);
       if (!attrs.Id || !attrs.Target) continue;
@@ -551,7 +617,9 @@ function findWorksheetPaths(files: Record<string, Uint8Array>) {
     }
 
     const sheetPaths: string[] = [];
-    for (const sheetTag of workbookXml.matchAll(/<sheet\b([^>]*)\/?>/g)) {
+    for (const sheetTag of workbookXml.matchAll(
+      /<(?:[\w.-]+:)?sheet\b([^>]*)\/?>/g,
+    )) {
       const attrs = parseAttributes(sheetTag[1]);
       const relationshipId = attrs['r:id'];
       const targetPath = relationshipId
@@ -574,25 +642,48 @@ function parseSharedStrings(xml: string | null) {
   if (!xml) return [];
 
   const strings: string[] = [];
-  for (const match of xml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)) {
+  for (const match of xml.matchAll(
+    /<(?:[\w.-]+:)?si\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?si>/g,
+  )) {
     strings.push(readRichText(match[1]));
   }
 
   return strings;
 }
 
-function parseWorksheetRows(xml: string, sharedStrings: string[]) {
+function parseWorksheetRows(
+  xml: string,
+  sharedStrings: string[],
+  percentageStyles?: boolean[],
+) {
   const rows: SheetRow[] = [];
-  for (const rowMatch of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+  for (const rowMatch of xml.matchAll(
+    /<(?:[\w.-]+:)?row\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?row>/g,
+  )) {
     const rowAttrs = parseAttributes(rowMatch[1]);
     const cells: string[] = [];
+    const metadata: Record<number, XlsxCellMetadata> = {};
     let nextIndex = 0;
 
     for (const cellMatch of rowMatch[2].matchAll(
-      /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g,
+      /<(?:[\w.-]+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?c>)/g,
     )) {
       const cellAttrs = parseAttributes(cellMatch[1]);
       const columnIndex = cellAttrs.r ? cellRefToIndex(cellAttrs.r) : nextIndex;
+      if (percentageStyles) {
+        if (
+          columnIndex > 100 ||
+          rows.length > 2000 ||
+          columnIndex in metadata
+        ) {
+          throw new Error('Sheet vượt giới hạn dòng/cột hoặc có ô trùng lặp.');
+        }
+        metadata[columnIndex] = {
+          formula: /<(?:[\w.-]+:)?f\b/.test(cellMatch[2] ?? ''),
+          percentage: percentageStyles[Number(cellAttrs.s ?? 0)] ?? false,
+          type: cellAttrs.t ?? 'n',
+        };
+      }
       cells[columnIndex] = readCellValue(
         cellMatch[2] ?? '',
         cellAttrs.t,
@@ -604,6 +695,7 @@ function parseWorksheetRows(xml: string, sharedStrings: string[]) {
     rows.push({
       cells,
       index: Number(rowAttrs.r) || rows.length + 1,
+      ...(percentageStyles ? { metadata } : {}),
     });
   }
 
@@ -616,11 +708,14 @@ function readCellValue(
   sharedStrings: string[],
 ) {
   if (type === 'inlineStr') {
-    const inlineString = xml.match(/<is\b[^>]*>([\s\S]*?)<\/is>/);
+    const inlineString = xml.match(
+      /<(?:[\w.-]+:)?is\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?is>/,
+    );
     return inlineString ? readRichText(inlineString[1]) : '';
   }
 
-  const value = xml.match(/<v\b[^>]*>([\s\S]*?)<\/v>/)?.[1] ?? '';
+  const value =
+    xml.match(/<(?:[\w.-]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?v>/)?.[1] ?? '';
   if (type === 's') {
     const sharedStringIndex = Number(value);
     return sharedStrings[sharedStringIndex] ?? '';
@@ -630,9 +725,9 @@ function readCellValue(
 }
 
 function readRichText(xml: string) {
-  const parts = Array.from(xml.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)).map(
-    (match) => decodeXml(match[1]),
-  );
+  const parts = Array.from(
+    xml.matchAll(/<(?:[\w.-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?t>/g),
+  ).map((match) => decodeXml(match[1]));
 
   if (parts.length > 0) return parts.join('');
   return decodeXml(xml.replace(/<[^>]+>/g, ''));

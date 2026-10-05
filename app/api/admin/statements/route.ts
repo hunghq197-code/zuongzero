@@ -16,6 +16,10 @@ import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
 import { buildReverseGuaranteeRecoupmentStatements } from '@/lib/guarantees';
 import { hasStatementLineItemsTable } from '@/lib/statement-line-items';
 import { summarizeSettlement } from '@/lib/settlements';
+import {
+  findFinalizedSuccessor,
+  readOpeningBalance,
+} from '@/lib/statement-balances';
 import { ensureUserRecord } from '@/lib/user-records';
 
 type StatementAction =
@@ -143,6 +147,29 @@ async function updateStatementResponse(request: Request) {
   const statement = await findStatementTarget(env.DB, reportPeriodId);
   if (!statement) return jsonError('Không tìm thấy statement.', 404);
 
+  const changesLedger = isPaymentAction(action)
+    ? statement.paymentStatus !== (action === 'mark_paid' ? 'paid' : 'unpaid')
+    : action === 'unpublish' ||
+      !['published', 'locked'].includes(statement.status);
+  if (changesLedger) {
+    const successor = await findFinalizedSuccessor(
+      env.DB,
+      statement.clientId,
+      statement.period,
+    );
+    if (successor)
+      return jsonError(
+        `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi thay đổi số dư kỳ trước.`,
+        409,
+      );
+  }
+  if (action === 'unpublish' && statement.paymentStatus === 'paid') {
+    return jsonError(
+      'Hãy hoàn tác trạng thái thanh toán trước khi ẩn statement.',
+      409,
+    );
+  }
+
   if (
     statement.status === 'locked' &&
     action !== 'publish' &&
@@ -161,9 +188,20 @@ async function updateStatementResponse(request: Request) {
   });
 
   if (isPaymentAction(action)) {
+    if (!['published', 'locked'].includes(statement.status)) {
+      return jsonError(
+        'Chỉ cập nhật thanh toán cho statement đã publish.',
+        409,
+      );
+    }
+    const opening = await readOpeningBalance(
+      env.DB,
+      statement.clientId,
+      statement.period,
+    );
     const settlement = summarizeSettlement({
       costs: Number(statement.costs) || 0,
-      opening: Number(statement.opening) || 0,
+      opening,
       reservesReleased: Number(statement.reservesReleased) || 0,
       reservesWithheld: Number(statement.reservesWithheld) || 0,
       revenue: Number(statement.revenue) || 0,
@@ -177,7 +215,23 @@ async function updateStatementResponse(request: Request) {
     }
 
     const paymentStatus = action === 'mark_paid' ? 'paid' : 'unpaid';
+    // Repeated mark_paid must not overwrite the original payment snapshot.
+    if (paymentStatus === statement.paymentStatus) {
+      return Response.json({
+        overview: await getAdminOverviewData(env.DB, statement.period),
+        statements: await listAdminStatements(env.DB, {
+          period: statement.period,
+        }),
+        message: statementMessage(action),
+      });
+    }
     await env.DB.batch([
+      env.DB.prepare(`UPDATE statements SET opening_balance = ?, closing_balance = ?
+        WHERE report_period_id = ?`).bind(
+        opening,
+        paymentStatus === 'paid' ? 0 : settlement.payable,
+        reportPeriodId,
+      ),
       env.DB.prepare(
         `UPDATE report_periods
          SET payment_status = ?,
@@ -298,6 +352,23 @@ async function deleteStatementResponse(request: Request) {
 
   const statement = await findStatementDeleteTarget(env.DB, reportPeriodId);
   if (!statement) return jsonError('Không tìm thấy statement.', 404);
+
+  if (statement.paymentStatus === 'paid' || statement.status === 'locked') {
+    return jsonError(
+      'Hãy mở khóa và hoàn tác trạng thái thanh toán trước khi xoá statement.',
+      409,
+    );
+  }
+  const successor = await findFinalizedSuccessor(
+    env.DB,
+    statement.clientId,
+    statement.period,
+  );
+  if (successor)
+    return jsonError(
+      `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi xoá kỳ trước.`,
+      409,
+    );
 
   const now = new Date().toISOString();
   const actor = await ensureUserRecord(env.DB, {
@@ -468,6 +539,7 @@ async function findStatementDeleteTarget(
          rp.currency,
          rp.status,
          c.code AS clientCode,
+         rp.payment_status AS paymentStatus,
          c.display_name AS clientName,
          s.source_upload_id AS sourceUploadId,
          u.report_period_id AS uploadReportPeriodId,

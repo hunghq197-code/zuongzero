@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
 import { ensureUserRecord } from '@/lib/user-records';
+import { findFinalizedSuccessor } from '@/lib/statement-balances';
 import {
   parseStatementImportSnapshot,
   restoreStatementImportSnapshot,
@@ -105,6 +106,20 @@ export async function POST(request: Request) {
         {
           message:
             'Statement đã thanh toán. Hãy hoàn tác trạng thái thanh toán trước khi hoàn tác dữ liệu.',
+        },
+        { status: 409 },
+      );
+    }
+
+    const successor = await findFinalizedSuccessor(
+      env.DB,
+      target.clientId,
+      target.period,
+    );
+    if (successor) {
+      return Response.json(
+        {
+          message: `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi hoàn tác dữ liệu kỳ trước.`,
         },
         { status: 409 },
       );

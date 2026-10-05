@@ -59,6 +59,17 @@ const checks = [
   },
   {
     expected: [401],
+    label: 'royalty rules template requires auth',
+    path: '/api/admin/royalty-rules/import',
+  },
+  {
+    expected: [401],
+    label: 'royalty rules import requires auth',
+    method: 'POST',
+    path: '/api/admin/royalty-rules/import',
+  },
+  {
+    expected: [401],
     label: 'admin statements requires auth',
     path: '/api/admin/statements',
   },

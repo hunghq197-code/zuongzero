@@ -6,6 +6,7 @@ import {
   REPORT_PERIOD_PATTERN,
 } from '@/lib/reporting-periods';
 import { summarizeSettlement } from '@/lib/settlements';
+import { readStatementBalances } from '@/lib/statement-balances';
 
 const DEFAULT_PORTAL_URL = 'https://artistportal.zuongzeroent.com';
 
@@ -181,7 +182,10 @@ export async function listSettlementReminderRecipients(
     .bind(period, period)
     .all<RecipientSqlRow>();
 
-  return rows.results.map((row) => mapRecipientRow(row, period));
+  const balances = await readStatementBalances(db);
+  return rows.results.map((row) =>
+    mapRecipientRow(row, period, balances.get(row.reportPeriodId ?? '')),
+  );
 }
 
 export async function listSettlementReminderRuns(
@@ -610,12 +614,16 @@ async function listRetryRecipients(
     .bind(runId)
     .all<RecipientSqlRow>();
 
-  return rows.results.map((row) => mapRecipientRow(row, row.period));
+  const balances = await readStatementBalances(db);
+  return rows.results.map((row) =>
+    mapRecipientRow(row, row.period, balances.get(row.reportPeriodId ?? '')),
+  );
 }
 
 function mapRecipientRow(
   row: RecipientSqlRow,
   period: string,
+  balance?: { opening: number; closing: number; paid: number },
 ): SettlementReminderRecipient {
   if (!row.statementId || !row.reportPeriodId) {
     return {
@@ -640,7 +648,7 @@ function mapRecipientRow(
 
   const settlement = summarizeSettlement({
     costs: Number(row.costs) || 0,
-    opening: Number(row.opening) || 0,
+    opening: balance?.opening ?? (Number(row.opening) || 0),
     reservesReleased: Number(row.reservesReleased) || 0,
     reservesWithheld: Number(row.reservesWithheld) || 0,
     revenue: Number(row.revenue) || 0,
@@ -649,14 +657,14 @@ function mapRecipientRow(
   return {
     accessLevel: row.accessLevel,
     canSend: true,
-    carryForward: settlement.carryForward,
+    carryForward: balance?.closing ?? settlement.payable,
     clientCode: row.clientCode,
     clientId: row.clientId,
     clientName: row.clientName,
     displayName: row.displayName,
     email: row.email,
     latestPublishedAt: row.publishedAt ?? row.lockedAt,
-    paidAmount: settlement.paidAmount,
+    paidAmount: balance?.paid ?? 0,
     payable: settlement.payable,
     period,
     periodLabel: periodDisplayLabel(period),

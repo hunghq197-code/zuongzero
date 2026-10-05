@@ -42,6 +42,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { buildCalendarQuarterOptions } from '@/lib/reporting-periods';
+import { RoyaltyRuleImportPanel } from '@/components/royalty-rule-import-panel';
 
 type RoyaltyRuleStatus = 'active' | 'inactive';
 
@@ -285,6 +286,9 @@ export function RoyaltyRulesPanel({
 
   return (
     <section className="grid gap-4 xl:grid-cols-[400px_minmax(0,1fr)]">
+      <div className="min-w-0 xl:col-span-2">
+        <RoyaltyRuleImportPanel onImported={loadRules} />
+      </div>
       <section className="music-card p-4 md:p-5" id="royalty-rule-form">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-lg font-semibold">

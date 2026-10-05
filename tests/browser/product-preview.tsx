@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AdminConsole } from '@/components/admin-console';
 import { RoyaltyDashboard } from '@/components/royalty-dashboard';
+import { RoyaltyRulesPanel } from '@/components/royalty-rules-panel';
 import {
   TablePagination,
   usePaginatedRows,
@@ -70,16 +71,83 @@ function PaginationPreview() {
 }
 
 const view = new URLSearchParams(window.location.search).get('view');
+const financialPeriods = [
+  {
+    ...trackPeriod,
+    id: 'finance-q3',
+    period: '2026-Q3',
+    opening: 1_200_000,
+    grossRevenue: 1_000_000,
+    revenue: 800_000,
+    costs: 100_000,
+    reservesWithheld: 0,
+    reservesReleased: 0,
+    paid: 0,
+    paymentStatus: 'unpaid' as const,
+    payable: 1_900_000,
+    carryForward: 1_900_000,
+  },
+  {
+    ...trackPeriod,
+    id: 'finance-q2',
+    period: '2026-Q2',
+    opening: 0,
+    grossRevenue: 1_500_000,
+    revenue: 1_200_000,
+    costs: 0,
+    reservesWithheld: 0,
+    reservesReleased: 0,
+    paid: 0,
+    paymentStatus: 'unpaid' as const,
+    payable: 1_200_000,
+    carryForward: 1_200_000,
+  },
+];
 createRoot(document.getElementById('root')!).render(
   view === 'pagination' ? (
     <PaginationPreview />
-  ) : view === 'client' || view === 'tracks' ? (
+  ) : view === 'rules' ? (
+    <main className="mx-auto max-w-7xl p-4">
+      <RoyaltyRulesPanel
+        customers={[
+          {
+            id: 'a',
+            code: 'A001',
+            name: 'Nghệ sĩ thử nghiệm',
+            status: 'active',
+          },
+        ]}
+      />
+    </main>
+  ) : view === 'client' || view === 'tracks' || view === 'financial' ? (
     <RoyaltyDashboard
       accessLevel="viewer"
       clientId="preview-client"
       clientName="Nghệ sĩ thử nghiệm"
       userEmail="preview@example.com"
-      statementPeriods={view === 'tracks' ? [trackPeriod] : []}
+      statementPeriods={
+        view === 'financial'
+          ? financialPeriods
+          : view === 'tracks'
+            ? [trackPeriod]
+            : []
+      }
+      salesPeriodsByPeriod={
+        view === 'financial'
+          ? {
+              '2026-Q3': ['2026-07', '08/2026', '202609'].map(
+                (salesPeriod) => ({
+                  salesPeriod,
+                  netPayable: 800_000 / 3,
+                  sales: 100,
+                }),
+              ),
+              '2026-Q2': [
+                { salesPeriod: '2026-04', netPayable: 1_200_000, sales: 200 },
+              ],
+            }
+          : {}
+      }
       lineItemsByPeriod={
         view === 'tracks' ? { [trackPeriod.period]: trackRows } : {}
       }
