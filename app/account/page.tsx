@@ -296,11 +296,11 @@ async function readAccountProfile(
 }
 
 function roleLabel(role: AccountProfile['role']) {
-  if (role === 'super_admin') return 'Super admin';
+  if (role === 'super_admin') return 'Quản trị viên';
   if (role === 'admin') return 'Quản lý';
   if (role === 'client') return 'Khách hàng';
-  if (role === 'auditor') return 'Auditor';
-  return 'Pending';
+  if (role === 'auditor') return 'Kiểm toán';
+  return 'Chờ duyệt';
 }
 
 function readSearchParam(params: SearchParams, key: string) {

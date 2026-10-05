@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 
 import { createAccountInvite } from '@/lib/account-invites';
+import { authRequestIp, consumeAuthRateLimit } from '@/lib/auth-rate-limit';
 import { cleanText, isValidEmail, normalizeEmail } from '@/lib/identity';
 import {
   accountInviteDeliveryMessage,
@@ -26,10 +27,26 @@ export async function POST(request: Request) {
       return genericForgotPasswordResponse(request);
     }
 
+    const ipLimit = await consumeAuthRateLimit(
+      env.DB,
+      'recovery_ip',
+      authRequestIp(request),
+    );
+    if (ipLimit.status !== 'allowed') {
+      return genericForgotPasswordResponse(request);
+    }
+
     const formData = await request.formData();
     const email = normalizeEmail(cleanText(formData.get('email'), 254));
     if (!isValidEmail(email)) {
       return genericForgotPasswordResponse(request);
+    }
+
+    for (const policy of ['recovery_cooldown', 'recovery_account'] as const) {
+      const limit = await consumeAuthRateLimit(env.DB, policy, email);
+      if (limit.status !== 'allowed') {
+        return genericForgotPasswordResponse(request);
+      }
     }
 
     const user = await findPasswordRecoveryCandidate(email);
@@ -105,5 +122,12 @@ function genericForgotPasswordResponse(request: Request) {
   const url = new URL('/forgot-password', request.url);
   url.searchParams.set('sent', '1');
 
-  return Response.redirect(url, 303);
+  return new Response(null, {
+    status: 303,
+    headers: {
+      Location: url.toString(),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
 }

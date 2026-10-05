@@ -35,10 +35,7 @@ export default async function SetupAccountPage({
       <section className="music-card grid w-full max-w-5xl overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="bg-[#071118] p-6 text-white md:p-8">
           <BrandMark />
-          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-white/55">
-            Account activation
-          </p>
-          <h1 className="font-display mt-4 text-3xl font-semibold">
+          <h1 className="font-display mt-8 text-3xl font-semibold">
             Zuong Zero Artist Portal
           </h1>
           <EqualizerBars className="mt-10" />

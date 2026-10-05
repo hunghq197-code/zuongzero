@@ -29,8 +29,13 @@ export type PaginatedRows<T> = {
 export function usePaginatedRows<T>(
   rows: T[],
   pageSize = DASHBOARD_PAGE_SIZE,
+  resetKey = '',
 ): PaginatedRows<T> {
-  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, resetKey });
+  if (pagination.resetKey !== resetKey) {
+    setPagination({ page: 1, resetKey });
+  }
+  const page = pagination.resetKey === resetKey ? pagination.page : 1;
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, pageCount);
   const rangeStart = rows.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
@@ -42,7 +47,10 @@ export function usePaginatedRows<T>(
 
   return {
     goToPage(nextPage) {
-      setPage(Math.min(Math.max(1, nextPage), pageCount));
+      setPagination({
+        page: Math.min(Math.max(1, nextPage), pageCount),
+        resetKey,
+      });
     },
     page: safePage,
     pageCount,
@@ -102,6 +110,7 @@ export function TablePagination({
         <PaginationContent>
           <PaginationItem>
             <PaginationPrevious
+              aria-label="Trang trước"
               aria-disabled={previousDisabled}
               className={
                 previousDisabled ? 'pointer-events-none opacity-45' : ''
@@ -124,6 +133,7 @@ export function TablePagination({
           ))}
           <PaginationItem>
             <PaginationNext
+              aria-label="Trang sau"
               aria-disabled={nextDisabled}
               className={nextDisabled ? 'pointer-events-none opacity-45' : ''}
               href="#"

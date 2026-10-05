@@ -7,6 +7,11 @@ import {
   verifyPlainSecret,
 } from '@/lib/app-auth';
 import { getConfiguredSuperAdminEmails } from '@/lib/admin-auth';
+import {
+  authRequestIp,
+  consumeAuthRateLimit,
+  type AuthRateLimitResult,
+} from '@/lib/auth-rate-limit';
 import { loginOtpDeliveryMessage, sendLoginOtpEmail } from '@/lib/email';
 import {
   accountUserIdForEmail,
@@ -38,22 +43,49 @@ export function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
+  if (!env.DB) {
+    return redirectToLogin(request, 'config', '', '/');
+  }
+
+  const ip = authRequestIp(request);
+  const ipLimit = await consumeAuthRateLimit(env.DB, 'login_ip', ip);
+  if (ipLimit.status !== 'allowed') {
+    return rateLimitLoginResponse(request, ipLimit, '', '/');
+  }
+
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return redirectToLogin(request, 'invalid', '', '/');
+  }
   const email = normalizeEmail(cleanText(formData.get('email'), 254));
   const password = readPassword(formData.get('password'));
   const returnTo = safeRelativeReturnPath(readText(formData.get('return_to')));
-
-  if (!env.DB) {
-    return redirectToLogin(request, 'config', email, returnTo);
-  }
 
   if (!isValidEmail(email) || !password) {
     return redirectToLogin(request, 'invalid', email, returnTo);
   }
 
+  const accountLimit = await consumeAuthRateLimit(env.DB, 'login_account', email);
+  if (accountLimit.status !== 'allowed') {
+    return rateLimitLoginResponse(request, accountLimit, email, returnTo);
+  }
+
   const authenticatedUser = await authenticateUser(email, password);
   if (!authenticatedUser) {
     return redirectToLogin(request, 'invalid', email, returnTo);
+  }
+
+  for (const policy of ['otp_ip', 'otp_cooldown', 'otp_hourly'] as const) {
+    const limit = await consumeAuthRateLimit(
+      env.DB,
+      policy,
+      policy === 'otp_ip' ? ip : email,
+    );
+    if (limit.status !== 'allowed') {
+      return rateLimitLoginResponse(request, limit, email, returnTo);
+    }
   }
 
   const challenge = await createLoginOtpChallenge(env.DB, {
@@ -140,16 +172,48 @@ async function authenticateUser(email: string, password: string) {
 
 function redirectToLogin(
   request: Request,
-  error: 'config' | 'invalid' | 'otp_delivery',
+  error: 'config' | 'invalid' | 'otp_delivery' | 'rate_limited' | 'temporary',
   email: string,
   returnTo: string,
+  retryAfterSeconds?: number,
 ) {
   const url = new URL('/login', request.url);
   url.searchParams.set('error', error);
   if (email) url.searchParams.set('email', email);
   if (returnTo !== '/') url.searchParams.set('return_to', returnTo);
+  if (retryAfterSeconds) {
+    url.searchParams.set('retry_after', String(retryAfterSeconds));
+  }
 
-  return navigationResponse(url);
+  const response = navigationResponse(url);
+  if (error === 'rate_limited') {
+    return new Response(response.body, {
+      status: 429,
+      headers: {
+        ...Object.fromEntries(response.headers),
+        'Retry-After': String(retryAfterSeconds),
+      },
+    });
+  }
+  if (error === 'temporary') {
+    return new Response(response.body, { status: 503, headers: response.headers });
+  }
+  return response;
+}
+
+function rateLimitLoginResponse(
+  request: Request,
+  limit: Exclude<AuthRateLimitResult, { status: 'allowed' }>,
+  email: string,
+  returnTo: string,
+) {
+  return redirectToLogin(
+    request,
+    limit.status === 'blocked' ? 'rate_limited' : 'temporary',
+    email,
+    returnTo,
+    limit.status === 'blocked' ? limit.retryAfterSeconds : undefined,
+  );
 }
 
 async function revokeLoginOtpChallenge(challengeToken: string) {

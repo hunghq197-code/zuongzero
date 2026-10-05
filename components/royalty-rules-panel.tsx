@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 import {
+  DASHBOARD_PAGE_SIZE,
   TablePagination,
   usePaginatedRows,
 } from '@/components/table-pagination';
@@ -130,7 +131,11 @@ export function RoyaltyRulesPanel({
       return statusMatches && searchMatches;
     });
   }, [rules, search, statusFilter]);
-  const rulePage = usePaginatedRows(visibleRules);
+  const rulePage = usePaginatedRows(
+    visibleRules,
+    DASHBOARD_PAGE_SIZE,
+    JSON.stringify([search, statusFilter]),
+  );
 
   const loadRules = useCallback(async () => {
     setState('loading');

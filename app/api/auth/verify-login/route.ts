@@ -9,6 +9,7 @@ import {
   SESSION_MAX_AGE_SECONDS,
   verifyPlainSecret,
 } from '@/lib/app-auth';
+import { authRequestIp, consumeAuthRateLimit } from '@/lib/auth-rate-limit';
 import {
   cleanLoginOtpChallenge,
   cleanLoginOtpCode,
@@ -35,9 +36,29 @@ export async function POST(request: Request) {
     return redirectToVerify(request, 'config');
   }
 
-  const formData = await request.formData();
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return redirectToVerify(request, 'invalid');
+  }
   const challenge = cleanLoginOtpChallenge(formData.get('challenge'));
   const code = cleanLoginOtpCode(formData.get('code'));
+
+  const ipLimit = await consumeAuthRateLimit(
+    env.DB,
+    'verify_ip',
+    authRequestIp(request),
+  );
+  if (ipLimit.status !== 'allowed') {
+    return redirectToVerify(
+      request,
+      ipLimit.status === 'blocked' ? 'rate_limited' : 'config',
+      challenge,
+      ipLimit.status === 'blocked' ? ipLimit.retryAfterSeconds : undefined,
+      ipLimit.status === 'blocked' ? 429 : 503,
+    );
+  }
 
   if (!challenge || code.length !== 6) {
     return redirectToVerify(request, 'invalid', challenge);
@@ -59,16 +80,29 @@ export async function POST(request: Request) {
     return redirectToVerify(request, 'expired', challenge);
   }
 
+  const reservedAttempt = await env.DB.prepare(
+    `UPDATE auth_login_otps
+     SET attempt_count = attempt_count + 1
+     WHERE id = ?
+       AND status = 'pending'
+       AND expires_at > ?
+       AND attempt_count < ?
+     RETURNING attempt_count AS attemptCount`,
+  )
+    .bind(otp.id, nowText, LOGIN_OTP_MAX_ATTEMPTS)
+    .first<{ attemptCount: number }>();
+  if (!reservedAttempt) {
+    return redirectToVerify(request, 'locked', challenge);
+  }
+
   const submittedCodeHash = await hashSessionToken(code);
   const codeMatches = await verifyPlainSecret(submittedCodeHash, otp.codeHash);
   if (!codeMatches) {
-    const nextAttemptCount = Number(otp.attemptCount || 0) + 1;
-    if (nextAttemptCount >= LOGIN_OTP_MAX_ATTEMPTS) {
-      await revokeLoginOtp(otp.id, nextAttemptCount);
+    if (reservedAttempt.attemptCount >= LOGIN_OTP_MAX_ATTEMPTS) {
+      await revokeLoginOtp(otp.id);
       return redirectToVerify(request, 'locked', challenge);
     }
 
-    await incrementLoginOtpAttempt(otp.id, nextAttemptCount);
     return redirectToVerify(request, 'invalid', challenge);
   }
 
@@ -83,9 +117,10 @@ export async function POST(request: Request) {
      SET status = 'used',
          used_at = ?
      WHERE id = ?
-       AND status = 'pending'`,
+       AND status = 'pending'
+       AND expires_at > ?`,
   )
-    .bind(nowText, otp.id)
+    .bind(nowText, otp.id, new Date().toISOString())
     .run();
 
   if (consumeResult.meta.changes !== 1) {
@@ -168,25 +203,14 @@ async function readLoginOtp(challengeToken: string) {
     .first<StoredLoginOtpRow>();
 }
 
-async function revokeLoginOtp(id: string, attemptCount?: number) {
+async function revokeLoginOtp(id: string) {
   await env.DB.prepare(
     `UPDATE auth_login_otps
-     SET status = 'revoked',
-         attempt_count = COALESCE(?, attempt_count)
-     WHERE id = ?`,
-  )
-    .bind(attemptCount ?? null, id)
-    .run();
-}
-
-async function incrementLoginOtpAttempt(id: string, attemptCount: number) {
-  await env.DB.prepare(
-    `UPDATE auth_login_otps
-     SET attempt_count = ?
+     SET status = 'revoked'
      WHERE id = ?
        AND status = 'pending'`,
   )
-    .bind(attemptCount, id)
+    .bind(id)
     .run();
 }
 
@@ -199,14 +223,30 @@ function resolveDestination(returnTo: string, role: AppUserRole) {
 
 function redirectToVerify(
   request: Request,
-  error: 'config' | 'expired' | 'invalid' | 'locked' | 'revoked' | 'used',
+  error:
+    | 'config'
+    | 'expired'
+    | 'invalid'
+    | 'locked'
+    | 'revoked'
+    | 'used'
+    | 'rate_limited',
   challenge?: string,
+  retryAfterSeconds?: number,
+  status = 200,
 ) {
   const url = new URL('/login/verify', request.url);
   if (challenge) url.searchParams.set('challenge', challenge);
   url.searchParams.set('error', error);
+  if (retryAfterSeconds) {
+    url.searchParams.set('retry_after', String(retryAfterSeconds));
+  }
 
-  return navigationResponse(url);
+  const response = navigationResponse(url);
+  if (retryAfterSeconds) {
+    response.headers.set('Retry-After', String(retryAfterSeconds));
+  }
+  return new Response(response.body, { status, headers: response.headers });
 }
 
 function navigationResponse(destination: URL) {

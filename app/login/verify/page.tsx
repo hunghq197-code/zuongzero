@@ -10,6 +10,7 @@ import {
   InputOTPSlot,
 } from '@/components/ui/input-otp';
 import { hashSessionToken } from '@/lib/app-auth';
+import { authRateLimitMessage } from '@/lib/auth-feedback';
 import {
   cleanLoginOtpChallenge,
   LOGIN_OTP_CODE_LENGTH,
@@ -35,7 +36,10 @@ export default async function LoginVerifyPage({
   const challenge = cleanLoginOtpChallenge(
     readSearchParam(params, 'challenge'),
   );
-  const errorMessage = resolveOtpError(readSearchParam(params, 'error'));
+  const errorMessage = resolveOtpError(
+    readSearchParam(params, 'error'),
+    readSearchParam(params, 'retry_after'),
+  );
   const otp = challenge ? await readOtpPreview(challenge) : null;
   const canSubmit = otp?.status === 'pending';
 
@@ -44,11 +48,8 @@ export default async function LoginVerifyPage({
       <section className="music-card grid w-full max-w-5xl overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="bg-[#071118] p-6 text-white md:p-8">
           <BrandMark />
-          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-white/55">
-            Login verification
-          </p>
-          <h1 className="font-display mt-4 text-3xl font-semibold">
-            Xác thực mã OTP
+          <h1 className="font-display mt-8 text-3xl font-semibold">
+            Zuong Zero Artist Portal
           </h1>
           <EqualizerBars className="mt-10" />
         </div>
@@ -60,13 +61,14 @@ export default async function LoginVerifyPage({
           <h2 className="font-display mt-5 text-2xl font-semibold md:text-3xl">
             Nhập mã trong email
           </h2>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Mã OTP 6 số đã được gửi đến{' '}
-            <span className="font-medium text-foreground">
-              {otp ? maskEmail(otp.email) : 'email đăng nhập'}
-            </span>
-            . Mã có hiệu lực {LOGIN_OTP_MAX_AGE_MINUTES} phút.
-          </p>
+          {canSubmit ? (
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {maskEmail(otp.email)}
+              </span>{' '}
+              · Hiệu lực {LOGIN_OTP_MAX_AGE_MINUTES} phút
+            </p>
+          ) : null}
 
           {errorMessage ? (
             <p className="mt-5 rounded-lg border border-[#f0b7b2] bg-[#fff2f0] px-3 py-2 text-sm text-[#a53a30]">
@@ -80,9 +82,6 @@ export default async function LoginVerifyPage({
                 <LockKeyhole className="size-4 text-primary" />
                 Mã OTP không còn hiệu lực
               </div>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Hãy quay lại trang đăng nhập để nhận mã mới.
-              </p>
             </div>
           ) : (
             <form
@@ -149,9 +148,10 @@ async function readOtpPreview(challengeToken: string) {
        expires_at AS expiresAt
      FROM auth_login_otps
      WHERE challenge_token_hash = ?
+       AND expires_at > ?
      LIMIT 1`,
   )
-    .bind(await hashSessionToken(challengeToken))
+    .bind(await hashSessionToken(challengeToken), new Date().toISOString())
     .first<LoginOtpPreview>();
 }
 
@@ -161,7 +161,8 @@ function readSearchParam(params: SearchParams, key: string) {
   return value ?? null;
 }
 
-function resolveOtpError(error: string | null) {
+function resolveOtpError(error: string | null, retryAfter: string | null) {
+  if (error === 'rate_limited') return authRateLimitMessage(retryAfter);
   if (error === 'config') return 'Dịch vụ xác thực chưa sẵn sàng.';
   if (error === 'expired') return 'Mã OTP đã hết hạn. Vui lòng đăng nhập lại.';
   if (error === 'invalid') return 'Mã OTP không đúng.';

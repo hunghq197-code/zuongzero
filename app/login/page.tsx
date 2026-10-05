@@ -8,6 +8,7 @@ import { BrandMark, EqualizerBars } from '@/components/music-brand';
 import { getClientPortalAccess } from '@/lib/access-control';
 import { getAdminAccess } from '@/lib/admin-auth';
 import { safeRelativeReturnPath } from '@/lib/app-auth';
+import { authRateLimitMessage } from '@/lib/auth-feedback';
 import { chatGPTSignOutPath, getChatGPTUser } from '../chatgpt-auth';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +22,10 @@ export default async function LoginPage({
 }) {
   const params = (await searchParams) ?? {};
   const returnTo = safeRelativeReturnPath(readSearchParam(params, 'return_to'));
-  const errorMessage = resolveErrorMessage(readSearchParam(params, 'error'));
+  const errorMessage = resolveErrorMessage(
+    readSearchParam(params, 'error'),
+    readSearchParam(params, 'retry_after'),
+  );
   const resetMessage = resolveResetMessage(readSearchParam(params, 'reset'));
   const email = readSearchParam(params, 'email');
   const user = await getChatGPTUser();
@@ -43,22 +47,12 @@ export default async function LoginPage({
         <div className="hidden min-h-[620px] flex-col justify-between bg-[#071118] p-8 text-white lg:flex">
           <div>
             <BrandMark />
-            <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-white/55">
-              Secure music rights workspace
-            </p>
-            <h1 className="font-display mt-4 max-w-xl text-5xl font-semibold leading-tight">
+            <h1 className="font-display mt-8 max-w-xl text-4xl font-semibold leading-tight">
               Zuong Zero Artist Portal
             </h1>
           </div>
           <div>
             <EqualizerBars />
-            <div className="mt-8 grid grid-cols-3 gap-3">
-              {['Catalogs', 'Statements', 'Access'].map((item) => (
-                <div className="border-t border-white/15 pt-3" key={item}>
-                  <p className="text-sm font-semibold">{item}</p>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
 
@@ -79,9 +73,6 @@ export default async function LoginPage({
           <h2 className="font-display text-3xl font-semibold md:text-4xl">
             Đăng nhập
           </h2>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Truy cập artist portal theo quyền đã được cấp.
-          </p>
 
           <form action="/api/auth/login" className="mt-7" method="post">
             <input name="return_to" type="hidden" value={returnTo} />
@@ -169,7 +160,7 @@ export default async function LoginPage({
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-white px-3 text-sm font-medium hover:bg-muted"
                 href={dashboardHref}
               >
-                Vào dashboard
+                Vào tổng quan
               </a>
             ) : null}
 
@@ -198,9 +189,9 @@ function resolveStatus({
   hasUser: boolean;
 }) {
   if (!hasUser) return 'Cần đăng nhập';
-  if (adminRole === 'super_admin') return 'Super admin';
+  if (adminRole === 'super_admin') return 'Quản trị viên';
   if (adminRole === 'admin') return 'Quản lý';
-  if (clientAccessLevel) return `Khách hàng: ${clientAccessLevel}`;
+  if (clientAccessLevel) return 'Khách hàng';
 
   return 'Chưa được cấp quyền';
 }
@@ -224,7 +215,11 @@ function readSearchParam(params: SearchParams, key: string) {
   return value ?? null;
 }
 
-function resolveErrorMessage(error: string | null) {
+function resolveErrorMessage(error: string | null, retryAfter: string | null) {
+  if (error === 'rate_limited') return authRateLimitMessage(retryAfter);
+  if (error === 'temporary') {
+    return 'Dịch vụ đăng nhập tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.';
+  }
   if (error === 'config') {
     return 'Chưa cấu hình tài khoản super admin.';
   }

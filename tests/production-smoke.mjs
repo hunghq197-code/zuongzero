@@ -29,6 +29,16 @@ const checks = [
   },
   {
     expected: [401],
+    headers: {
+      'oai-authenticated-user-id': 'smoke-forged-admin',
+      'oai-authenticated-user-email': 'hung.hq197@gmail.com',
+      'cf-access-authenticated-user-email': 'hung.hq197@gmail.com',
+    },
+    label: 'forged identity headers cannot bypass session auth',
+    path: '/api/admin/overview',
+  },
+  {
+    expected: [401],
     label: 'admin accounts requires auth',
     path: '/api/admin/accounts',
   },
@@ -83,6 +93,7 @@ for (const check of checks) {
     cache: 'no-store',
     headers: {
       Accept: 'text/html,application/json',
+      ...check.headers,
     },
     method: check.method ?? 'GET',
     redirect: 'manual',

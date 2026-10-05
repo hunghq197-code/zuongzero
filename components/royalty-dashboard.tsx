@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  DASHBOARD_PAGE_SIZE,
   TablePagination,
   usePaginatedRows,
 } from '@/components/table-pagination';
@@ -356,11 +357,9 @@ function makeTrackIdentityRows(items: StatementLineItem[]) {
     rows.set(key, current);
   }
 
-  return Array.from(rows.values())
-    .sort(
-      (left, right) => Math.abs(right.netPayable) - Math.abs(left.netPayable),
-    )
-    .slice(0, 10);
+  return Array.from(rows.values()).sort(
+    (left, right) => Math.abs(right.netPayable) - Math.abs(left.netPayable),
+  );
 }
 
 function cleanInsightLabel(value: string | null) {
@@ -473,7 +472,11 @@ export function RoyaltyDashboard({
     [guarantees],
   );
   const statementPreviewPage = usePaginatedRows(clientPeriods);
-  const guaranteePage = usePaginatedRows(activeGuarantees);
+  const guaranteePage = usePaginatedRows(
+    activeGuarantees,
+    DASHBOARD_PAGE_SIZE,
+    clientId,
+  );
   const ledgerPage = usePaginatedRows(clientPeriods);
 
   async function exportStatement(
@@ -800,9 +803,7 @@ export function RoyaltyDashboard({
               id="client-statements"
             >
               {exportMessage ? (
-                <output
-                  className="col-span-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
-                >
+                <output className="col-span-full rounded-lg border border-border bg-white px-3 py-2 text-sm">
                   {exportMessage}
                 </output>
               ) : null}
@@ -955,6 +956,7 @@ export function RoyaltyDashboard({
 
               <TabsContent className="mt-5" value={activeTab}>
                 <BreakdownChart
+                  key={`${activePeriod.period}:${activeSection.id}`}
                   chartType={activeSection.chartType}
                   data={activeBreakdown}
                   section={activeSection}
@@ -963,7 +965,10 @@ export function RoyaltyDashboard({
             </Tabs>
 
             {shouldShowSourceInsights ? (
-              <section className="grid gap-4 xl:grid-cols-2">
+              <section
+                className="grid gap-4 xl:grid-cols-2"
+                key={activePeriod.id}
+              >
                 {sourceInsights.salesPeriods.length > 0 ? (
                   <MiniBreakdownPanel
                     data={sourceInsights.salesPeriods}
@@ -1249,12 +1254,13 @@ function MiniTablePanel({
 }
 
 function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
+  const page = usePaginatedRows(rows);
   return (
     <section className="music-card p-4 md:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Theo dõi bài hát</h2>
         <Badge className="rounded-lg" variant="outline">
-          {formatNumber(rows.length)} bài hát nổi bật
+          {formatNumber(rows.length)} bài hát
         </Badge>
       </div>
       <div className="overflow-hidden rounded-lg border border-border">
@@ -1269,7 +1275,7 @@ function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
+            {page.visibleRows.map((row) => (
               <TableRow key={`${row.isrc}:${row.trackTitle}`}>
                 <TableCell className="max-w-[220px] truncate font-medium">
                   {row.trackTitle}
@@ -1282,6 +1288,7 @@ function TrackIdentityPanel({ rows }: { rows: TrackIdentityRow[] }) {
             ))}
           </TableBody>
         </Table>
+        <TablePagination {...page} itemLabel="bài hát" />
       </div>
     </section>
   );

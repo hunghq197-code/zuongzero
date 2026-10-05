@@ -12,7 +12,7 @@ export default async function AdminPage() {
   if (!access.allowed) {
     return (
       <AccessRequired
-        badge="Admin access required"
+        badge="Cần quyền quản trị"
         email={user.email}
         primaryHref="/login"
         primaryLabel="Về trang đăng nhập"

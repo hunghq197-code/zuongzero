@@ -1,6 +1,6 @@
 # Zuong Zero Artist Portal - Implementation Log
 
-Cap nhat ngay 2026-09-10, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
+Cap nhat ngay 2026-10-05, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
 ## Muc tieu san pham
 
@@ -330,8 +330,70 @@ Trang thai: DEPLOYED PRODUCTION, can test tai file that voi phien dang nhap.
 - Da rollback production ve Worker version on dinh `ccef7e86-f28a-45bb-b2fe-3e30d0232794`; `/login` va `/login/verify` tro lai HTTP 200. Khong rollback D1/R2.
 - Da sua luong export: Worker chi kiem tra quyen, lay du lieu theo tung trang 500 dong va tra JSON; file goc tren R2 duoc stream. PDF va workbook fallback duoc tao trong trinh duyet sau khi bam tai, khong nap thu vien PDF/font vao export API Worker. Scope client, published-only va audit van giu nguyen.
 - `npm test` qua 32 unit + 13 contract, `npx tsc --noEmit`, targeted `oxlint` va `npm run build` dat. Toan repo `npm run lint` con 17 loi co san o `components/ui/*` va `hooks/use-mobile.ts`, khong phai cac file vua sua.
-- Da deploy staging version `eb5cba4f-3a00-49cf-8e33-375289bf1114`: smoke 13/13 va 30 request trang cong khai lien tiep dat. Da deploy production version `7b02b4dc-3813-4b0b-a7ba-a38730765c57`: smoke 13/13 va 40 request trang cong khai lien tiep dat, khong tai hien 1102.
+- Da deploy staging version `eb5cba4f-3a00-49cf-8e33-375289bf1114`: smoke 13/13 va 30 request trang cong khai lien tiep dat. Da deploy production tai `https://artistportal.zuongzeroent.com`, Worker version `7b02b4dc-3813-4b0b-a7ba-a38730765c57`, code commit `1af779c`: smoke 13/13 va 40 request trang cong khai lien tiep dat, khong tai hien 1102.
 - Chua test tai PDF/Excel bang phien admin/client that tren staging vi khong co phien dang nhap/OTP trong task. Can thu mot statement co du lieu, doi chieu PDF mot trang va Excel tai lai voi file upload, sau do theo doi Worker Logs neu su co tai hien.
+
+## Product cleanup va toi uu - 2026-10-05
+
+Trang thai: DEPLOYED PRODUCTION. Chua commit/push trong tac vu nay; khong sua du lieu production hoac secrets cua Worker. Chi tiet phat hanh va pham vi smoke test o muc deploy ben duoi.
+
+- Go mo ta gioi thieu va note lap lai o cac trang auth; Viet hoa them nhan/trang thai admin. Giu loi, ket qua thao tac, canh bao xoa/nhap, so lieu thanh toan va ghi chu nghiep vu do nguoi dung nhap.
+- Tach tai Email/Nhac lich khoi tai tong quan; chi fetch khi mo tab, huy request cu khi roi tab/doi quy. Loi email khong con chan tong quan.
+- Reset phan trang khi doi bo loc/quy; danh sach ma bai hat hien du qua phan trang thay vi cat 10 bai. Ngay admin dung UTC+7.
+- Sua tab admin xuong dong chong len bo loc va grid bao cao tran ngang o mobile.
+- Sua auth fallback: `AUTH_PROVIDER=app-session` khong chap nhan danh tinh tu header OAI/Cloudflare Access; van doc session hop le truoc. Them unit va static contract test. Trang OTP khong hien form cho challenge het han.
+- `npm test` dat 34 unit + 14 contract; TypeScript, targeted lint va build dat. Playwright dat deferred tabs, email failure isolation, reset pagination, desktop/mobile dashboard; local `/login` tra 200 va khong tran ngang mobile.
+- UI admin test bang mock data, khong gui email/nhap file/thanh toan tren production. Chi test `/login` cua local app ma khong nhap credentials.
+- De xuat tiep theo va pham vi kiem thu chi tiet: `PRODUCT_REVIEW_2026-10-05.md`. Uu tien full-period SQL aggregates (hien co LIMIT 2000/5000), throttling login/email, credentials rieng cho super admin, quan tri khach hang gon hon va dien tap khoi phuc.
+
+### Deploy production theo xac nhan - 2026-10-05
+
+Trang thai: DEPLOYED PRODUCTION tai `https://artistportal.zuongzeroent.com`, version `75fa7fdb-85ed-48a4-a560-4c31a5fb027e`.
+
+- Nguoi dung da xac nhan deploy ban cleanup/toi uu len ban chinh. Kiem tra `wrangler.cloudflare.jsonc` tro dung Worker `royalty-dashboard`, D1/R2 production va `AUTH_PROVIDER=app-session`; khong can migration cho ban nay.
+- Chay lai `npm run build` thanh cong. Bo sung smoke check request gia mao header OAI/Cloudflare Access vao `/api/admin/overview`, ky vong HTTP 401; `node --check tests/production-smoke.mjs` dat.
+- Ban dau `npx wrangler whoami` that bai voi `Failed to fetch auth token: 400 Bad Request` / `Not logged in`, ca trong va ngoai sandbox. OAuth callback cu chua hoan tat, co lan timeout; khong coi dang nhap website Cloudflare la bang chung CLI da dang nhap.
+- Khac phuc bang `npx --yes wrangler@4.147.0 login --device`, mo dung URL `/oauth2/device/verify` do CLI cung cap trong Chrome. Nguoi dung tu xac nhan; CLI bao `Successfully logged in`. `whoami` cua Wrangler 4.92.0 trong repo xac nhan dung account `2b6f84a024bc49c8d450f9bead71a702`. Khong thay dependency, khong luu token/URL co ma xac nhan vao tai lieu.
+- Ghi nhan version production truoc deploy: `7b02b4dc-3813-4b0b-a7ba-a38730765c57`, de rollback code neu can. Khong rollback database/file.
+- Deploy thanh cong bang `npx wrangler deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`; version moi `75fa7fdb-85ed-48a4-a560-4c31a5fb027e`, URL Worker `https://royalty-dashboard.hung-hq197.workers.dev`, cron giu `0 2 15 * *`. Giu bien cau hinh hien co; khong sua secrets, schema, D1/R2 hoac deploy staging.
+- Ban phat hanh gom HEAD `1af779c` va thay doi local cua dot toi uu; chua commit/push moi trong tac vu nay.
+- `npm run test:production` dat 14/14 tren domain chinh: auth pages tra 200, API rieng tu tra 401 khi chua dang nhap, header gia mao khong vuot qua session auth.
+- `node tests/production-smoke.mjs https://royalty-dashboard.hung-hq197.workers.dev` dat 14/14, khong co auth bypass qua URL Worker.
+- 20 request cong khai lien tiep tren domain chinh dat: `/` va `/admin` tra 307 ve login khi chua co phien; ba trang auth tra 200. Khong gap 5xx/1102 trong luot kiem tra nay.
+- Chua test lai cac luong co session admin/client that, gui email/OTP, import/rollback va tai bao cao co du lieu tren production; smoke test khong thay the kiem thu nghiep vu.
+
+## Gioi han dang nhap, OTP va quen mat khau - 2026-10-05
+
+Trang thai: CODE DONE, LOCAL TESTED, NOT DEPLOYED. Nguoi dung dong y trien khai buoc bao ve xac thuc; da thong bao pham vi demo/local truoc khi lam. Chua commit/push, deploy staging/production, migration remote hay sua secrets. Production van la version `75fa7fdb-85ed-48a4-a560-4c31a5fb027e` cua ban cleanup.
+
+- Them `lib/auth-rate-limit.ts`, schema `authRateLimits` va migration `drizzle/0013_auth_rate_limits.sql`. Bo dem chia se qua D1, UPSERT co dieu kien de chong vuot quota dong thoi; request bi chan khong tang count/keo dai thoi gian. Xoa toi da 100 bucket het han moi lan, giu bucket con hieu luc.
+- Chi tin `CF-Connecting-IP` hop le, khong dung forwarding header do client gui. Thieu IP thi vao bucket chung `unknown`. Bucket luu hash, khong luu email/IP truc tiep. Loi limiter chi log policy va ma loi ngau nhien; khong log credentials/OTP.
+- Login: 60 luot/IP/15 phut va 10 luot/email/15 phut, chan truoc kiem tra mat khau. OTP: 30 luot/IP/15 phut, cho 60 giay/email va toi da 10 luot/email/gio. Ap dung ca super admin.
+- Quen mat khau: 20 luot/IP/15 phut, cho 60 giay/email, 3 luot/email/gio. Van tra cung phan hoi chung cho email ton tai, khong ton tai va bi chan. Giu recovery cho tai khoan active va activation cho tai khoan pending.
+- Verify OTP: 60 luot/IP/15 phut; giu 5 luot/challenge nhung dat luot bang UPDATE atomically. OTP het han/da dung khong tao phien; nhieu request dung cung mot ma chi tao mot session. Revoke muon khong ghi de OTP da used.
+- Login/verify vuot quota tra 429 + `Retry-After`, hien thong bao cho tieng Viet; thieu bang/D1 loi thi fail closed (503), khong gui email/tao session. Recovery giu phan hoi chung khi loi. Khong them note tinh, CAPTCHA hay quy trinh dang nhap moi.
+- `npm test` dat 35 unit + 15 contract + 18 integration = 68/68. Integration dung route that + Miniflare/workerd + D1 rieng trong bo nho va outbound email mock, khong gui Resend/OTP that. Gom concurrent quotas/OTP, cooldown expiry, IP/email, super admin, activation, replay va missing migration.
+- TypeScript, targeted lint va production build dat; van co canh bao chunk lon co san. Playwright dat 7/7: cac trang thai cho loi desktop/mobile va submit form that nhan 429/ve login; chi dung email gia khong co tai khoan. Khong nhan/muon credentials that.
+- Da them tests/auth, unit auth-feedback va browser auth-feedback; `npm test` chay them integration suite. Chi tiet nguong/rollout o `PRODUCT_REVIEW_2026-10-05.md`.
+- Database demo thieu bang OTP tu truoc: da chay `0008_login_otps.sql` va `0013_auth_rate_limits.sql` bang Wrangler `--local`, dung D1 `site-creator-d1` va persist `.wrangler/state`. Chi tao bang/index, khong sua user/statement. Khong chay len D1 remote.
+- Demo dang chay `http://127.0.0.1:3213/login`; 3211 co PID vinext dang ky nhung khong listen luc kiem tra, nen dung cong rieng va khong kill tien trinh cu. Anh QA va config migration local o `outputs/` bi ignore.
+- Can apply 0013 vao D1 dung moi truong truoc deploy code moi; bang thieu se chan login/verify. Khong chay lai 0008 tren moi truong da co OTP. Giu migration SQL thu cong nhu 0010-0012, khong auto-generate lai thay doi cu tu Drizzle snapshots chua cap nhat. Rollback code khong can xoa bang moi.
+- Chua test lai email that tren staging/production; chua thay credential rieng cho super admin va chua sua full-quarter aggregates LIMIT 2000/5000. Gioi han email co the lam nguoi dung phai cho neu email bi thu lien tuc; day la throttle tam thoi, khong khoa vinh vien.
+
+## Deploy va commit ban gioi han xac thuc - 2026-10-05
+
+Trang thai: DEPLOYED PRODUCTION. Nguoi dung xac nhan "deploy va commit len github" va yeu cau tiep tuc tac vu. Muc nay cap nhat trang thai NOT DEPLOYED cua ban demo o tren.
+
+- `git fetch origin` thanh cong; `main` va `origin/main` cung HEAD `1af779c`, khong force push hay ghi de lich su remote.
+- Wrangler 4.92.0 xac nhan dung account Cloudflare `2b6f84a024bc49c8d450f9bead71a702` khi chay ngoai sandbox; khong can dang nhap lai hoac thay secret.
+- Production co bang `auth_login_otps`, chua co `auth_rate_limits`. Chi apply `drizzle/0013_auth_rate_limits.sql` bang `npx wrangler d1 execute royalty-dashboard-db --remote --config wrangler.cloudflare.jsonc --env= --file drizzle/0013_auth_rate_limits.sql`, sau do doc sqlite_master xac nhan bang/index dung schema. Khong chay lai 0008/old migrations va khong sua du lieu khach hang.
+- Chay lai `npm test`: 35 unit + 15 contract + 18 integration = 68/68; TypeScript, targeted lint va build dat. Playwright 7/7 da dat tren demo truoc xac nhan deploy. Build van canh bao chunk lon co san.
+- Deploy thanh cong: `npx wrangler deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`; Worker `royalty-dashboard`, version `e8c5fe1b-a51c-4ce9-bdd8-89239dba0738`, domain `https://artistportal.zuongzeroent.com`, URL Worker `https://royalty-dashboard.hung-hq197.workers.dev`.
+- Version truoc deploy: `75fa7fdb-85ed-48a4-a560-4c31a5fb027e`. Co the rollback code ve version nay, khong xoa/rollback bang D1/R2. Giu vars/secrets va cron `0 2 15 * *`, khong deploy staging.
+- `npm run test:production` dat 14/14 tren domain chinh; smoke URL Worker dat 14/14, API rieng tu van tra 401 khi khong co phien hoac gui header danh tinh gia.
+- Thu limiter tren domain chinh bang email gia ngau nhien `example.invalid`: 10 lan loi login theo luong HTTP 200; lan 11 HTTP 429 voi `Retry-After` va `error=rate_limited`. Tat ca khong co session cookie. Chi tao bucket bo dem tam thoi, khong user/challenge/email that, khong thu mat khau tai khoan that.
+- Chua test OTP/mail that hoac dashboard co session admin/client tren production; quota/concurrency/replay da test trong Miniflare D1 rieng. Pham vi smoke khong thay the nghiep vu.
+- Nguon deploy la baseline `1af779c` + cac thay doi cleanup va rate limiting cua dot nay. Se ghi commit code cu the sau buoc commit; khong dua `.env*`, log OAuth, database local, file Excel, outputs hoac build vao GitHub.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 

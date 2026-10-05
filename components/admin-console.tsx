@@ -86,6 +86,7 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  DASHBOARD_PAGE_SIZE,
   TablePagination,
   usePaginatedRows,
 } from '@/components/table-pagination';
@@ -160,7 +161,7 @@ type UploadHistoryRow = {
   uploadMode: UploadMode;
   uploaderEmail: string | null;
 };
-type ReminderActionState = 'idle' | 'saving' | 'saved' | 'failed';
+type ReminderActionState = 'idle' | 'loading' | 'saving' | 'saved' | 'failed';
 type EmailActionState = 'idle' | 'loading' | 'saving' | 'saved' | 'failed';
 type AdminTab =
   | 'overview'
@@ -294,10 +295,10 @@ function formatFileSize(value: number) {
 function accountRoleLabel(role: ManagedAccountRow['role']) {
   const labels: Record<ManagedAccountRow['role'], string> = {
     admin: 'Quản lý',
-    auditor: 'Auditor',
+    auditor: 'Kiểm toán',
     client: 'Khách hàng',
-    pending: 'Pending',
-    super_admin: 'Super admin',
+    pending: 'Chờ duyệt',
+    super_admin: 'Quản trị viên',
   };
 
   return labels[role];
@@ -318,19 +319,19 @@ function accountStatusLabel(account: ManagedAccountRow) {
     return 'Chờ kích hoạt';
   }
 
-  if (account.status === 'active') return 'Active';
-  return 'Disabled';
+  if (account.status === 'active') return 'Đang hoạt động';
+  return 'Đã khóa';
 }
 
 function accessLevelLabel(accessLevel: ClientAccessLevel | null) {
   const labels: Record<ClientAccessLevel, string> = {
-    finance: 'Finance',
-    owner: 'Owner',
-    uploader: 'Uploader',
-    viewer: 'Viewer',
+    finance: 'Kế toán',
+    owner: 'Chủ tài khoản',
+    uploader: 'Nhập dữ liệu',
+    viewer: 'Người xem',
   };
 
-  return accessLevel ? labels[accessLevel] : 'Không gán client';
+  return accessLevel ? labels[accessLevel] : 'Chưa gán khách hàng';
 }
 
 function formatAccountDate(value: string) {
@@ -340,6 +341,7 @@ function formatAccountDate(value: string) {
   return new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'short',
     timeStyle: 'short',
+    timeZone: 'Asia/Bangkok',
   }).format(date);
 }
 
@@ -367,7 +369,7 @@ function statementStatusLabel(status: AdminStatementRow['status']) {
 function importStrategyLabel(strategy: ImportStrategy) {
   if (strategy === 'sync') return 'Đồng bộ bổ sung';
   if (strategy === 'replace') return 'Ghi đè toàn bộ';
-  return 'Tạo statement mới';
+  return 'Tạo báo cáo mới';
 }
 
 function statementStatusFilterLabel(status: StatementStatusFilter) {
@@ -499,7 +501,7 @@ function StatementActionsMenu({
 
   return (
     <NativeSelect
-      aria-label={`Thao tác statement ${statement.clientName}`}
+      aria-label={`Thao tác báo cáo ${statement.clientName}`}
       className="ml-auto w-[132px] bg-white"
       disabled={busy}
       onChange={(event) => runAction(event.currentTarget.value)}
@@ -507,7 +509,7 @@ function StatementActionsMenu({
       value=""
     >
       <NativeSelectOption value="">Thao tác</NativeSelectOption>
-      <NativeSelectOptGroup label="Tải statement">
+      <NativeSelectOptGroup label="Tải báo cáo">
         <NativeSelectOption value="pdf">Tải PDF</NativeSelectOption>
         <NativeSelectOption value="excel">Tải Excel</NativeSelectOption>
       </NativeSelectOptGroup>
@@ -532,19 +534,19 @@ function StatementActionsMenu({
         {statement.status === 'published' ? (
           <>
             <NativeSelectOption value="unpublish">
-              Ẩn khỏi client
+              Ẩn khỏi khách hàng
             </NativeSelectOption>
-            <NativeSelectOption value="lock">Khóa statement</NativeSelectOption>
+            <NativeSelectOption value="lock">Khóa báo cáo</NativeSelectOption>
           </>
         ) : (
           <NativeSelectOption value="publish">
-            {statement.status === 'locked' ? 'Mở lại' : 'Publish'}
+            {statement.status === 'locked' ? 'Mở lại' : 'Phát hành'}
           </NativeSelectOption>
         )}
       </NativeSelectOptGroup>
       {isSuperAdmin ? (
         <NativeSelectOptGroup label="Nguy hiểm">
-          <NativeSelectOption value="delete">Xóa statement</NativeSelectOption>
+          <NativeSelectOption value="delete">Xóa báo cáo</NativeSelectOption>
         </NativeSelectOptGroup>
       ) : null}
     </NativeSelect>
@@ -553,8 +555,8 @@ function StatementActionsMenu({
 
 function guaranteeStatusLabel(status: TrackGuaranteeStatus) {
   if (status === 'active') return 'Đang trừ GM';
-  if (status === 'recouped') return 'Đã recoup';
-  return 'Archived';
+  if (status === 'recouped') return 'Đã thu hồi đủ';
+  return 'Đã lưu trữ';
 }
 
 function guaranteeStatusFilterLabel(status: GuaranteeStatusFilter) {
@@ -571,9 +573,9 @@ function guaranteeBadgeClass(status: TrackGuaranteeStatus) {
 function reminderStatementLabel(
   status: ReminderRecipientRow['statementStatus'],
 ) {
-  if (status === 'published') return 'Published';
-  if (status === 'locked') return 'Locked';
-  return 'Chưa publish';
+  if (status === 'published') return 'Đã phát hành';
+  if (status === 'locked') return 'Đã khóa';
+  return 'Chưa phát hành';
 }
 
 function reminderStatementClass(
@@ -588,22 +590,22 @@ function reminderSettlementLabel(
   status: ReminderRecipientRow['settlementStatus'],
 ) {
   if (status === 'paid') return 'Đủ ngưỡng';
-  if (status === 'carried_forward') return 'Carry forward';
+  if (status === 'carried_forward') return 'Chuyển kỳ sau';
   return 'Chưa có số liệu';
 }
 
 function reminderRunTypeLabel(type: ReminderRunRow['runType']) {
   if (type === 'scheduled') return 'Tự động';
   if (type === 'manual') return 'Gửi tay';
-  if (type === 'dry_run') return 'Dry-run';
-  return 'Retry';
+  if (type === 'dry_run') return 'Xem trước';
+  return 'Gửi lại';
 }
 
 function reminderRunStatusLabel(status: ReminderRunRow['status']) {
-  if (status === 'completed') return 'Completed';
-  if (status === 'partial') return 'Partial';
-  if (status === 'failed') return 'Failed';
-  return 'Skipped';
+  if (status === 'completed') return 'Hoàn tất';
+  if (status === 'partial') return 'Hoàn tất một phần';
+  if (status === 'failed') return 'Thất bại';
+  return 'Đã bỏ qua';
 }
 
 function reminderRunStatusClass(status: ReminderRunRow['status']) {
@@ -616,7 +618,7 @@ function reminderRunStatusClass(status: ReminderRunRow['status']) {
 }
 
 function emailReadyLabel(value: boolean) {
-  return value ? 'Ready' : 'Action needed';
+  return value ? 'Sẵn sàng' : 'Cần kiểm tra';
 }
 
 function emailReadyClass(value: boolean) {
@@ -626,12 +628,12 @@ function emailReadyClass(value: boolean) {
 }
 
 function emailRecordStatusLabel(status: string) {
-  if (status === 'verified') return 'Verified';
-  if (status === 'pending') return 'Pending';
-  if (status === 'failed') return 'Failed';
-  if (status === 'temporary_failure') return 'Temporary failure';
-  if (status === 'not_started') return 'Not started';
-  return 'Unknown';
+  if (status === 'verified') return 'Đã xác minh';
+  if (status === 'pending') return 'Đang chờ';
+  if (status === 'failed') return 'Thất bại';
+  if (status === 'temporary_failure') return 'Lỗi tạm thời';
+  if (status === 'not_started') return 'Chưa bắt đầu';
+  return 'Chưa xác định';
 }
 
 function emailRecordStatusClass(status: string) {
@@ -647,9 +649,9 @@ function emailRecordStatusClass(status: string) {
 }
 
 function dmarcStatusLabel(status: EmailProductionStatusRow['dmarc']['status']) {
-  if (status === 'present') return 'Present';
-  if (status === 'missing') return 'Missing';
-  return 'Unknown';
+  if (status === 'present') return 'Đã cấu hình';
+  if (status === 'missing') return 'Chưa cấu hình';
+  return 'Chưa xác định';
 }
 
 function parseVndInput(value: string) {
@@ -660,10 +662,10 @@ function parseVndInput(value: string) {
 }
 
 function trendLabel(trend: AdminTrendItem['trend']) {
-  if (trend === 'new') return 'New';
-  if (trend === 'up') return 'Up';
-  if (trend === 'down') return 'Down';
-  return 'Flat';
+  if (trend === 'new') return 'Mới';
+  if (trend === 'up') return 'Tăng';
+  if (trend === 'down') return 'Giảm';
+  return 'Không đổi';
 }
 
 function trendClass(trend: AdminTrendItem['trend']) {
@@ -964,12 +966,32 @@ export function AdminConsole({
       );
     });
   }, [guarantees, guaranteeSearch, guaranteeStatusFilter]);
-  const customerPage = usePaginatedRows(visibleCustomers);
+  const customerPage = usePaginatedRows(
+    visibleCustomers,
+    DASHBOARD_PAGE_SIZE,
+    JSON.stringify([customerSearch, customerStatusFilter]),
+  );
   const accountPage = usePaginatedRows(managedAccounts);
-  const statementPage = usePaginatedRows(visibleStatementRows);
-  const guaranteePage = usePaginatedRows(visibleGuarantees);
-  const reminderRecipientPage = usePaginatedRows(reminderRecipients);
-  const reminderRunPage = usePaginatedRows(reminderRuns);
+  const statementPage = usePaginatedRows(
+    visibleStatementRows,
+    DASHBOARD_PAGE_SIZE,
+    JSON.stringify([selectedPeriod, statementSearch, statementStatusFilter]),
+  );
+  const guaranteePage = usePaginatedRows(
+    visibleGuarantees,
+    DASHBOARD_PAGE_SIZE,
+    JSON.stringify([guaranteeSearch, guaranteeStatusFilter]),
+  );
+  const reminderRecipientPage = usePaginatedRows(
+    reminderRecipients,
+    DASHBOARD_PAGE_SIZE,
+    selectedPeriod,
+  );
+  const reminderRunPage = usePaginatedRows(
+    reminderRuns,
+    DASHBOARD_PAGE_SIZE,
+    selectedPeriod,
+  );
   const validation = useMemo(
     () => validateWorkbook(selectedFile, uploadMode),
     [selectedFile, uploadMode],
@@ -1005,6 +1027,9 @@ export function AdminConsole({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const fetchSnapshot = (url: string) =>
+      fetchWithSession(url, { signal: controller.signal });
 
     async function loadAdminData() {
       try {
@@ -1013,32 +1038,24 @@ export function AdminConsole({
         setStatementRows([]);
         setActivityRows([]);
         setGuarantees([]);
-        setReminderRecipients([]);
-        setReminderRuns([]);
         const [
           accountsResponse,
           overviewResponse,
           statementsResponse,
           activityResponse,
           guaranteesResponse,
-          remindersResponse,
-          emailResponse,
         ] = await Promise.all([
-          fetchWithSession(
+          fetchSnapshot(
             isSuperAdmin ? '/api/admin/accounts' : '/api/admin/customers',
           ),
-          fetchWithSession(
+          fetchSnapshot(
             `/api/admin/overview?period=${encodeURIComponent(selectedPeriod)}`,
           ),
-          fetchWithSession(
+          fetchSnapshot(
             `/api/admin/statements?period=${encodeURIComponent(selectedPeriod)}`,
           ),
-          fetchWithSession('/api/admin/activity?limit=12'),
-          fetchWithSession('/api/admin/guarantees'),
-          fetchWithSession(
-            `/api/admin/reminders?period=${encodeURIComponent(selectedPeriod)}`,
-          ),
-          fetchWithSession('/api/admin/email'),
+          fetchSnapshot('/api/admin/activity?limit=12'),
+          fetchSnapshot('/api/admin/guarantees'),
         ]);
         const result = await readJsonResponse<{
           accounts?: ManagedAccountRow[];
@@ -1061,16 +1078,6 @@ export function AdminConsole({
           guarantees?: TrackGuaranteeRow[];
           message?: string;
         }>(guaranteesResponse);
-        const remindersResult = await readJsonResponse<{
-          message?: string;
-          recipients?: ReminderRecipientRow[];
-          runs?: ReminderRunRow[];
-        }>(remindersResponse);
-        const emailResult = await readJsonResponse<{
-          message?: string;
-          status?: EmailProductionStatusRow;
-          testRecipient?: string;
-        }>(emailResponse);
 
         if (!accountsResponse.ok) {
           throw new Error(result.message ?? 'Không thể tải dữ liệu admin.');
@@ -1093,16 +1100,6 @@ export function AdminConsole({
         if (!guaranteesResponse.ok) {
           throw new Error(
             guaranteesResult.message ?? 'Không thể tải danh sách GM.',
-          );
-        }
-        if (!remindersResponse.ok) {
-          throw new Error(
-            remindersResult.message ?? 'Không thể tải lịch nhắc đối soát.',
-          );
-        }
-        if (!emailResponse.ok) {
-          throw new Error(
-            emailResult.message ?? 'Không thể tải cấu hình email.',
           );
         }
 
@@ -1130,15 +1127,6 @@ export function AdminConsole({
           setStatementRows(statementsResult.statements ?? []);
           setActivityRows(activityResult.activity ?? []);
           setGuarantees(guaranteesResult.guarantees ?? []);
-          setReminderRecipients(remindersResult.recipients ?? []);
-          setReminderRuns(remindersResult.runs ?? []);
-          setEmailStatus(emailResult.status ?? null);
-          setEmailTestTo(
-            (currentValue) =>
-              currentValue || emailResult.testRecipient || userEmail,
-          );
-          setEmailState('idle');
-          setEmailMessage('');
           setOperationsMessage('');
           setOperationsState('ready');
         }
@@ -1166,8 +1154,68 @@ export function AdminConsole({
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [isSuperAdmin, selectedPeriod, userEmail]);
+
+  useEffect(() => {
+    if (activeAdminTab !== 'email' && activeAdminTab !== 'reminders') return;
+    const controller = new AbortController();
+
+    async function loadTabData() {
+      const isEmail = activeAdminTab === 'email';
+      try {
+        if (isEmail) {
+          setEmailState('loading');
+          setEmailMessage('');
+        } else {
+          setReminderState('loading');
+          setReminderMessage('');
+          setReminderRecipients([]);
+          setReminderRuns([]);
+        }
+        const response = await fetchWithSession(
+          isEmail
+            ? '/api/admin/email'
+            : `/api/admin/reminders?period=${encodeURIComponent(selectedPeriod)}`,
+          { signal: controller.signal },
+        );
+        const result = await readJsonResponse<{
+          message?: string;
+          status?: EmailProductionStatusRow;
+          testRecipient?: string;
+          recipients?: ReminderRecipientRow[];
+          runs?: ReminderRunRow[];
+        }>(response);
+        if (controller.signal.aborted) return;
+        if (!response.ok)
+          throw new Error(result.message ?? 'Không thể tải dữ liệu.');
+        if (isEmail) {
+          setEmailStatus(result.status ?? null);
+          setEmailTestTo((value) => value || result.testRecipient || userEmail);
+          setEmailState('idle');
+        } else {
+          setReminderRecipients(result.recipients ?? []);
+          setReminderRuns(result.runs ?? []);
+          setReminderState('idle');
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        const message =
+          error instanceof Error ? error.message : 'Không thể tải dữ liệu.';
+        if (isEmail) {
+          setEmailMessage(message);
+          setEmailState('failed');
+        } else {
+          setReminderMessage(message);
+          setReminderState('failed');
+        }
+      }
+    }
+
+    void loadTabData();
+    return () => controller.abort();
+  }, [activeAdminTab, selectedPeriod, userEmail]);
 
   async function refreshAdminSnapshot(period = selectedPeriod) {
     const [
@@ -1176,8 +1224,6 @@ export function AdminConsole({
       statementsResponse,
       activityResponse,
       guaranteesResponse,
-      remindersResponse,
-      emailResponse,
     ] = await Promise.all([
       fetchWithSession('/api/admin/customers'),
       fetchWithSession(
@@ -1188,10 +1234,6 @@ export function AdminConsole({
       ),
       fetchWithSession('/api/admin/activity?limit=12'),
       fetchWithSession('/api/admin/guarantees'),
-      fetchWithSession(
-        `/api/admin/reminders?period=${encodeURIComponent(period)}`,
-      ),
-      fetchWithSession('/api/admin/email'),
     ]);
     const customersResult = await readJsonResponse<{
       customers?: ManagedCustomerRow[];
@@ -1213,16 +1255,6 @@ export function AdminConsole({
       guarantees?: TrackGuaranteeRow[];
       message?: string;
     }>(guaranteesResponse);
-    const remindersResult = await readJsonResponse<{
-      message?: string;
-      recipients?: ReminderRecipientRow[];
-      runs?: ReminderRunRow[];
-    }>(remindersResponse);
-    const emailResult = await readJsonResponse<{
-      message?: string;
-      status?: EmailProductionStatusRow;
-      testRecipient?: string;
-    }>(emailResponse);
 
     if (!customersResponse.ok) {
       throw new Error(
@@ -1249,16 +1281,6 @@ export function AdminConsole({
         guaranteesResult.message ?? 'Không thể tải lại danh sách GM.',
       );
     }
-    if (!remindersResponse.ok) {
-      throw new Error(
-        remindersResult.message ?? 'Không thể tải lại lịch nhắc đối soát.',
-      );
-    }
-    if (!emailResponse.ok) {
-      throw new Error(
-        emailResult.message ?? 'Không thể tải lại cấu hình email.',
-      );
-    }
 
     const nextCustomers = customersResult.customers ?? [];
     setCustomers(nextCustomers);
@@ -1276,12 +1298,6 @@ export function AdminConsole({
     setStatementRows(statementsResult.statements ?? []);
     setActivityRows(activityResult.activity ?? []);
     setGuarantees(guaranteesResult.guarantees ?? []);
-    setReminderRecipients(remindersResult.recipients ?? []);
-    setReminderRuns(remindersResult.runs ?? []);
-    setEmailStatus(emailResult.status ?? null);
-    setEmailTestTo(
-      (currentValue) => currentValue || emailResult.testRecipient || userEmail,
-    );
   }
 
   async function createManagedAccount(event: { preventDefault: () => void }) {
@@ -1738,7 +1754,7 @@ export function AdminConsole({
     action: 'dry_run' | 'send' | 'retry_failed',
     retryRunId?: string,
   ) {
-    if (reminderState === 'saving') return;
+    if (reminderState === 'saving' || reminderState === 'loading') return;
 
     setReminderState('saving');
     setReminderMessage('');
@@ -1783,7 +1799,7 @@ export function AdminConsole({
   }
 
   async function sendEmailProductionTest() {
-    if (emailState === 'saving') return;
+    if (emailState === 'saving' || emailState === 'loading') return;
 
     setEmailState('saving');
     setEmailMessage('');
@@ -2218,7 +2234,7 @@ export function AdminConsole({
                   variant="secondary"
                 >
                   <ShieldCheck className="size-3.5" />
-                  {isSuperAdmin ? 'Super admin' : 'Quản lý'}
+                  {isSuperAdmin ? 'Quản trị viên' : 'Quản lý'}
                 </Badge>
                 <Badge
                   className="h-8 max-w-[280px] truncate rounded-lg bg-white px-3 text-[#1f2937]"
@@ -2265,7 +2281,7 @@ export function AdminConsole({
                 <div>
                   <RefreshCw className="mx-auto size-8 animate-spin text-primary" />
                   <p className="mt-4 text-sm font-semibold">
-                    Đang tải dashboard admin
+                    Đang tải tổng quan
                   </p>
                 </div>
               </section>
@@ -2280,7 +2296,7 @@ export function AdminConsole({
               value={activeAdminTab}
             >
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                <TabsList className="min-h-11 w-full max-w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-lg border border-border/80 bg-white p-1 shadow-sm sm:w-fit">
+                <TabsList className="min-h-11 w-full max-w-full flex-wrap items-center justify-start gap-1 overflow-visible rounded-lg border border-border/80 bg-white p-1 shadow-sm group-data-horizontal/tabs:h-auto sm:w-fit">
                   <TabsTrigger
                     className="h-9 min-w-[112px] flex-none gap-2 px-3 py-0 leading-none after:hidden data-active:bg-[#e9fffb] data-active:shadow-none"
                     value="overview"
@@ -2477,7 +2493,7 @@ export function AdminConsole({
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h2 className="text-lg font-semibold">
-                          Top khách hàng quý này
+                          Khách hàng nổi bật
                         </h2>
                       </div>
                       <WalletCards className="size-5 text-[#ff4d6d]" />
@@ -2568,9 +2584,9 @@ export function AdminConsole({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Tất cả trạng thái</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="locked">Locked</SelectItem>
-                        <SelectItem value="archived">Archived</SelectItem>
+                        <SelectItem value="active">Đang hoạt động</SelectItem>
+                        <SelectItem value="locked">Đã khóa</SelectItem>
+                        <SelectItem value="archived">Đã lưu trữ</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -2579,13 +2595,13 @@ export function AdminConsole({
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Client</TableHead>
-                          <TableHead>Viewer email</TableHead>
-                          <TableHead>Latest</TableHead>
-                          <TableHead>Quarters</TableHead>
-                          <TableHead>Revenue</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Action</TableHead>
+                          <TableHead>Khách hàng</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Quý gần nhất</TableHead>
+                          <TableHead>Số quý</TableHead>
+                          <TableHead>Doanh thu</TableHead>
+                          <TableHead>Trạng thái</TableHead>
+                          <TableHead>Thao tác</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2745,9 +2761,13 @@ export function AdminConsole({
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="locked">Locked</SelectItem>
-                              <SelectItem value="archived">Archived</SelectItem>
+                              <SelectItem value="active">
+                                Đang hoạt động
+                              </SelectItem>
+                              <SelectItem value="locked">Đã khóa</SelectItem>
+                              <SelectItem value="archived">
+                                Đã lưu trữ
+                              </SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -2778,7 +2798,7 @@ export function AdminConsole({
 
               {isSuperAdmin ? (
                 <TabsContent className="space-y-5" value="accounts">
-                  <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                  <section className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                     <section className="music-card p-4 md:p-5">
                       <div className="flex items-start justify-between gap-3">
                         <h2 className="text-lg font-semibold">Tạo tài khoản</h2>
@@ -2858,7 +2878,7 @@ export function AdminConsole({
                         <div className="grid gap-3 sm:grid-cols-2">
                           <div className="space-y-2">
                             <span className="block text-sm font-medium">
-                              Role
+                              Vai trò
                             </span>
                             <Select
                               onValueChange={(value) => {
@@ -2869,7 +2889,7 @@ export function AdminConsole({
                               value={accountRole}
                             >
                               <SelectTrigger
-                                aria-label="Role"
+                                aria-label="Vai trò"
                                 className="music-control h-10 w-full"
                               >
                                 <SelectValue />
@@ -2907,11 +2927,15 @@ export function AdminConsole({
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="viewer">Viewer</SelectItem>
-                                  <SelectItem value="finance">
-                                    Finance
+                                  <SelectItem value="viewer">
+                                    Người xem
                                   </SelectItem>
-                                  <SelectItem value="owner">Owner</SelectItem>
+                                  <SelectItem value="finance">
+                                    Kế toán
+                                  </SelectItem>
+                                  <SelectItem value="owner">
+                                    Chủ tài khoản
+                                  </SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -2956,7 +2980,7 @@ export function AdminConsole({
                               variant="outline"
                             >
                               <Copy className="size-4" />
-                              Copy
+                              Sao chép
                             </Button>
                           </div>
                           {inviteCopyMessage ? (
@@ -3002,7 +3026,7 @@ export function AdminConsole({
                               variant="outline"
                             >
                               <Copy className="size-4" />
-                              Copy
+                              Sao chép
                             </Button>
                           </div>
                           {resetCopyMessage ? (
@@ -3019,11 +3043,11 @@ export function AdminConsole({
                             <TableHeader>
                               <TableRow>
                                 <TableHead>Email</TableHead>
-                                <TableHead>Role</TableHead>
-                                <TableHead>Client</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Last seen</TableHead>
-                                <TableHead>Action</TableHead>
+                                <TableHead>Vai trò</TableHead>
+                                <TableHead>Khách hàng</TableHead>
+                                <TableHead>Trạng thái</TableHead>
+                                <TableHead>Đăng nhập gần nhất</TableHead>
+                                <TableHead>Thao tác</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -3051,7 +3075,8 @@ export function AdminConsole({
                                   </TableCell>
                                   <TableCell>
                                     <span className="block">
-                                      {account.clientName ?? 'Không gán client'}
+                                      {account.clientName ??
+                                        'Chưa gán khách hàng'}
                                     </span>
                                     <span className="text-xs text-muted-foreground">
                                       {accessLevelLabel(account.accessLevel)}
@@ -3143,14 +3168,14 @@ export function AdminConsole({
               ) : null}
 
               <TabsContent className="space-y-5" value="statements">
-                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section
                     className="music-card p-4 md:p-5"
                     id="admin-upload-panel"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-lg font-semibold">
-                        Upload dữ liệu quý
+                        Nhập dữ liệu quý
                       </h2>
                       <FileSpreadsheet className="size-6 text-primary" />
                     </div>
@@ -3278,7 +3303,7 @@ export function AdminConsole({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="create">
-                              Tạo statement mới
+                              Tạo báo cáo mới
                             </SelectItem>
                             <SelectItem value="sync">
                               Đồng bộ bổ sung
@@ -3325,7 +3350,11 @@ export function AdminConsole({
                           }
                           variant="secondary"
                         >
-                          {validation.state === 'blocked' ? 'Blocked' : 'Ready'}
+                          {validation.state === 'blocked'
+                            ? 'Không hợp lệ'
+                            : selectedFile
+                              ? 'Sẵn sàng'
+                              : 'Chưa chọn file'}
                         </Badge>
                       </div>
                       <Progress value={validation.progress} />
@@ -3395,7 +3424,7 @@ export function AdminConsole({
                           onChange={(event) =>
                             setStatementSearch(event.target.value)
                           }
-                          placeholder="Tìm client, file, kỳ..."
+                          placeholder="Tìm khách hàng, file, kỳ..."
                           value={statementSearch}
                         />
                       </div>
@@ -3584,7 +3613,7 @@ export function AdminConsole({
               </TabsContent>
 
               <TabsContent className="space-y-5" value="guarantees">
-                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section className="music-card p-4 md:p-5">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-lg font-semibold">
@@ -3764,7 +3793,7 @@ export function AdminConsole({
                           onChange={(event) =>
                             setGuaranteeSearch(event.target.value)
                           }
-                          placeholder="Tìm client, bài hát, ID..."
+                          placeholder="Tìm khách hàng, bài hát, mã..."
                           value={guaranteeSearch}
                         />
                       </div>
@@ -3792,8 +3821,10 @@ export function AdminConsole({
                         <SelectContent>
                           <SelectItem value="all">Tất cả GM</SelectItem>
                           <SelectItem value="active">Đang trừ GM</SelectItem>
-                          <SelectItem value="recouped">Đã recoup</SelectItem>
-                          <SelectItem value="archived">Archived</SelectItem>
+                          <SelectItem value="recouped">
+                            Đã thu hồi đủ
+                          </SelectItem>
+                          <SelectItem value="archived">Đã lưu trữ</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -3802,13 +3833,13 @@ export function AdminConsole({
                       <Table className="min-w-[720px]">
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Client</TableHead>
-                            <TableHead>Track</TableHead>
+                            <TableHead>Khách hàng</TableHead>
+                            <TableHead>Bài hát</TableHead>
                             <TableHead>GM</TableHead>
                             <TableHead>Đã trừ</TableHead>
                             <TableHead>Còn lại</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Action</TableHead>
+                            <TableHead>Trạng thái</TableHead>
+                            <TableHead>Thao tác</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -3879,7 +3910,7 @@ export function AdminConsole({
                                       variant="outline"
                                     >
                                       <RefreshCw className="size-4" />
-                                      Reactivate
+                                      Kích hoạt lại
                                     </Button>
                                   ) : (
                                     <Button
@@ -3897,7 +3928,7 @@ export function AdminConsole({
                                       variant="outline"
                                     >
                                       <Archive className="size-4" />
-                                      Archive
+                                      Lưu trữ
                                     </Button>
                                   )}
                                 </TableCell>
@@ -3926,7 +3957,7 @@ export function AdminConsole({
               </TabsContent>
 
               <TabsContent className="space-y-5" value="reminders">
-                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section className="music-card p-4 md:p-5">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-lg font-semibold">
@@ -3965,7 +3996,10 @@ export function AdminConsole({
                     <div className="mt-5 grid gap-2">
                       <Button
                         className="h-10 justify-center"
-                        disabled={reminderState === 'saving'}
+                        disabled={
+                          reminderState === 'saving' ||
+                          reminderState === 'loading'
+                        }
                         onClick={() => {
                           void runSettlementReminderAction('dry_run');
                         }}
@@ -3979,6 +4013,7 @@ export function AdminConsole({
                         className="h-10 justify-center bg-[#071118] text-white hover:bg-[#111827]"
                         disabled={
                           reminderState === 'saving' ||
+                          reminderState === 'loading' ||
                           sendableReminderCount === 0
                         }
                         onClick={() => {
@@ -3993,6 +4028,7 @@ export function AdminConsole({
                         className="h-10 justify-center"
                         disabled={
                           reminderState === 'saving' ||
+                          reminderState === 'loading' ||
                           !latestRetryableReminderRun
                         }
                         onClick={() => {
@@ -4025,9 +4061,7 @@ export function AdminConsole({
 
                     <div className="mt-5 rounded-lg border border-border bg-white px-3 py-2 text-sm">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">
-                          Cron Cloudflare
-                        </span>
+                        <span className="text-muted-foreground">Lịch gửi</span>
                         <span className="font-medium">
                           09:00 ngày 15 hằng tháng
                         </span>
@@ -4211,7 +4245,7 @@ export function AdminConsole({
               </TabsContent>
 
               <TabsContent className="space-y-5" value="email">
-                <section className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
                   <section className="music-card p-4 md:p-5">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="text-lg font-semibold">
@@ -4280,7 +4314,7 @@ export function AdminConsole({
 
                     <div className="mt-5 space-y-2">
                       <span className="block text-sm font-medium">
-                        Gửi email test
+                        Email nhận thử
                       </span>
                       <Input
                         onChange={(event) => setEmailTestTo(event.target.value)}
@@ -4290,14 +4324,16 @@ export function AdminConsole({
                       />
                       <Button
                         className="h-10 w-full bg-[#071118] text-white hover:bg-[#111827]"
-                        disabled={emailState === 'saving'}
+                        disabled={
+                          emailState === 'saving' || emailState === 'loading'
+                        }
                         onClick={() => {
                           void sendEmailProductionTest();
                         }}
                         type="button"
                       >
                         <Mail className="size-4" />
-                        {emailState === 'saving' ? 'Đang gửi...' : 'Gửi test'}
+                        {emailState === 'saving' ? 'Đang gửi...' : 'Gửi thử'}
                       </Button>
                     </div>
 
@@ -4317,7 +4353,7 @@ export function AdminConsole({
                   <section className="music-card p-4 md:p-5">
                     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                       <h2 className="text-lg font-semibold">
-                        Resend, SPF/DKIM/DMARC
+                        Cấu hình tên miền email
                       </h2>
                       <Badge
                         className={emailReadyClass(
@@ -4396,10 +4432,10 @@ export function AdminConsole({
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Record</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead>Status</TableHead>
+                            <TableHead>Bản ghi</TableHead>
+                            <TableHead>Tên</TableHead>
+                            <TableHead>Loại</TableHead>
+                            <TableHead>Trạng thái</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -4433,7 +4469,7 @@ export function AdminConsole({
                                 className="h-24 text-center text-sm text-muted-foreground"
                                 colSpan={4}
                               >
-                                Chưa đọc được DNS records từ Resend.
+                                Chưa có thông tin bản ghi DNS.
                               </TableCell>
                             </TableRow>
                           )}
@@ -4500,7 +4536,6 @@ export function AdminConsole({
                         value={formatMoney(
                           uploadPreview.totals.guaranteeRecouped,
                         )}
-                        helper="Chưa ghi dữ liệu"
                       />
                       <PreviewMetric
                         label="Thực nhận dự kiến"
@@ -4591,7 +4626,7 @@ export function AdminConsole({
             >
               <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
                 <DialogHeader>
-                  <DialogTitle>Lịch sử dữ liệu statement</DialogTitle>
+                  <DialogTitle>Lịch sử cập nhật báo cáo</DialogTitle>
                 </DialogHeader>
                 <p className="text-sm text-muted-foreground">
                   {historyTarget?.clientName} · {historyTarget?.periodLabel}
@@ -4657,7 +4692,7 @@ export function AdminConsole({
                   </div>
                 ) : uploadHistoryState === 'ready' ? (
                   <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                    Chưa có lịch sử import cho statement này.
+                    Chưa có lịch sử cập nhật.
                   </p>
                 ) : null}
 
@@ -4733,8 +4768,8 @@ export function AdminConsole({
                   </AlertDialogMedia>
                   <AlertDialogTitle>Xoá khách hàng</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Khách hàng, statement và file upload liên quan sẽ bị xoá
-                    khỏi hệ thống.
+                    Khách hàng, báo cáo và file dữ liệu liên quan sẽ bị xoá khỏi
+                    hệ thống.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -4765,10 +4800,10 @@ export function AdminConsole({
                   <AlertDialogMedia className="bg-[#fff2f0] text-[#a53a30]">
                     <Trash2 className="size-5" />
                   </AlertDialogMedia>
-                  <AlertDialogTitle>Xoá statement</AlertDialogTitle>
+                  <AlertDialogTitle>Xoá báo cáo</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Statement và toàn bộ breakdown của kỳ này sẽ bị xoá khỏi hệ
-                    thống.
+                    Báo cáo và toàn bộ dữ liệu phân tích của kỳ này sẽ bị xoá
+                    khỏi hệ thống.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -4799,7 +4834,7 @@ function PreviewMetric({
   label,
   value,
 }: {
-  helper: string;
+  helper?: string;
   label: string;
   value: string;
 }) {
@@ -4811,7 +4846,9 @@ function PreviewMetric({
       <p className="mt-2 truncate text-lg font-semibold tabular-nums">
         {value}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+      {helper ? (
+        <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+      ) : null}
     </div>
   );
 }

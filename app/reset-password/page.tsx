@@ -35,10 +35,7 @@ export default async function ResetPasswordPage({
       <section className="music-card grid w-full max-w-5xl overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="bg-[#071118] p-6 text-white md:p-8">
           <BrandMark />
-          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-white/55">
-            Password reset
-          </p>
-          <h1 className="font-display mt-4 text-3xl font-semibold">
+          <h1 className="font-display mt-8 text-3xl font-semibold">
             Zuong Zero Artist Portal
           </h1>
           <EqualizerBars className="mt-10" />
@@ -93,7 +90,7 @@ function ResetForm({
       <div className="rounded-lg border border-border bg-white p-3">
         <p className="break-all text-sm font-medium">{invite.email}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {invite.displayName ?? invite.clientName ?? 'Artist portal account'}
+          {invite.displayName ?? invite.clientName ?? 'Tài khoản'}
         </p>
       </div>
 

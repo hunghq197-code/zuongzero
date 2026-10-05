@@ -10,6 +10,19 @@ function readSource(relativePath) {
   return readFileSync(join(root, relativePath), 'utf8');
 }
 
+void test('session auth delegates header identities to the provider guard', () => {
+  const auth = readSource('app/chatgpt-auth.ts');
+  assert.match(
+    auth,
+    /readHeaderIdentity\(requestHeaders, env\.AUTH_PROVIDER\)/,
+  );
+  assert.doesNotMatch(auth, /oai-authenticated-user-email/);
+  assert.ok(
+    auth.indexOf('readSessionUser(sessionToken)') <
+      auth.indexOf('return readHeaderIdentity'),
+  );
+});
+
 test('all admin API routes require signed-in admin authorization', () => {
   const adminRoutes = [
     'app/api/admin/access-requests/route.ts',
@@ -318,4 +331,26 @@ test('login requires an email OTP before creating a session', () => {
   assert.match(verifyRoute, /INSERT INTO auth_sessions/);
   assert.match(verifyPage, /InputOTP/);
   assert.match(verifyPage, /\/api\/auth\/verify-login/);
+});
+
+test('auth throttling is durable, atomic and runs before credentials or email work', () => {
+  const limiter = readSource('lib/auth-rate-limit.ts');
+  const login = readSource('app/api/auth/login/route.ts');
+  const recovery = readSource('app/api/auth/forgot-password/route.ts');
+  const verify = readSource('app/api/auth/verify-login/route.ts');
+  const migration = readSource('drizzle/0013_auth_rate_limits.sql');
+
+  assert.match(migration, /CREATE TABLE `auth_rate_limits`/);
+  assert.match(migration, /idx_auth_rate_limits_expires/);
+  assert.match(limiter, /hashSessionToken/);
+  assert.match(limiter, /ON CONFLICT\(bucket_key\) DO UPDATE/);
+  assert.match(limiter, /RETURNING expires_at/);
+  assert.match(limiter, /status: 'unavailable'/);
+  assert.doesNotMatch(limiter, /x-forwarded-for|x-real-ip/i);
+  assert.ok(login.indexOf("'login_account'") < login.indexOf('await authenticateUser'));
+  assert.ok(login.indexOf("'otp_cooldown'") < login.indexOf('await createLoginOtpChallenge'));
+  assert.ok(recovery.indexOf("'recovery_account'") < recovery.indexOf('await findPasswordRecoveryCandidate'));
+  assert.match(verify, /attempt_count = attempt_count \+ 1/);
+  assert.match(verify, /AND attempt_count < \?/);
+  assert.doesNotMatch(verify, /SET attempt_count = \?/);
 });

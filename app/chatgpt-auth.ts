@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { readHeaderIdentity, type HeaderIdentity } from '@/lib/header-identity';
 
 import {
   buildExpiredSessionCookie,
@@ -10,20 +11,7 @@ import {
   SESSION_COOKIE_NAME,
 } from '@/lib/app-auth';
 
-export type ChatGPTUser = {
-  userId: string;
-  displayName: string;
-  email: string;
-  fullName: string | null;
-};
-
-const USER_ID_HEADER = 'oai-authenticated-user-id';
-const USER_EMAIL_HEADER = 'oai-authenticated-user-email';
-const USER_FULL_NAME_HEADER = 'oai-authenticated-user-full-name';
-const USER_FULL_NAME_ENCODING_HEADER =
-  'oai-authenticated-user-full-name-encoding';
-const CLOUDFLARE_ACCESS_EMAIL_HEADER = 'cf-access-authenticated-user-email';
-const PERCENT_ENCODED_UTF8 = 'percent-encoded-utf-8';
+export type ChatGPTUser = HeaderIdentity;
 
 type SessionUserRow = {
   userId: string;
@@ -49,39 +37,7 @@ export async function getChatGPTUser(
     if (sessionUser) return sessionUser;
   }
 
-  const userId = requestHeaders.get(USER_ID_HEADER);
-  const email = requestHeaders.get(USER_EMAIL_HEADER);
-  const accessEmail = requestHeaders.get(CLOUDFLARE_ACCESS_EMAIL_HEADER);
-
-  if (userId && email) {
-    const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
-    const fullName =
-      encodedFullName &&
-      requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) ===
-        PERCENT_ENCODED_UTF8
-        ? safeDecodeURIComponent(encodedFullName)
-        : null;
-
-    return {
-      userId,
-      displayName: fullName ?? email,
-      email,
-      fullName,
-    };
-  }
-
-  if (isCloudflareAccessAuth() && accessEmail) {
-    const normalizedEmail = accessEmail.trim().toLowerCase();
-
-    return {
-      userId: `cloudflare-access:${normalizedEmail}`,
-      displayName: normalizedEmail,
-      email: normalizedEmail,
-      fullName: null,
-    };
-  }
-
-  return null;
+  return readHeaderIdentity(requestHeaders, env.AUTH_PROVIDER);
 }
 
 export async function requireChatGPTUser(
@@ -105,18 +61,6 @@ export function chatGPTSignOutPath(returnTo = '/'): string {
 
 export function authProviderName() {
   return 'Zuong Zero Artist Portal account';
-}
-
-function isCloudflareAccessAuth() {
-  return env.AUTH_PROVIDER === 'cloudflare-access';
-}
-
-function safeDecodeURIComponent(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
 }
 
 async function readSessionUser(token: string): Promise<ChatGPTUser | null> {

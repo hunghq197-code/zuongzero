@@ -115,6 +115,16 @@ export const authSessions = sqliteTable(
   ],
 );
 
+export const authRateLimits = sqliteTable(
+  'auth_rate_limits',
+  {
+    bucketKey: text('bucket_key').primaryKey(),
+    requestCount: integer('request_count').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (table) => [index('idx_auth_rate_limits_expires').on(table.expiresAt)],
+);
+
 export const authLoginOtps = sqliteTable(
   'auth_login_otps',
   {

@@ -22,10 +22,7 @@ export default async function ForgotPasswordPage({
       <section className="music-card grid w-full max-w-5xl overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="bg-[#071118] p-6 text-white md:p-8">
           <BrandMark />
-          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-white/55">
-            Password recovery
-          </p>
-          <h1 className="font-display mt-4 text-3xl font-semibold">
+          <h1 className="font-display mt-8 text-3xl font-semibold">
             Zuong Zero Artist Portal
           </h1>
           <EqualizerBars className="mt-10" />
@@ -38,9 +35,6 @@ export default async function ForgotPasswordPage({
           <h2 className="font-display mt-5 text-2xl font-semibold md:text-3xl">
             Quên mật khẩu
           </h2>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Nhập email tài khoản để nhận link đặt lại mật khẩu.
-          </p>
 
           <form
             action="/api/auth/forgot-password"
@@ -64,14 +58,14 @@ export default async function ForgotPasswordPage({
 
             {sent ? (
               <p className="rounded-lg border border-[#bce9e4] bg-[#f0fffc] px-3 py-2 text-sm text-[#047a70]">
-                Nếu email tồn tại trong hệ thống, link đặt lại mật khẩu đã được
-                gửi.
+                Nếu email tồn tại trong hệ thống, liên kết đặt lại mật khẩu đã
+                được gửi.
               </p>
             ) : null}
 
             <Button className="h-11 w-full" type="submit">
               <ShieldCheck className="size-4" />
-              Gửi link đặt lại mật khẩu
+              Gửi liên kết đặt lại mật khẩu
             </Button>
           </form>
 
