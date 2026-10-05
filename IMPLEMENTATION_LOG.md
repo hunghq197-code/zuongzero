@@ -393,7 +393,8 @@ Trang thai: DEPLOYED PRODUCTION. Nguoi dung xac nhan "deploy va commit len githu
 - `npm run test:production` dat 14/14 tren domain chinh; smoke URL Worker dat 14/14, API rieng tu van tra 401 khi khong co phien hoac gui header danh tinh gia.
 - Thu limiter tren domain chinh bang email gia ngau nhien `example.invalid`: 10 lan loi login theo luong HTTP 200; lan 11 HTTP 429 voi `Retry-After` va `error=rate_limited`. Tat ca khong co session cookie. Chi tao bucket bo dem tam thoi, khong user/challenge/email that, khong thu mat khau tai khoan that.
 - Chua test OTP/mail that hoac dashboard co session admin/client tren production; quota/concurrency/replay da test trong Miniflare D1 rieng. Pham vi smoke khong thay the nghiep vu.
-- Nguon deploy la baseline `1af779c` + cac thay doi cleanup va rate limiting cua dot nay. Se ghi commit code cu the sau buoc commit; khong dua `.env*`, log OAuth, database local, file Excel, outputs hoac build vao GitHub.
+- Commit code phat hanh: `baea9a27111e567b0fce489c7dfc6c099c3da9a0` (`feat: harden auth throttling and streamline portal UX`), gom 35 file source/test/tai lieu. Noi dung source khop ban build/deploy; commit tiep theo chi ghi ma commit vao tai lieu.
+- GitHub: `hunghq197-code/zuongzero`, nhanh `main`. Da kiem tra staged changes va `git diff --cached --check`; khong thay mau secret, khong dua `.env*`, log OAuth, database local, file Excel, outputs hoac build vao GitHub. Push khong force va xac nhan remote HEAD sau lenh.
 
 ## Nguyen tac ghi log cho cac lan tiep theo
 
