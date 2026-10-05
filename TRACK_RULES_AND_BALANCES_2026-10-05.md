@@ -1,7 +1,7 @@
 # Bai Hat, Ty Le Chia Va So Du Chuyen Quy
 
 Ngay: 2026-10-05. Nhanh goc: `main`, commit goc `1ef3e41`.
-Trang thai: DEPLOYED PRODUCTION version `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`; CHUA commit/push.
+Trang thai: DEPLOYED PRODUCTION version `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`; source da commit/push len GitHub `main` tai `cfdb42d98d7b7416376cdd6de8e4a29ba3371853`.
 Production duy nhat: Cloudflare, `https://artistportal.zuongzeroent.com`.
 
 ## Yeu Cau Va Quy Uoc Da Chot
@@ -72,11 +72,11 @@ Production duy nhat: Cloudflare, `https://artistportal.zuongzeroent.com`.
 - Hash JS admin, JS client dashboard va CSS tren domain khop ban build; HTML login tham chieu CSS moi. Khong gap trang loi Worker resource limits trong cac request da thu; day khong phai load test.
 - Wrangler xac nhan dung account va deploy thanh cong. Token khong co quyen truy van schema D1 truc tiep (7403), nen chua kiem tra lai schema bang CLI; cac migration hien co da duoc ghi nhan o lich su phat hanh truoc. Khong chay migration hay sua du lieu production trong luot nay.
 - Chua test co session that/import/thanh toan/gui email tren production. Khong dong nhat smoke test voi doi soat nghiep vu bang workbook that.
-- Source van la working tree tren `1ef3e416182814bc16c75ecef3d752c337084e2a`, chua push. Build server entry SHA256 `a81d5dae5a6e57b82b317847215f054b6d94746102b38e5cc934d6e90e59232d`.
+- Source duoc build tu working tree tren `1ef3e416182814bc16c75ecef3d752c337084e2a`, sau do da commit/push thanh `cfdb42d98d7b7416376cdd6de8e4a29ba3371853` vao `origin/main`. Build server entry SHA256 `a81d5dae5a6e57b82b317847215f054b6d94746102b38e5cc934d6e90e59232d`. Cap nhat tai lieu sau commit source khong yeu cau deploy lai.
 
 ## Chay Tiep O May Khac
 
-1. Dong bo code va doc file nay cung `IMPLEMENTATION_LOG.md`, `STAGING.md`. Phien nay chua push; can commit/push cac thay doi truoc khi may khac co the pull.
+1. Clone `https://github.com/hunghq197-code/zuongzero.git` hoac pull `main` (`git pull --ff-only origin main` khi working tree sach). Source phat hanh da push tai commit `cfdb42d`; doc file nay cung `IMPLEMENTATION_LOG.md`, `STAGING.md`.
 2. Node >=22.13, `npm ci`, `npm test`, TypeScript va `npm run build`.
 3. Khong co migration moi. Database phai co cac migration hien hanh den 0013, dac biet 0010/0011/0012 cho line items, payment status va royalty rules.
 4. Local app: `node node_modules/vite/bin/vite.js --host=127.0.0.1 --port=3213 --strictPort`. Neu cong bi chiem, dung cong khac. Secrets local luu trong file ignored, khong dua len Git.
@@ -85,7 +85,6 @@ Production duy nhat: Cloudflare, `https://artistportal.zuongzeroent.com`.
 
 ## Chua Thuc Hien / Viec Tiep Theo
 
-- Commit/push source va tai lieu cua ban da deploy; hien tai van la working tree local, may khac chua pull duoc release nay.
 - Kiem tra staging voi workbook that cua truong hop lech quy va doi chieu 2-3 quy co unpaid/paid/GM truoc production; dung chung tu de kiem tra so tien lich su.
 - Khac phuc Resend API key/cau hinh staging va kiem tra gui reminder that theo checklist truoc day; khong gui email that trong dot nay.
 - Loi upload 2026-09-29: da bo han che namespace-prefixed OOXML va co test, nhung chua co dung workbook gap loi de ket luan day la nguyen nhan duy nhat.

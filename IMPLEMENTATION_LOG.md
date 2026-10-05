@@ -2,17 +2,25 @@
 
 Cap nhat ngay 2026-10-05, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
+## Commit Va Push GitHub - 2026-10-05
+
+- DONE: theo yeu cau nguoi dung, da commit va push source, tests va tai lieu len `origin/main` tai `https://github.com/hunghq197-code/zuongzero`.
+- Commit source phat hanh: `cfdb42d98d7b7416376cdd6de8e4a29ba3371853` (`feat: import track royalty rules and carry unpaid quarterly balances`), gom 30 files. Source khop ban Cloudflare `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`; cap nhat sau commit nay chi la tai lieu.
+- Da fetch truoc push, khong co thay doi remote moi can merge. `git diff --cached --check` dat; kiem tra 30 files thay doi khong phat hien mau token/private key da quet. Khong dua `.env`, `.wrangler`, `dist`, `outputs` hay du lieu runtime vao Git.
+- Khong doi source nghiep vu, khong chay lai deploy hay sua production trong luot commit/push. Ket qua 81/81 tests va 16/16 production smoke cua dung source phat hanh duoc giu o muc ben duoi.
+- May khac co the clone/pull `main`, doc `TRACK_RULES_AND_BALANCES_2026-10-05.md` de tiep tuc; cac hang muc chua lam van duoc ghi rieng, khong danh dau hoan thanh theo viec push.
+
 ## Phat hanh bai hat va so du len production - 2026-10-05
 
 - DEPLOYED theo yeu cau deploy ban chinh. Chi Cloudflare Worker `royalty-dashboard`, domain `https://artistportal.zuongzeroent.com`; khong deploy ChatGPT Sites, khong doi DNS.
 - Version moi: `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`. Version truoc deploy da doc tu Cloudflare: `e8c5fe1b-a51c-4ce9-bdd8-89239dba0738` (diem rollback code, khong rollback D1/R2).
 - Lenh: `node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`. Giu vars/secrets, bindings D1/R2 va cron `0 2 15 * *`; Worker startup 12 ms.
-- Source la working tree tren commit goc `1ef3e416182814bc16c75ecef3d752c337084e2a`, CHUA commit/push ban nay. SHA256 `dist/server/index.js`: `a81d5dae5a6e57b82b317847215f054b6d94746102b38e5cc934d6e90e59232d`.
+- Khi deploy, source la working tree tren commit goc `1ef3e416182814bc16c75ecef3d752c337084e2a`; sau do da commit/push thanh `cfdb42d98d7b7416376cdd6de8e4a29ba3371853`. SHA256 `dist/server/index.js`: `a81d5dae5a6e57b82b317847215f054b6d94746102b38e5cc934d6e90e59232d`.
 - Truoc deploy: chay lai `npm test` 81/81, TypeScript, lint hai file vua chinh va build dat. Chuyen XLSX template writer sang dynamic import sau auth de khong nap PDF/font library vao moi request; them 2 smoke checks GET/POST import ty le.
 - Sau deploy: `npm run test:production` 16/16 tren domain chinh; 20/20 request trang auth bo sung dat, khong gap trang loi tai nguyen. Hash 3 assets admin/client dashboard/CSS tren domain khop tung byte ban build; HTML login tham chieu CSS moi.
 - Token dung account Cloudflare `2b6f84a024bc49c8d450f9bead71a702`, deploy thanh cong, nhung truy van chi doc schema D1 qua CLI bi tu choi `7403`. Khong co migration moi; khong sua schema/du lieu D1/R2 hay thay secrets. Schema hien co duoc ghi nhan trong lich su phat hanh, chua xac minh lai bang CLI trong luot nay.
 - Chua test lai phien admin/client that, import/mark paid/export co du lieu hay gui OTP/reminder tren production. Kiem thu nghiep vu da chay trong Miniflare rieng va demo desktop/mobile; staging mail va doi chieu workbook that van con trong danh sach viec tiep theo.
-- Ban giao va cac hang muc con lai: `TRACK_RULES_AND_BALANCES_2026-10-05.md`. Can commit/push de may khac lay duoc source dung voi release nay.
+- Ban giao va cac hang muc con lai: `TRACK_RULES_AND_BALANCES_2026-10-05.md`. Source cua release nay da co tren GitHub `main`.
 
 ## Bai hat, ty le chia va so du chuyen quy - 2026-10-05
 
@@ -22,7 +30,7 @@ Cap nhat ngay 2026-10-05, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 - DONE LOCAL: so du chuyen quy dua tren trang thai thanh toan thuc te, khong tu coi khoan du 1 trieu la da tra. Dong bo dashboard admin/client, import, export va reminder. Giu nguyen so tien thanh toan lich su; chan thay doi ky truoc neu ky sau da tra/da khoa.
 - DONE LOCAL: doc XLSX co namespace prefix va format percentage; import ty le kiem tra lai snapshot trong transaction D1, khong luu mot phan khi file loi/preview cu.
 - VERIFIED: `npm test` 81/81 (35 unit + 15 contracts + 18 auth + 13 business); TypeScript, build Cloudflare va 2 browser runners desktop/mobile dat. Lint source thay doi va test moi dat; lint ca file static cu van co `no-floating-promises` ton tai tu truoc.
-- Giai doan trien khai local chua deploy/push/commit. Sau do da deploy theo xac nhan nguoi dung, xem muc phat hanh ngay ben tren; van chua commit/push. Khong gui email that hay sua D1/R2 production.
+- Giai doan trien khai local chua deploy/push/commit. Sau do da deploy va commit/push theo xac nhan nguoi dung, xem cac muc phat hanh ben tren. Khong gui email that hay sua D1/R2 production.
 - Tai lieu tiep tuc cong viec, dinh dang file, han che va cac viec chua lam: `TRACK_RULES_AND_BALANCES_2026-10-05.md`. Du an local dang chay cong 3213; preview test component cong 3212 khong phai site production.
 
 ## Dong bo source va doc tai lieu - 2026-10-05
