@@ -1,6 +1,6 @@
 # An Toan Du Lieu Va Bao Cao - 12/10/2026
 
-Trang thai: DEPLOYED PRODUCTION version `3c514f56-93bb-487c-b4d1-fb2b91519456`. Source goc `c339b8c` tren `main`; thong tin commit source o muc phat hanh ben duoi.
+Trang thai: DEPLOYED PRODUCTION version `3c514f56-93bb-487c-b4d1-fb2b91519456`. Source phat hanh `dfb7da03c84ff77a96e296b5de1cd7a868b7fafb` tren `main`, source goc `c339b8c`.
 Nguoi dung yeu cau trien khai cac muc con thieu va giu cach dung don gian nhat.
 Giai doan local ban dau khong deploy/commit/push. Sau do nguoi dung xac nhan phat hanh va commit; da deploy va them bang khoa production, khong thay secret hay sua du lieu khach hang. Ket qua phat hanh o cuoi file.
 
@@ -87,5 +87,6 @@ Layout 3 cot desktop / 2 cot tablet / 1 cot mobile; status/quy van o header. Tes
 - Version `3c514f56-93bb-487c-b4d1-fb2b91519456`; version cu `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`. Khong rollback D1/R2; rollback code auth cu phai co ke hoach khoi phuc vi khong su dung credential ca nhan.
 - Domain chinh `https://artistportal.zuongzeroent.com`; URL Worker `https://royalty-dashboard.hung-hq197.workers.dev`. Vars/secrets, cron va bindings duoc giu; khong deploy staging hoac reset password that.
 - Production smoke 16/16 tren ca hai host. Ba assets JS admin/JS dashboard/CSS khop hash ban build; login HTML tham chieu CSS moi. Chua test co phien/du lieu that hay gui email that tren production.
-- Build server entry SHA256 `2edd53127d48fefe8e169d67a29f8ce78a3aba8ed2d2b9232d9d8e60ca094eeb`; build tu working tree tren `c339b8c`. Commit source va tai lieu duoc ghi nhan sau buoc commit; cap nhat .md sau commit code khong can deploy lai.
+- Build server entry SHA256 `2edd53127d48fefe8e169d67a29f8ce78a3aba8ed2d2b9232d9d8e60ca094eeb`; build tu working tree tren `c339b8c`, sau do commit source `dfb7da03c84ff77a96e296b5de1cd7a868b7fafb` (`feat: protect client updates and simplify financial dashboard`), gom 36 file. Cap nhat .md sau commit code khong can deploy lai.
+- GitHub repository `https://github.com/hunghq197-code/zuongzero`, nhanh `main`. Source, test va hai file .md nam trong commit source; commit tai lieu sau do chi bo sung ma commit phat hanh. Khong dua secret, database local, Excel, build hoac screenshot vao repo.
 - Moi super admin dung credential rieng neu da co. Dang nhap cu bootstrap mot lan neu chua co; Tai khoan cho phep doi password va Quen mat khau cho phep reset qua inbox cua super admin active da ton tai. Khong tu doi password cua khach hang hay hai super admin khi deploy.

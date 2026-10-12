@@ -12,11 +12,12 @@ Trang thai: DEPLOYED PRODUCTION theo xac nhan "deploy va commit len git". Cac mu
 - Lenh deploy: `node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`.
 - Worker `royalty-dashboard`, version moi `3c514f56-93bb-487c-b4d1-fb2b91519456`, startup 16 ms; domain `https://artistportal.zuongzeroent.com`, URL Worker `https://royalty-dashboard.hung-hq197.workers.dev`. Giu vars/secrets, D1/R2 bindings va cron `0 2 15 * *`; khong deploy staging.
 - Version truoc deploy `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`. Rollback code cu khong tham gia lock/credential rieng; phai chot ke hoach auth truoc rollback, khong xoa bang khoa hay rollback du lieu D1/R2.
-- SHA256 build `dist/server/index.js`: `2edd53127d48fefe8e169d67a29f8ce78a3aba8ed2d2b9232d9d8e60ca094eeb`. Source build tu working tree tren `c339b8c`; commit source cu the duoc bo sung sau buoc commit.
+- SHA256 build `dist/server/index.js`: `2edd53127d48fefe8e169d67a29f8ce78a3aba8ed2d2b9232d9d8e60ca094eeb`. Source build tu working tree tren `c339b8c`, sau do commit tai `dfb7da03c84ff77a96e296b5de1cd7a868b7fafb` (`feat: protect client updates and simplify financial dashboard`), gom 36 file source/test/.md.
 - `npm run test:production` dat 16/16; smoke URL Worker dat 16/16. Auth pages tra 200, API nhay cam tra 401 khi khong co phien/header gia mao.
 - Hash JS admin, JS dashboard client va CSS tren domain khop ban build; HTML login tham chieu CSS moi. Kiem tra chi doc, khong gui OTP/reset/mail that hoac dang nhap/nhap file/thanh toan tren production.
 - Chua xac nhan dashboard co session va workbook that tren production. Can nguoi dung dang nhap, xem 6 chi so va thu doi/reset password rieng qua inbox. Credential da co duoc giu, khong reset bang server secret; super admin active da ton tai co the dung Quen mat khau neu khong nho password.
 - Tai lieu chi tiet va cac gioi han: `SAFETY_AND_REPORTING_2026-10-12.md`. Commit/push bao gom source/test/.md, loai tru `.env*`, `.wrangler`, `dist`, `outputs`, database va file Excel.
+- GitHub handoff: `hunghq197-code/zuongzero`, nhanh `main`; commit source `dfb7da0`, commit tiep theo chi ghi ma source vao tai lieu. Kiem tra staged changes: 36 files, khong thay mau secret/duong dan runtime bi cam; `git diff --cached --check` dat. Cap nhat tai lieu khong yeu cau deploy lai; remote HEAD duoc xac nhan sau push.
 
 ## Rut Gon Tong Quan Tai Chinh Client - 2026-10-12
 
