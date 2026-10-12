@@ -4,7 +4,7 @@
 
 With the component preview on port 3212, run `node tests/browser/statement-history.test.mjs` using the `PLAYWRIGHT_MODULE` setup below. It checks history links on desktop/mobile: quarter selection, financial values and monthly charts, no document reload, keyboard/focus, Back/Forward, reload and new-tab URLs, scoped PDF/Excel downloads, unavailable quarters, empty data and pagination over 10 reports. Screenshots are in ignored `outputs/statement-history-2026-10-12/`. No production data or API is used.
 
-The fixture accepts `period=2026-Q2` for direct links and `history=many` for 14 synthetic quarterly reports. `npm test` now has 97 checks including the history-link scope contract. This change is local only, not deployed; see `IMPLEMENTATION_LOG.md`.
+The fixture accepts `period=2026-Q2` for direct links and `history=many` for 14 synthetic quarterly reports. `npm test` now has 97 checks including the history-link scope contract. Source `911ea7c` was deployed to production as version `33560e6a-e059-45b7-9dec-063a91ff7c3f` after approval; post-release smoke passed 16/16 on each host. These browser checks still use synthetic local data. See `IMPLEMENTATION_LOG.md` for release details.
 
 ## Six-Metric Financial Summary (2026-10-12)
 

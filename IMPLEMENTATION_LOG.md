@@ -2,9 +2,22 @@
 
 Cap nhat ngay 2026-10-12, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
+## Phat Hanh Lien Ket Lich Su Quy - 2026-10-12
+
+Trang thai: DEPLOYED PRODUCTION theo xac nhan "deploy va commit len git".
+
+- Fetch GitHub xac nhan `HEAD`/`origin/main` cung `7e8b605`; Wrangler OAuth dung account hien co. Source/test/.md duoc commit tai `911ea7c0c2efae6b44791964a3088973018377a7` (`feat: link quarterly report history to client dashboard`), 7 files. Khong force push hay doi DNS.
+- Source nay da dat `npm test` 97/97, TypeScript va targeted lint. Chay lai build va Playwright history 16/16 ngay truoc deploy; financial summary 16/16 va royalty workflow desktop/mobile da dat tren cung source. Build van co canh bao chunk >500 KB co san.
+- Deploy `royalty-dashboard` bang `node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`. Version moi `33560e6a-e059-45b7-9dec-063a91ff7c3f`, startup 11 ms; version truoc `3c514f56-93bb-487c-b4d1-fb2b91519456`.
+- Domain chinh `https://artistportal.zuongzeroent.com`, URL Worker `https://royalty-dashboard.hung-hq197.workers.dev`. Khong migration, thay secrets/email vars hay ghi du lieu khach hang; D1/R2 va cron `0 2 15 * *` giu nguyen, khong deploy staging.
+- Build server SHA256: `4f32c86233d27813b459525ac076be456ef8893d66aa4ab0e62ed3e57015650e`. Cloudflare bao warning khong gan duoc service/environment tags, chi anh huong grouping tren dashboard Cloudflare; deploy/triggers thanh cong.
+- Post-release smoke 16/16 tren moi host. Auth pages 200, API nhay cam 401 khi chua co session/header gia mao. JS dashboard `royalty-dashboard-H9iCTErQ.js`, JS admin `admin-console-yxHekJBJ.js` va CSS `index.BAoKmB-6.css` tren domain khop SHA256 ban build; HTML login tham chieu CSS moi.
+- Domain that: GET `/?period=2026-Q2` tra 307 va giu `return_to=/?period=2026-Q2`; query invalid tra ve `/`. Kiem tra chi doc, khong gui OTP/email hay nhap/thanh toan/export du lieu that. Chua test lai click lich su voi session khach hang that tren production; da test day du bang fixture local.
+- Kiem tra staging Git: 7 files, 370 added lines, khong phat hien mau secret da quet hay duong dan runtime bi cam; `git diff --cached --check` dat. Repo `https://github.com/hunghq197-code/zuongzero`, nhanh `main`; tai lieu phat hanh cap nhat bang commit rieng sau commit source, khong can deploy lai.
+
 ## Lien Ket Xem Lai Bao Cao Theo Quy - 2026-10-12
 
-Trang thai: CODE DONE, LOCAL TESTED, NOT DEPLOYED. Source goc `7e8b605`; khong commit/push/deploy trong tac vu nay.
+Trang thai: DEPLOYED PRODUCTION theo xac nhan tiep theo. Source goc `7e8b605`, source phat hanh `911ea7c`; cac buoc local ben duoi duoc thuc hien truoc deploy.
 
 - Ten quy trong Lich su bao cao la lien ket. Click thuong doi ngay dashboard/bieu do sang quy do, dong bo bo chon quy va dua man hinh/focus len tong quan; khong tai lai trang hay them trang/nut moi.
 - URL `/?period=2026-Q2#client-overview` ho tro mo tab moi, tai lai, copy link va Back/Forward. Bo chon quy cung cap nhat URL. Ton trong reduced motion, Enter va thao tac Ctrl/Cmd-click mac dinh cua lien ket.
@@ -13,7 +26,7 @@ Trang thai: CODE DONE, LOCAL TESTED, NOT DEPLOYED. Source goc `7e8b605`; khong c
 - `npm test` 97/97 (35 unit + 19 contract + 22 auth + 21 business); TypeScript, targeted lint va build dat. Build van co canh bao chunk >500 KB co san.
 - Playwright `tests/browser/statement-history.test.mjs` 16/16 desktop/mobile: so lieu/bieu do Q2/Q3, keyboard/focus, URL, Back/Forward/reload/tab moi, export hai dinh dang, invalid/missing quarter/empty dashboard va lich su >10 dong. Financial summary regression 16/16 va royalty workflow desktop/mobile dat; screenshots synthetic trong `outputs/statement-history-2026-10-12/` da xem.
 - App local xac nhan request chua dang nhap `/?period=2026-Q2` tra 307 den `/login?return_to=%2F%3Fperiod%3D2026-Q2`. Khong gui email that hay ghi du lieu production.
-- Demo component: `http://127.0.0.1:3212/tests/browser/product-preview.html?view=financial`; app local: `http://127.0.0.1:3213/login`. Ban production van la release `3c514f56` ben duoi.
+- Demo component: `http://127.0.0.1:3212/tests/browser/product-preview.html?view=financial`; app local: `http://127.0.0.1:3213/login`. Sau xac nhan da deploy release `33560e6a` nhu muc phat hanh ben tren.
 
 ## Phat Hanh An Toan Du Lieu Va Dashboard 6 Chi So - 2026-10-12
 
