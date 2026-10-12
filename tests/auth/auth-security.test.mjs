@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare } from 'miniflare';
 
-import { createPasswordHash, hashSessionToken } from '../../lib/app-auth.ts';
+import {
+  createPasswordHash,
+  hashSessionToken,
+  verifyPassword,
+} from '../../lib/app-auth.ts';
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const password = 'demo-only-strong-password';
@@ -85,7 +89,7 @@ before(async () => {
     bindings: {
       AUTH_PROVIDER: 'app-session',
       APP_BASE_URL: 'https://auth-demo.test',
-      SUPER_ADMIN_EMAILS: 'admin@auth-demo.test',
+      SUPER_ADMIN_EMAILS: 'admin@auth-demo.test,other-admin@auth-demo.test',
       SUPER_ADMIN_PASSWORD: password,
       RESEND_API_KEY: 'test-only-no-live-mail',
       EMAIL_FROM: 'Demo <no-reply@auth-demo.test>',
@@ -139,6 +143,10 @@ beforeEach(async () => {
     db.prepare('DELETE FROM auth_sessions'),
     db.prepare('DELETE FROM auth_login_otps'),
     db.prepare('DELETE FROM account_invites'),
+    db.prepare(
+      "DELETE FROM password_credentials WHERE user_id IN (SELECT id FROM users WHERE role='super_admin')",
+    ),
+    db.prepare("UPDATE users SET status='active' WHERE role='super_admin'"),
   ]);
 });
 
@@ -537,4 +545,174 @@ void test('missing limiter migration fails closed without sending email or creat
   } finally {
     await applyMigration('0013_auth_rate_limits.sql');
   }
+});
+
+void test('each super admin bootstraps a separate hash; personal passwords cannot fall back to the server password', async () => {
+  for (const email of ['admin@auth-demo.test', 'other-admin@auth-demo.test']) {
+    const response = await post('/api/auth/login', { email, password });
+    assert.equal((await destination(response)).pathname, '/login/verify');
+  }
+  const credentials = (
+    await db
+      .prepare(
+        "SELECT u.email, pc.password_hash AS hash FROM users u JOIN password_credentials pc ON pc.user_id=u.id WHERE u.role='super_admin'",
+      )
+      .all()
+  ).results;
+  assert.equal(credentials.length, 2);
+  assert.notEqual(credentials[0].hash, credentials[1].hash);
+  for (const row of credentials)
+    assert.ok(await verifyPassword(password, row.hash));
+  const personal = 'demo-personal-admin-password';
+  await db
+    .prepare(
+      "UPDATE password_credentials SET password_hash=? WHERE user_id IN (SELECT id FROM users WHERE email='admin@auth-demo.test')",
+    )
+    .bind(await createPasswordHash(personal))
+    .run();
+  await db.prepare('DELETE FROM auth_rate_limits').run();
+  const rejected = await post('/api/auth/login', {
+    email: 'admin@auth-demo.test',
+    password,
+  });
+  assert.equal(
+    (await destination(rejected)).searchParams.get('error'),
+    'invalid',
+  );
+  const accepted = await post('/api/auth/login', {
+    email: 'admin@auth-demo.test',
+    password: personal,
+  });
+  assert.equal((await destination(accepted)).pathname, '/login/verify');
+  const other = await db
+    .prepare(
+      "SELECT pc.password_hash AS hash FROM users u JOIN password_credentials pc ON pc.user_id=u.id WHERE u.email='other-admin@auth-demo.test'",
+    )
+    .first();
+  assert.ok(await verifyPassword(password, other.hash));
+});
+
+void test('super admin recovery resets only that account, revokes pending OTP and sessions, and consumes the link once', async () => {
+  const email = 'admin@auth-demo.test';
+  const initial = await post('/api/auth/login', { email, password });
+  const challenge = (await destination(initial)).searchParams.get('challenge');
+  const oldCode = emails[0].text.match(/là: (\d{6})/)[1];
+  const user = await db
+    .prepare('SELECT id FROM users WHERE email=?')
+    .bind(email)
+    .first();
+  await db
+    .prepare(
+      "INSERT INTO auth_sessions (id,user_id,token_hash,created_at,last_seen_at,expires_at) VALUES ('old-session',?,'demo-session-hash',?,?,?)",
+    )
+    .bind(
+      user.id,
+      new Date().toISOString(),
+      new Date().toISOString(),
+      new Date(Date.now() + 60000).toISOString(),
+    )
+    .run();
+  const recovery = await post('/api/auth/forgot-password', { email });
+  assert.equal(recovery.status, 303);
+  assert.match(emails.at(-1).subject, /mật khẩu/);
+  const token = emails
+    .at(-1)
+    .text.match(/reset-password\?token=([A-Za-z0-9_-]+)/)[1];
+  const personal = 'demo-reset-personal-password';
+  const responses = await Promise.all(
+    Array.from({ length: 2 }, () =>
+      post('/api/auth/reset-password', {
+        token,
+        password: personal,
+        confirm_password: personal,
+      }),
+    ),
+  );
+  assert.equal(
+    responses.filter(
+      (response) => response.headers.get('Location') === '/login?reset=changed',
+    ).length,
+    1,
+  );
+  const stored = await db
+    .prepare(
+      'SELECT password_hash AS hash FROM password_credentials WHERE user_id=?',
+    )
+    .bind(user.id)
+    .first();
+  assert.ok(await verifyPassword(personal, stored.hash));
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT count(*) AS total FROM auth_sessions WHERE user_id=?')
+        .bind(user.id)
+        .first()
+    ).total,
+    0,
+  );
+  const otp = await post('/api/auth/verify-login', {
+    challenge,
+    code: oldCode,
+  });
+  assert.equal(otp.headers.get('Set-Cookie'), null);
+  await db.prepare('DELETE FROM auth_rate_limits').run();
+  const oldPassword = await post('/api/auth/login', { email, password });
+  assert.equal(
+    (await destination(oldPassword)).searchParams.get('error'),
+    'invalid',
+  );
+  const current = await post('/api/auth/login', { email, password: personal });
+  assert.equal((await destination(current)).pathname, '/login/verify');
+});
+
+void test('a disabled configured super admin is not reactivated by the bootstrap password', async () => {
+  const email = 'admin@auth-demo.test';
+  await post('/api/auth/login', { email, password });
+  await db
+    .prepare("UPDATE users SET status='disabled' WHERE email=?")
+    .bind(email)
+    .run();
+  await db.prepare('DELETE FROM auth_rate_limits').run();
+  const count = emails.length;
+  const denied = await post('/api/auth/login', { email, password });
+  assert.equal(
+    (await destination(denied)).searchParams.get('error'),
+    'invalid',
+  );
+  await post('/api/auth/forgot-password', { email });
+  assert.equal(emails.length, count);
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT status FROM users WHERE email=?')
+        .bind(email)
+        .first()
+    ).status,
+    'disabled',
+  );
+});
+
+void test('an existing active super admin can recover before the first personal-password bootstrap', async () => {
+  const email = 'admin@auth-demo.test';
+  await db
+    .prepare(`INSERT INTO users (id,email,display_name,role,status,created_at)
+    VALUES ('recovery-bootstrap',?,'Admin','super_admin','active',?)
+    ON CONFLICT(email) DO UPDATE SET role='super_admin', status='active'`)
+    .bind(email, new Date().toISOString())
+    .run();
+  await post('/api/auth/forgot-password', { email });
+  assert.equal(emails.length, 1);
+  assert.match(emails[0].subject, /mật khẩu/);
+  const token = emails[0].text.match(
+    /reset-password\?token=([A-Za-z0-9_-]+)/,
+  )[1];
+  const personal = 'demo-recovered-admin-password';
+  const reset = await post('/api/auth/reset-password', {
+    token,
+    password: personal,
+    confirm_password: personal,
+  });
+  assert.equal(reset.headers.get('Location'), '/login?reset=changed');
+  const login = await post('/api/auth/login', { email, password: personal });
+  assert.equal((await destination(login)).pathname, '/login/verify');
 });

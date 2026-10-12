@@ -127,9 +127,17 @@ export async function POST(request: Request) {
     return redirectToVerify(request, 'used', challenge);
   }
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO auth_sessions (
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`SELECT json(CASE WHEN EXISTS (
+      SELECT 1 FROM auth_login_otps lo JOIN users u ON u.id = lo.user_id
+      WHERE lo.id = ? AND lo.status = 'used' AND lo.expires_at > ? AND u.status = 'active'
+    ) THEN 'true' ELSE 'otp-no-longer-valid' END)`).bind(
+        otp.id,
+        new Date().toISOString(),
+      ),
+      env.DB.prepare(
+        `INSERT INTO auth_sessions (
          id,
          user_id,
          token_hash,
@@ -140,32 +148,41 @@ export async function POST(request: Request) {
          expires_at
        )
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      sessionId,
-      otp.userId,
-      await hashSessionToken(sessionToken),
-      await hashOptionalRequestValue(request.headers.get('user-agent')),
-      await hashOptionalRequestValue(request.headers.get('cf-connecting-ip')),
-      nowText,
-      nowText,
-      expiresAt,
-    ),
-    env.DB.prepare(
-      `UPDATE users
+      ).bind(
+        sessionId,
+        otp.userId,
+        await hashSessionToken(sessionToken),
+        await hashOptionalRequestValue(request.headers.get('user-agent')),
+        await hashOptionalRequestValue(request.headers.get('cf-connecting-ip')),
+        nowText,
+        nowText,
+        expiresAt,
+      ),
+      env.DB.prepare(
+        `UPDATE users
        SET last_seen_at = ?
        WHERE id = ?`,
-    ).bind(nowText, otp.userId),
-    env.DB.prepare(
-      `DELETE FROM auth_sessions
+      ).bind(nowText, otp.userId),
+      env.DB.prepare(
+        `DELETE FROM auth_sessions
        WHERE expires_at <= ?`,
-    ).bind(nowText),
-    env.DB.prepare(
-      `UPDATE auth_login_otps
+      ).bind(nowText),
+      env.DB.prepare(
+        `UPDATE auth_login_otps
        SET status = 'revoked'
        WHERE status = 'pending'
          AND expires_at <= ?`,
-    ).bind(nowText),
-  ]);
+      ).bind(nowText),
+    ]);
+  } catch (error) {
+    const detail =
+      error instanceof Error
+        ? `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`
+        : '';
+    if (detail.includes('malformed JSON'))
+      return redirectToVerify(request, 'revoked', challenge);
+    return redirectToVerify(request, 'config', challenge, undefined, 503);
+  }
 
   const destination = resolveDestination(
     safeRelativeReturnPath(otp.returnTo),

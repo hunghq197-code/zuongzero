@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { clientWriteErrorResponse } from '@/lib/client-write-lock';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
 import { ensureUserRecord } from '@/lib/user-records';
@@ -115,6 +116,8 @@ export async function POST(request: Request) {
       message: 'Đã lưu danh sách bài hát và tỷ lệ chia.',
     });
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     if (error instanceof RoyaltyRuleImportError)
       return Response.json(
         { message: error.message },

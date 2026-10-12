@@ -11,7 +11,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 await build({
   absWorkingDir: root,
   stdin: {
-    contents: `export * from './lib/statement-balances'; export * from './lib/sales-periods'; export * from './lib/royalty-rule-import'; export * from './lib/statement-export-files'; export * from './lib/xlsx-royalty-parser';`,
+    contents: `export * from './lib/statement-balances'; export * from './lib/sales-periods'; export * from './lib/royalty-rule-import'; export * from './lib/statement-export-files'; export * from './lib/xlsx-royalty-parser'; export * from './lib/client-write-lock'; export * from './lib/app-auth';`,
     resolveDir: root,
   },
   bundle: true,
@@ -28,6 +28,12 @@ const {
   commitRoyaltyRuleImport,
   buildTabularXlsx,
   parseRoyaltyWorkbook,
+  withClientWriteLock,
+  ClientWriteError,
+  createPasswordHash,
+  verifyPassword,
+  hashSessionToken,
+  SESSION_COOKIE_NAME,
 } = await import(
   pathToFileURL(join(root, 'outputs/business-helpers.mjs')).href
 );
@@ -114,6 +120,7 @@ before(async () => {
 });
 beforeEach(async () => {
   for (const table of [
+    'client_write_locks',
     'audit_logs',
     'track_royalty_rules',
     'track_guarantee_recoupments',
@@ -541,15 +548,51 @@ void test('transaction checks the preview snapshot again to stop concurrent over
   );
 });
 
-void test('monthly SQL aggregate includes more than 5000 rows and isolates customers', async () => {
+void test('all client insights aggregate full rows across quarters without exposing other customers', async () => {
   await statement('q3', '2026-Q3', 5100);
   await db
     .prepare(`INSERT INTO statement_line_items (id,client_id,report_period_id,source_upload_id,row_index,account_no,sales_period,sales,net_payable,currency,created_at)
     WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<5100)
     SELECT 'line-'||x,'a','q3','u-q3',x,'A001',CASE WHEN x<=5000 THEN '2026-07' ELSE '2026-08' END,1,1,'VND','2026-01-01' FROM n`)
     .run();
+  await db
+    .prepare(
+      "UPDATE statement_line_items SET configuration='Streaming', content_type='Audio', contract_name='Contract A', release_artist='Artist A', isrc='VNABC2600001', track_title='Song A' WHERE client_id='a'",
+    )
+    .run();
+  await statement('q2', '2026-Q2', 7);
+  await statement('b3', '2026-Q3', 999, { client: 'b' });
+  await db
+    .prepare(`INSERT INTO statement_line_items (id,client_id,report_period_id,source_upload_id,row_index,account_no,configuration,release_artist,isrc,track_title,net_payable,sales,currency,created_at)
+    VALUES ('old-row','a','q2','u-q2',1,'A001','Streaming','Artist A','VNABC2600001','Song A',7,1,'VND','2026-01-01'),
+      ('other-row','b','b3','u-b3',1,'B001','Other','Other artist','VNABC2600002','Other song',999,1,'VND','2026-01-01')`)
+    .run();
+  await db
+    .prepare(`INSERT INTO revenue_breakdowns (id,client_id,report_period_id,dimension,label,value,percentage,units,row_count,created_at)
+    WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2101)
+    SELECT 'break-'||x,'a','q3','source','Platform '||x,1,0,1,1,'2026-01-01' FROM n`)
+    .run();
   const client = await (await request('/client')).json();
-  assert.equal(client.lineItemsByPeriod['2026-Q3'].length, 5000);
+  assert.deepEqual(client.lineItemsByPeriod, {});
+  assert.equal(client.breakdownsByPeriod['2026-Q3'].VND.sources.length, 2101);
+  const insights = client.sourceInsightsByPeriod['2026-Q3'];
+  for (const dimension of [
+    'configurations',
+    'contentTypes',
+    'contracts',
+    'releaseArtists',
+  ]) {
+    assert.equal(insights[dimension][0].value, 5100);
+    assert.equal(insights[dimension][0].rows, 5100);
+    assert.equal(insights[dimension][0].percentage, 100);
+  }
+  assert.equal(insights.trackIdentities.length, 1);
+  assert.equal(insights.trackIdentities[0].netPayable, 5100);
+  assert.equal(
+    client.sourceInsightsByPeriod['2026-Q2'].trackIdentities[0].netPayable,
+    7,
+  );
+  assert.doesNotMatch(JSON.stringify(client), /Other artist|Other song/);
   assert.equal(
     client.salesPeriodsByPeriod['2026-Q3'].reduce(
       (sum, row) => sum + row.netPayable,
@@ -558,4 +601,449 @@ void test('monthly SQL aggregate includes more than 5000 rows and isolates custo
     5100,
   );
   assert.equal(client.salesPeriodsByPeriod['2026-Q3'].length, 2);
+});
+
+async function uploadFile(
+  bytes,
+  {
+    action = 'preview',
+    previewToken = '',
+    period = '2026-Q3',
+    strategy = 'create',
+    clientId = 'a',
+  } = {},
+) {
+  const body = new FormData();
+  body.set('file', new Blob([bytes]), 'statement.xlsx');
+  body.set('uploadMode', 'single');
+  body.set('clientId', clientId);
+  body.set('period', period);
+  body.set('action', action);
+  body.set('importStrategy', strategy);
+  body.set('confirmReplace', 'true');
+  body.set('previewToken', previewToken);
+  return request('/uploads', { method: 'POST', body });
+}
+
+function revenueFile(count = 2) {
+  return workbook(
+    Array.from({ length: count }, (_, index) => [
+      'A001',
+      'VNABC2600001',
+      'Song A',
+      1000,
+      800,
+      'VND',
+      index % 2 ? '2026-08' : '2026-07',
+      1,
+    ]),
+    [
+      'Account No.',
+      'ISRC',
+      'Track Title',
+      'Gross Income',
+      'Net Payable',
+      'Currency',
+      'Sales Period',
+      'Sales',
+    ],
+  );
+}
+
+void test('a customer lease blocks payment, upload, rollback, GM and customer edits but not another customer', async () => {
+  await statement('q3', '2026-Q3', 1_200_000);
+  await statement('b3', '2026-Q3', 1_300_000, { client: 'b' });
+  await withClientWriteLock(db, ['a'], async () => {
+    assert.equal((await action('q3', 'mark_paid')).status, 409);
+    assert.equal(
+      (
+        await request('/statements', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reportPeriodId: 'q3' }),
+        })
+      ).status,
+      409,
+    );
+    assert.equal((await uploadFile(revenueFile())).status, 409);
+    for (const [path, body] of [
+      ['/rollback', { reportPeriodId: 'q3', uploadId: 'u-q3' }],
+      ['/guarantees', { clientId: 'a', trackTitle: 'Song A', amount: 100000 }],
+      ['/customers', { clientId: 'a', name: 'Changed' }],
+    ]) {
+      const response = await request(path, {
+        method: path === '/customers' ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 409, await response.text());
+    }
+    assert.equal((await action('b3', 'mark_paid')).status, 200);
+    await assert.rejects(
+      withClientWriteLock(db, ['b', 'a'], async () => {}),
+      ClientWriteError,
+    );
+    assert.equal(
+      (
+        await db
+          .prepare(
+            "SELECT count(*) AS total FROM client_write_locks WHERE client_id='b'",
+          )
+          .first()
+      ).total,
+      0,
+    );
+    assert.equal(
+      (
+        await db
+          .prepare(
+            "SELECT count(*) AS total FROM client_write_locks WHERE client_id='a'",
+          )
+          .first()
+      ).total,
+      1,
+    );
+  });
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT count(*) AS total FROM client_write_locks')
+        .first()
+    ).total,
+    0,
+  );
+  assert.equal((await action('q3', 'mark_paid')).status, 200);
+});
+
+void test('expired leases recover; a stale owner cannot write or release a replacement lease', async () => {
+  await db
+    .prepare("INSERT INTO client_write_locks VALUES ('a','expired',0)")
+    .run();
+  await withClientWriteLock(db, ['a'], async (scoped) => {
+    await db
+      .prepare(
+        "UPDATE client_write_locks SET owner_token='replacement', expires_at=? WHERE client_id='a'",
+      )
+      .bind(Date.now() + 120000)
+      .run();
+    await assert.rejects(
+      scoped.batch([
+        scoped.prepare("UPDATE clients SET display_name='Stale' WHERE id='a'"),
+      ]),
+      ClientWriteError,
+    );
+  });
+  assert.equal(
+    (
+      await db
+        .prepare(
+          "SELECT owner_token FROM client_write_locks WHERE client_id='a'",
+        )
+        .first()
+    ).owner_token,
+    'replacement',
+  );
+  assert.equal(
+    (await db.prepare("SELECT display_name FROM clients WHERE id='a'").first())
+      .display_name,
+    'Artist A',
+  );
+});
+
+void test('concurrent payment requests produce one payment event and preserve the first snapshot', async () => {
+  await statement('q3', '2026-Q3', 1_200_000);
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => action('q3', 'mark_paid')),
+  );
+  assert.ok(results.some((response) => response.status === 200));
+  assert.ok(results.every((response) => [200, 409].includes(response.status)));
+  assert.equal(
+    (
+      await db
+        .prepare(
+          "SELECT count(*) AS total FROM audit_logs WHERE action='admin_statement_mark_paid'",
+        )
+        .first()
+    ).total,
+    1,
+  );
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT payment_status FROM report_periods WHERE id='q3'")
+        .first()
+    ).payment_status,
+    'paid',
+  );
+});
+
+void test('a failed large import rolls back every D1 mutation and a successful import keeps all rows', async () => {
+  const file = revenueFile(5101);
+  const checked = await uploadFile(file);
+  assert.equal(checked.status, 200, await checked.clone().text());
+  const { previewToken } = await checked.json();
+  await db
+    .prepare(
+      "CREATE TRIGGER fail_import BEFORE INSERT ON statement_line_items WHEN NEW.sales_period='2026-08' BEGIN SELECT RAISE(ABORT,'test import failure'); END",
+    )
+    .run();
+  try {
+    const failed = await uploadFile(file, { action: 'commit', previewToken });
+    assert.equal(failed.status, 500);
+    for (const table of [
+      'statements',
+      'statement_line_items',
+      'revenue_breakdowns',
+      'uploads',
+      'report_periods',
+    ]) {
+      assert.equal(
+        (await db.prepare(`SELECT count(*) AS total FROM ${table}`).first())
+          .total,
+        0,
+        table,
+      );
+    }
+  } finally {
+    await db.prepare('DROP TRIGGER fail_import').run();
+  }
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT count(*) AS total FROM client_write_locks')
+        .first()
+    ).total,
+    0,
+  );
+  const committed = await uploadFile(file, { action: 'commit', previewToken });
+  assert.equal(committed.status, 200, await committed.clone().text());
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT count(*) AS total FROM statement_line_items')
+        .first()
+    ).total,
+    5101,
+  );
+  const active = await db
+    .prepare(
+      'SELECT source_upload_id AS uploadId, report_period_id AS reportPeriodId FROM statements',
+    )
+    .first();
+  await db
+    .prepare(
+      "CREATE TRIGGER fail_rollback BEFORE UPDATE ON uploads WHEN NEW.status='rolled_back' BEGIN SELECT RAISE(ABORT,'test rollback failure'); END",
+    )
+    .run();
+  try {
+    const failed = await request('/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(active),
+    });
+    assert.equal(failed.status, 500);
+    assert.equal(
+      (
+        await db
+          .prepare('SELECT count(*) AS total FROM statement_line_items')
+          .first()
+      ).total,
+      5101,
+    );
+    assert.equal(
+      (
+        await db
+          .prepare('SELECT status FROM uploads WHERE id=?')
+          .bind(active.uploadId)
+          .first()
+      ).status,
+      'imported',
+    );
+  } finally {
+    await db.prepare('DROP TRIGGER fail_rollback').run();
+  }
+  const restored = await request('/rollback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(active),
+  });
+  assert.equal(restored.status, 200, await restored.clone().text());
+  assert.equal(
+    (await db.prepare('SELECT count(*) AS total FROM statements').first())
+      .total,
+    0,
+  );
+});
+
+void test('backdated GM edits are blocked even when the later quarter is unpaid and unlocked', async () => {
+  await statement('q3', '2026-Q3', 1_200_000);
+  await db
+    .prepare(`INSERT INTO track_guarantees (id,client_id,track_title,track_key,initial_amount,balance_amount,status,created_by_user_id,created_at,updated_at)
+    VALUES ('gm','a','Song A','songa',100000,100000,'active','admin','2026-01-01','2026-01-01')`)
+    .run();
+  const blocked = await uploadFile(revenueFile(), { period: '2026-Q2' });
+  assert.equal(blocked.status, 409);
+  assert.match((await blocked.json()).message, /GM/);
+  await statement('q2', '2026-Q2', 800000);
+  const deleted = await request('/statements', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reportPeriodId: 'q2' }),
+  });
+  assert.equal(deleted.status, 409);
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT balance_amount FROM track_guarantees WHERE id='gm'")
+        .first()
+    ).balance_amount,
+    100000,
+  );
+});
+
+void test('missing lock migration refuses mutations without changing data', async () => {
+  await statement('q3', '2026-Q3', 1_200_000);
+  await db.prepare('DROP TABLE client_write_locks').run();
+  try {
+    const denied = await action('q3', 'mark_paid');
+    assert.equal(denied.status, 503);
+    assert.equal(
+      (
+        await db
+          .prepare("SELECT payment_status FROM report_periods WHERE id='q3'")
+          .first()
+      ).payment_status,
+      'unpaid',
+    );
+  } finally {
+    await db
+      .prepare(
+        await readFile(
+          join(root, 'drizzle/0014_client_write_locks.sql'),
+          'utf8',
+        ),
+      )
+      .run();
+  }
+});
+
+void test('super admin changes a personal password in the existing form without modifying other credentials', async () => {
+  const current = 'demo-current-admin-password';
+  const personal = 'demo-next-admin-password';
+  await db
+    .prepare(
+      "INSERT INTO password_credentials (id,user_id,password_hash,password_updated_at,must_change_password,created_at) VALUES ('admin-pwd','admin',?,'2026-01-01',0,'2026-01-01')",
+    )
+    .bind(await createPasswordHash(current))
+    .run();
+  const token = 'keep-demo-session';
+  await db
+    .prepare(
+      "INSERT INTO auth_sessions (id,user_id,token_hash,created_at,last_seen_at,expires_at) VALUES ('keep','admin',?,'2026-01-01','2026-01-01','2099-01-01'), ('drop','admin','old-demo-hash','2026-01-01','2026-01-01','2099-01-01')",
+    )
+    .bind(await hashSessionToken(token))
+    .run();
+  try {
+    const response = await request('/password', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: `${SESSION_COOKIE_NAME}=${token}`,
+      },
+      body: new URLSearchParams({
+        current_password: current,
+        new_password: personal,
+        confirm_password: personal,
+      }),
+    });
+    assert.equal(response.status, 303);
+    assert.equal(
+      new URL(response.headers.get('Location')).searchParams.get('password'),
+      'changed',
+    );
+    const credential = await db
+      .prepare(
+        "SELECT password_hash AS hash FROM password_credentials WHERE user_id='admin'",
+      )
+      .first();
+    assert.ok(await verifyPassword(personal, credential.hash));
+    assert.equal(await verifyPassword(current, credential.hash), false);
+    assert.equal(
+      (
+        await db
+          .prepare(
+            "SELECT count(*) AS total FROM auth_sessions WHERE user_id='admin'",
+          )
+          .first()
+      ).total,
+      1,
+    );
+    assert.equal(
+      (
+        await db
+          .prepare("SELECT id FROM auth_sessions WHERE user_id='admin'")
+          .first()
+      ).id,
+      'keep',
+    );
+  } finally {
+    await db
+      .prepare("DELETE FROM password_credentials WHERE id='admin-pwd'")
+      .run();
+    await db.prepare("DELETE FROM auth_sessions WHERE user_id='admin'").run();
+  }
+});
+
+void test('customer deletion keeps the workbook if D1 fails and removes rules before deleting the customer', async () => {
+  await db
+    .prepare(
+      "INSERT INTO clients (id,code,legal_name,display_name,default_currency,status,created_at,updated_at) VALUES ('delete-demo','DEL','Delete Demo','Delete Demo','VND','active','2026-01-01','2026-01-01')",
+    )
+    .run();
+  await statement('del3', '2026-Q3', 123, { client: 'delete-demo' });
+  const bucket = await mf.getR2Bucket('FILES');
+  await bucket.put('files/del3', 'synthetic-workbook');
+  await db
+    .prepare(
+      "INSERT INTO track_royalty_rules (id,client_id,track_title,track_external_id,track_external_key,royalty_rate_bps,effective_from_period,status,created_by_user_id,created_at,updated_at) VALUES ('delete-rule','delete-demo','Song','VNABC2600001','VNABC2600001',8000,'2026-Q3','active','admin','2026-01-01','2026-01-01')",
+    )
+    .run();
+  await db
+    .prepare(
+      "CREATE TRIGGER fail_delete BEFORE DELETE ON clients WHEN OLD.id='delete-demo' BEGIN SELECT RAISE(ABORT,'test deletion failure'); END",
+    )
+    .run();
+  const options = {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId: 'delete-demo', action: 'delete' }),
+  };
+  try {
+    assert.equal((await request('/customers', options)).status, 500);
+    assert.ok(await bucket.get('files/del3'));
+    assert.equal(
+      (
+        await db
+          .prepare(
+            "SELECT count(*) AS total FROM statements WHERE client_id='delete-demo'",
+          )
+          .first()
+      ).total,
+      1,
+    );
+  } finally {
+    await db.prepare('DROP TRIGGER fail_delete').run();
+  }
+  const deleted = await request('/customers', options);
+  assert.equal(deleted.status, 200, await deleted.clone().text());
+  assert.equal(await bucket.get('files/del3'), null);
+  assert.equal(
+    (
+      await db
+        .prepare("SELECT count(*) AS total FROM clients WHERE id='delete-demo'")
+        .first()
+    ).total,
+    0,
+  );
 });

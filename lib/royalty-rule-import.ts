@@ -1,4 +1,5 @@
 import { REPORT_PERIOD_PATTERN } from '@/lib/reporting-periods';
+import { withClientWriteLock } from './client-write-lock';
 import { normalizeRoyaltyRuleIsrc } from '@/lib/royalty-rules';
 import {
   readXlsxImportSheets,
@@ -370,41 +371,45 @@ export async function previewRoyaltyRuleImport(
 }
 
 export async function commitRoyaltyRuleImport(
-  db: D1Database,
+  rawDb: D1Database,
   prepared: Awaited<ReturnType<typeof previewRoyaltyRuleImport>>,
   actorId: string,
 ) {
   const { preview, scope, snapshot } = prepared;
   if (!preview.canCommit)
     throw new RoyaltyRuleImportError('File còn lỗi; chưa nhập dòng nào.', 422);
-  const now = new Date().toISOString();
-  const importId = crypto.randomUUID();
-  const mutations = preview.rows
-    .filter((row) => row.action !== 'unchanged')
-    .map((row) => ({
-      ...row,
-      id: row.ruleId ?? crypto.randomUUID(),
-      trackExternalKey: normalizeRoyaltyRuleIsrc(row.isrc),
-      auditId: crypto.randomUUID(),
-    }));
-  const payload = JSON.stringify(mutations);
-  try {
-    await db.batch([
-      // NOT NULL intentionally aborts the entire batch if any snapshotted data changed.
-      db
-        .prepare(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, metadata, created_at)
+  return withClientWriteLock(
+    rawDb,
+    preview.rows.map((row) => row.clientId),
+    async (db) => {
+      const now = new Date().toISOString();
+      const importId = crypto.randomUUID();
+      const mutations = preview.rows
+        .filter((row) => row.action !== 'unchanged')
+        .map((row) => ({
+          ...row,
+          id: row.ruleId ?? crypto.randomUUID(),
+          trackExternalKey: normalizeRoyaltyRuleIsrc(row.isrc),
+          auditId: crypto.randomUUID(),
+        }));
+      const payload = JSON.stringify(mutations);
+      try {
+        await db.batch([
+          // NOT NULL intentionally aborts the entire batch if any snapshotted data changed.
+          db
+            .prepare(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, metadata, created_at)
         VALUES (?3, CASE WHEN (${snapshotSql}) = ?2 THEN ?4 ELSE NULL END,
           'track_royalty_rules_imported', 'track_royalty_rule_import', ?3, ?5, ?6)`)
-        .bind(
-          scope,
-          snapshot,
-          importId,
-          actorId,
-          JSON.stringify(preview.summary),
-          now,
-        ),
-      db
-        .prepare(`INSERT INTO track_royalty_rules (
+            .bind(
+              scope,
+              snapshot,
+              importId,
+              actorId,
+              JSON.stringify(preview.summary),
+              now,
+            ),
+          db
+            .prepare(`INSERT INTO track_royalty_rules (
         id, client_id, track_title, track_external_id, track_external_key, royalty_rate_bps,
         effective_from_period, effective_to_period, status, created_by_user_id, created_at, updated_at
       ) SELECT json_extract(value, '$.id'), json_extract(value, '$.clientId'),
@@ -415,31 +420,33 @@ export async function commitRoyaltyRuleImport(
       ON CONFLICT(id) DO UPDATE SET track_title = excluded.track_title, track_external_id = excluded.track_external_id,
         royalty_rate_bps = excluded.royalty_rate_bps, effective_to_period = excluded.effective_to_period,
         status = 'active', updated_at = excluded.updated_at`)
-        .bind(payload, actorId, now),
-      db
-        .prepare(`INSERT INTO audit_logs (id, actor_user_id, client_id, action, target_type, target_id, metadata, created_at)
+            .bind(payload, actorId, now),
+          db
+            .prepare(`INSERT INTO audit_logs (id, actor_user_id, client_id, action, target_type, target_id, metadata, created_at)
         SELECT json_extract(value, '$.auditId'), ?2, json_extract(value, '$.clientId'),
           CASE json_extract(value, '$.action') WHEN 'create' THEN 'track_royalty_rule_created' ELSE 'track_royalty_rule_updated' END,
           'track_royalty_rule', json_extract(value, '$.id'), json_set(value, '$.importId', ?3), ?4
         FROM json_each(?1)`)
-        .bind(payload, actorId, importId, now),
-    ]);
-  } catch (error) {
-    const cause =
-      error instanceof Error
-        ? `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`
-        : '';
-    if (
-      cause.includes('NOT NULL constraint failed: audit_logs.actor_user_id')
-    ) {
-      throw new RoyaltyRuleImportError(
-        'Dữ liệu đã thay đổi. Hãy xem trước lại; chưa nhập dòng nào.',
-        409,
-      );
-    }
-    throw error;
-  }
-  return { importId, summary: preview.summary };
+            .bind(payload, actorId, importId, now),
+        ]);
+      } catch (error) {
+        const cause =
+          error instanceof Error
+            ? `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`
+            : '';
+        if (
+          cause.includes('NOT NULL constraint failed: audit_logs.actor_user_id')
+        ) {
+          throw new RoyaltyRuleImportError(
+            'Dữ liệu đã thay đổi. Hãy xem trước lại; chưa nhập dòng nào.',
+            409,
+          );
+        }
+        throw error;
+      }
+      return { importId, summary: preview.summary };
+    },
+  );
 }
 
 function overlaps(

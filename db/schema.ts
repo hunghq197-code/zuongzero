@@ -125,6 +125,12 @@ export const authRateLimits = sqliteTable(
   (table) => [index('idx_auth_rate_limits_expires').on(table.expiresAt)],
 );
 
+export const clientWriteLocks = sqliteTable('client_write_locks', {
+  clientId: text('client_id').primaryKey(),
+  ownerToken: text('owner_token').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+});
+
 export const authLoginOtps = sqliteTable(
   'auth_login_otps',
   {

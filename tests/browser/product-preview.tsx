@@ -70,7 +70,9 @@ function PaginationPreview() {
   );
 }
 
-const view = new URLSearchParams(window.location.search).get('view');
+const previewParams = new URLSearchParams(window.location.search);
+const view = previewParams.get('view');
+const isPaid = previewParams.get('payment') === 'paid';
 const financialPeriods = [
   {
     ...trackPeriod,
@@ -82,10 +84,10 @@ const financialPeriods = [
     costs: 100_000,
     reservesWithheld: 0,
     reservesReleased: 0,
-    paid: 0,
-    paymentStatus: 'unpaid' as const,
+    paid: isPaid ? 1_900_000 : 0,
+    paymentStatus: isPaid ? ('paid' as const) : ('unpaid' as const),
     payable: 1_900_000,
-    carryForward: 1_900_000,
+    carryForward: isPaid ? 0 : 1_900_000,
   },
   {
     ...trackPeriod,
@@ -103,6 +105,16 @@ const financialPeriods = [
     carryForward: 1_200_000,
   },
 ];
+if (previewParams.get('amount') === 'large') {
+  Object.assign(financialPeriods[0], {
+    grossRevenue: 9_876_543_210_123,
+    opening: 987_654_321_000,
+    revenue: 8_765_432_109_999,
+    costs: 0,
+    payable: 9_753_086_430_999,
+    carryForward: 9_753_086_430_999,
+  });
+}
 createRoot(document.getElementById('root')!).render(
   view === 'pagination' ? (
     <PaginationPreview />
@@ -148,8 +160,24 @@ createRoot(document.getElementById('root')!).render(
             }
           : {}
       }
-      lineItemsByPeriod={
-        view === 'tracks' ? { [trackPeriod.period]: trackRows } : {}
+      sourceInsightsByPeriod={
+        view === 'tracks'
+          ? {
+              [trackPeriod.period]: {
+                configurations: [],
+                contentTypes: [],
+                contracts: [],
+                releaseArtists: [],
+                trackIdentities: trackRows.map((row) => ({
+                  isrc: row.isrc ?? '-',
+                  trackTitle: row.trackTitle ?? '-',
+                  trackVersion: row.trackVersion,
+                  netPayable: row.netPayable,
+                  sales: row.sales,
+                })),
+              },
+            }
+          : {}
       }
       trend={[]}
       breakdownsByPeriod={{}}

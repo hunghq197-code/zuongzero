@@ -7,10 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BrandMark, EqualizerBars } from '@/components/music-brand';
 import { getClientPortalAccess } from '@/lib/access-control';
-import {
-  getAdminAccess,
-  getConfiguredSuperAdminEmails,
-} from '@/lib/admin-auth';
+import { getAdminAccess } from '@/lib/admin-auth';
 import { PASSWORD_MIN_LENGTH } from '@/lib/app-auth';
 import { chatGPTSignOutPath, requireChatGPTUser } from '../chatgpt-auth';
 
@@ -37,9 +34,6 @@ export default async function AccountPage({
   const profile = await readAccountProfile(user.email, user.displayName);
   const adminAccess = await getAdminAccess(user.email);
   const clientAccess = await getClientPortalAccess(user);
-  const passwordManagedByServer = getConfiguredSuperAdminEmails().includes(
-    user.email.trim().toLowerCase(),
-  );
   const profileMessage = profileStatusMessage(
     readSearchParam(params, 'profile'),
   );
@@ -180,81 +174,79 @@ export default async function AccountPage({
           </form>
         </section>
 
-        {passwordManagedByServer ? null : (
-          <section className="music-card p-5">
-            <div className="flex items-start justify-between gap-4">
-              <h2 className="text-lg font-semibold">Mật khẩu</h2>
-              <KeyRound className="size-5 text-primary" />
+        <section className="music-card p-5">
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="text-lg font-semibold">Mật khẩu</h2>
+            <KeyRound className="size-5 text-primary" />
+          </div>
+
+          <form
+            action="/api/account/password"
+            className="mt-5 grid gap-4"
+            method="post"
+          >
+            <div className="space-y-2">
+              <label
+                className="block text-sm font-medium"
+                htmlFor="current_password"
+              >
+                Mật khẩu hiện tại
+              </label>
+              <Input
+                autoComplete="current-password"
+                id="current_password"
+                name="current_password"
+                required
+                type="password"
+              />
             </div>
 
-            <form
-              action="/api/account/password"
-              className="mt-5 grid gap-4"
-              method="post"
-            >
-              <div className="space-y-2">
-                <label
-                  className="block text-sm font-medium"
-                  htmlFor="current_password"
-                >
-                  Mật khẩu hiện tại
-                </label>
-                <Input
-                  autoComplete="current-password"
-                  id="current_password"
-                  name="current_password"
-                  required
-                  type="password"
-                />
-              </div>
+            <div className="space-y-2">
+              <label
+                className="block text-sm font-medium"
+                htmlFor="new_password"
+              >
+                Mật khẩu mới
+              </label>
+              <Input
+                autoComplete="new-password"
+                id="new_password"
+                minLength={PASSWORD_MIN_LENGTH}
+                name="new_password"
+                required
+                type="password"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <label
-                  className="block text-sm font-medium"
-                  htmlFor="new_password"
-                >
-                  Mật khẩu mới
-                </label>
-                <Input
-                  autoComplete="new-password"
-                  id="new_password"
-                  minLength={PASSWORD_MIN_LENGTH}
-                  name="new_password"
-                  required
-                  type="password"
-                />
-              </div>
+            <div className="space-y-2">
+              <label
+                className="block text-sm font-medium"
+                htmlFor="confirm_password"
+              >
+                Nhập lại mật khẩu mới
+              </label>
+              <Input
+                autoComplete="new-password"
+                id="confirm_password"
+                minLength={PASSWORD_MIN_LENGTH}
+                name="confirm_password"
+                required
+                type="password"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <label
-                  className="block text-sm font-medium"
-                  htmlFor="confirm_password"
-                >
-                  Nhập lại mật khẩu mới
-                </label>
-                <Input
-                  autoComplete="new-password"
-                  id="confirm_password"
-                  minLength={PASSWORD_MIN_LENGTH}
-                  name="confirm_password"
-                  required
-                  type="password"
-                />
-              </div>
+            {passwordMessage ? (
+              <p className={messageClass(passwordMessage.tone)}>
+                {passwordMessage.text}
+              </p>
+            ) : null}
 
-              {passwordMessage ? (
-                <p className={messageClass(passwordMessage.tone)}>
-                  {passwordMessage.text}
-                </p>
-              ) : null}
-
-              <Button className="h-10 w-full" type="submit">
-                <ShieldCheck className="size-4" />
-                Đổi mật khẩu
-              </Button>
-            </form>
-          </section>
-        )}
+            <Button className="h-10 w-full" type="submit">
+              <ShieldCheck className="size-4" />
+              Đổi mật khẩu
+            </Button>
+          </form>
+        </section>
       </div>
     </main>
   );
@@ -339,10 +331,6 @@ function passwordStatusMessage(status: string | null) {
       },
       current_invalid: {
         text: 'Mật khẩu hiện tại không đúng.',
-        tone: 'error',
-      },
-      managed: {
-        text: 'Không thể đổi mật khẩu tài khoản này.',
         tone: 'error',
       },
       password_length: {

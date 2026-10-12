@@ -10,6 +10,10 @@ import {
   type TrackGuaranteeStatus,
 } from '@/lib/guarantees';
 import { ensureUserRecord } from '@/lib/user-records';
+import {
+  clientWriteErrorResponse,
+  withClientWriteLock,
+} from '@/lib/client-write-lock';
 
 type GuaranteeBody = {
   action?: unknown;
@@ -90,6 +94,8 @@ export async function POST(request: Request) {
   try {
     return await createGuaranteeResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể tạo GM lúc này.');
   }
 }
@@ -98,6 +104,8 @@ export async function PATCH(request: Request) {
   try {
     return await updateGuaranteeResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể cập nhật GM lúc này.');
   }
 }
@@ -136,37 +144,38 @@ async function createGuaranteeResponse(request: Request) {
     return jsonError('Số tiền GM phải lớn hơn 0 VNĐ.', 400);
   }
 
-  const client = await findClient(env.DB, clientId);
-  if (!client || client.status === 'archived') {
-    return jsonError('Khách hàng không hợp lệ hoặc đã lưu trữ.', 400);
-  }
+  return withClientWriteLock(env.DB, [clientId], async (db) => {
+    const client = await findClient(db, clientId);
+    if (!client || client.status === 'archived') {
+      return jsonError('Khách hàng không hợp lệ hoặc đã lưu trữ.', 400);
+    }
 
-  const duplicate = await findActiveGuarantee(
-    env.DB,
-    clientId,
-    trackKey,
-    trackExternalId,
-  );
-  if (duplicate) {
-    return jsonError(
-      'Bài hát hoặc ID này đang có GM active. Hãy archive GM cũ trước khi tạo mới.',
-      409,
+    const duplicate = await findActiveGuarantee(
+      db,
+      clientId,
+      trackKey,
+      trackExternalId,
     );
-  }
+    if (duplicate) {
+      return jsonError(
+        'Bài hát hoặc ID này đang có GM active. Hãy archive GM cũ trước khi tạo mới.',
+        409,
+      );
+    }
 
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
-  const guaranteeId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const actor = await ensureUserRecord(db, {
+      displayName: authorization.user.displayName,
+      email: authorization.user.email,
+      lastSeenAt: now,
+      role: authorization.role,
+      userId: authorization.user.userId,
+    });
+    const guaranteeId = crypto.randomUUID();
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO track_guarantees (
+    await db.batch([
+      env.DB.prepare(
+        `INSERT INTO track_guarantees (
          id,
          client_id,
          track_title,
@@ -182,39 +191,40 @@ async function createGuaranteeResponse(request: Request) {
          updated_at
        )
        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, ?, ?)`,
-    ).bind(
-      guaranteeId,
-      clientId,
-      trackTitle,
-      trackKey,
-      trackExternalId,
-      amount,
-      amount,
-      notes,
-      actor.id,
-      now,
-      now,
-    ),
-    createAuditLog(
-      actor.id,
-      clientId,
-      'track_guarantee_created',
-      'track_guarantee',
-      guaranteeId,
-      {
-        amount,
-        clientCode: client.code,
-        clientName: client.name,
-        trackExternalId,
+      ).bind(
+        guaranteeId,
+        clientId,
         trackTitle,
-      },
-      now,
-    ),
-  ]);
+        trackKey,
+        trackExternalId,
+        amount,
+        amount,
+        notes,
+        actor.id,
+        now,
+        now,
+      ),
+      createAuditLog(
+        actor.id,
+        clientId,
+        'track_guarantee_created',
+        'track_guarantee',
+        guaranteeId,
+        {
+          amount,
+          clientCode: client.code,
+          clientName: client.name,
+          trackExternalId,
+          trackTitle,
+        },
+        now,
+      ),
+    ]);
 
-  return Response.json({
-    guarantees: await listTrackGuarantees(env.DB),
-    message: 'Đã tạo GM cho bài hát.',
+    return Response.json({
+      guarantees: await listTrackGuarantees(env.DB),
+      message: 'Đã tạo GM cho bài hát.',
+    });
   });
 }
 
@@ -243,53 +253,57 @@ async function updateGuaranteeResponse(request: Request) {
     return jsonError('Cần chọn GM và hành động hợp lệ.', 400);
   }
 
-  const guarantee = await findGuarantee(env.DB, guaranteeId);
-  if (!guarantee) return jsonError('Không tìm thấy GM.', 404);
+  const target = await findGuarantee(env.DB, guaranteeId);
+  if (!target) return jsonError('Không tìm thấy GM.', 404);
+  return withClientWriteLock(env.DB, [target.clientId], async (db) => {
+    const guarantee = await findGuarantee(db, guaranteeId);
+    if (!guarantee) return jsonError('Không tìm thấy GM.', 404);
 
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
-  const nextStatus =
-    action === 'archive'
-      ? 'archived'
-      : guarantee.balanceAmount > 0
-        ? 'active'
-        : 'recouped';
+    const now = new Date().toISOString();
+    const actor = await ensureUserRecord(db, {
+      displayName: authorization.user.displayName,
+      email: authorization.user.email,
+      lastSeenAt: now,
+      role: authorization.role,
+      userId: authorization.user.userId,
+    });
+    const nextStatus =
+      action === 'archive'
+        ? 'archived'
+        : guarantee.balanceAmount > 0
+          ? 'active'
+          : 'recouped';
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE track_guarantees
+    await db.batch([
+      env.DB.prepare(
+        `UPDATE track_guarantees
        SET status = ?,
            updated_at = ?
        WHERE id = ?`,
-    ).bind(nextStatus, now, guaranteeId),
-    createAuditLog(
-      actor.id,
-      guarantee.clientId,
-      `track_guarantee_${action}`,
-      'track_guarantee',
-      guaranteeId,
-      {
-        balanceAmount: guarantee.balanceAmount,
-        clientCode: guarantee.clientCode,
-        clientName: guarantee.clientName,
-        previousStatus: guarantee.status,
-        status: nextStatus,
-        trackExternalId: guarantee.trackExternalId,
-        trackTitle: guarantee.trackTitle,
-      },
-      now,
-    ),
-  ]);
+      ).bind(nextStatus, now, guaranteeId),
+      createAuditLog(
+        actor.id,
+        guarantee.clientId,
+        `track_guarantee_${action}`,
+        'track_guarantee',
+        guaranteeId,
+        {
+          balanceAmount: guarantee.balanceAmount,
+          clientCode: guarantee.clientCode,
+          clientName: guarantee.clientName,
+          previousStatus: guarantee.status,
+          status: nextStatus,
+          trackExternalId: guarantee.trackExternalId,
+          trackTitle: guarantee.trackTitle,
+        },
+        now,
+      ),
+    ]);
 
-  return Response.json({
-    guarantees: await listTrackGuarantees(env.DB),
-    message: action === 'archive' ? 'Đã archive GM.' : 'Đã kích hoạt lại GM.',
+    return Response.json({
+      guarantees: await listTrackGuarantees(env.DB),
+      message: action === 'archive' ? 'Đã archive GM.' : 'Đã kích hoạt lại GM.',
+    });
   });
 }
 

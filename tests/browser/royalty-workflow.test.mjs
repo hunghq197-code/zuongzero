@@ -18,7 +18,7 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`${base}?view=financial`);
   // The labels and source months must change together with the selected statement.
-  await page.getByText('Số dư kỳ trước chuyển sang', { exact: true }).waitFor();
+  await page.getByText('Số dư kỳ trước', { exact: true }).waitFor();
   assert.equal(
     await page.getByText('Tổng giảm trừ', { exact: true }).count(),
     0,
@@ -28,16 +28,14 @@ try {
     0,
   );
   const opening = page
-    .getByText('Số dư kỳ trước chuyển sang', { exact: true })
+    .getByText('Số dư kỳ trước', { exact: true })
     .locator('..');
   assert.match(await opening.textContent(), /1\.200\.000/);
   const net = page
     .getByText('Thực nhận trong quý', { exact: true })
     .locator('..');
   assert.match(await net.textContent(), /700\.000/);
-  const total = page
-    .getByText('Tổng số dư đến kỳ này', { exact: true })
-    .locator('..');
+  const total = page.getByText('Số dư kỳ này', { exact: true }).locator('..');
   assert.match(await total.textContent(), /1\.900\.000/);
   const monthly = page.getByRole('region', {
     name: 'Doanh thu theo tháng phát sinh',

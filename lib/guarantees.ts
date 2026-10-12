@@ -310,6 +310,23 @@ export async function planTrackGuaranteeRecoupments({
   };
 }
 
+export async function findGuaranteeSuccessor(
+  db: D1Database,
+  clientId: string,
+  period: string,
+) {
+  if (!(await hasGuaranteeTables(db))) return null;
+  return db
+    .prepare(`SELECT rp.period FROM report_periods rp
+    JOIN statements s ON s.report_period_id = rp.id
+    WHERE rp.client_id = ?1 AND rp.currency = 'VND' AND rp.period > ?2
+      AND rp.status != 'replaced'
+      AND EXISTS (SELECT 1 FROM track_guarantees g WHERE g.client_id = ?1)
+    ORDER BY rp.period LIMIT 1`)
+    .bind(clientId, period)
+    .first<{ period: string }>();
+}
+
 export async function buildReverseGuaranteeRecoupmentStatements(
   db: D1Database,
   reportPeriodId: string,

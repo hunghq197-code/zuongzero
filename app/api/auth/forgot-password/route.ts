@@ -15,7 +15,7 @@ type PasswordRecoveryCandidate = {
   displayName: string | null;
   email: string;
   id: string;
-  role: 'admin' | 'client';
+  role: 'super_admin' | 'admin' | 'client';
   status: 'active' | 'disabled';
 };
 
@@ -57,8 +57,14 @@ export async function POST(request: Request) {
     if (user.status === 'disabled' && user.credentialId) {
       return genericForgotPasswordResponse(request);
     }
+    if (user.role === 'super_admin' && user.status !== 'active') {
+      return genericForgotPasswordResponse(request);
+    }
 
-    const purpose = user.credentialId ? 'password_reset' : 'account_activation';
+    const purpose =
+      user.credentialId || user.role === 'super_admin'
+        ? 'password_reset'
+        : 'account_activation';
     const recovery = await createAccountInvite(env.DB, {
       createdByUserId: user.id,
       email: user.email,
@@ -79,7 +85,7 @@ export async function POST(request: Request) {
             email: user.email,
             expiresAt: recovery.expiresAt,
             inviteUrl: recovery.inviteUrl,
-            role: user.role,
+            role: user.role === 'super_admin' ? 'admin' : user.role,
           });
 
     console.info('[password-recovery] request processed', {
@@ -111,7 +117,7 @@ async function findPasswordRecoveryCandidate(email: string) {
      LEFT JOIN password_credentials pc
        ON pc.user_id = u.id
      WHERE lower(u.email) = ?
-       AND u.role IN ('admin', 'client')
+       AND u.role IN ('super_admin', 'admin', 'client')
      LIMIT 1`,
   )
     .bind(email)

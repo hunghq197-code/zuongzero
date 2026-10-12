@@ -1,5 +1,17 @@
 # Product UX regression checks
 
+## Six-Metric Financial Summary (2026-10-12)
+
+With the component preview on port 3212, run `node tests/browser/financial-summary.test.mjs` using the same `PLAYWRIGHT_MODULE` setup below. It checks exactly six agreed financial fields, unchanged values for unpaid/paid/empty quarters, large amounts, and 3/2/1 columns at desktop/tablet/mobile widths (1440/768/390/320 px). Screenshots are in ignored `outputs/financial-summary-2026-10-12/`. All values are synthetic; no production API is called.
+
+`royalty-workflow.test.mjs` uses the shorter labels and still checks quarter switching, carry-forward and rule import flows. The new UI contract adds one check to `npm test` (96 total).
+
+## Safety And Reporting (2026-10-12)
+
+The safety/reporting baseline covers 95 checks: customer write leases, concurrent payments, atomic import/restore of a synthetic 5,101-row file with injected D1 failures, complete multi-quarter insights, and individual super-admin password bootstrap/change/reset, including recovery before bootstrap. The six-metric UI contract brings the current `npm test` total to 96. D1/R2 and outbound email are isolated mocks, not production.
+
+The track fixture uses pre-aggregated `sourceInsightsByPeriod` and still checks all 35 tracks through pagination. Existing browser runners and ports below are unchanged. Apply migration `0014_client_write_locks.sql` only to the intended local DB before exercising mutations in the actual app. See `SAFETY_AND_REPORTING_2026-10-12.md` for bootstrap and release status; production was deployed after approval on 2026-10-12. These browser runners still use synthetic local data, not production.
+
 ## Song Rules And Carry-Forward (2026-10-05)
 
 `npm run test:business` runs 13 isolated D1/R2 business regressions, including the real rule-import and statement-payment routes, snapshot conflicts, Gross Income then GM, carry-forward, export/reminder agreement, and a 5,100-row monthly aggregate. Its identity adapter is injected only by the test bundler and is not an application authentication path.

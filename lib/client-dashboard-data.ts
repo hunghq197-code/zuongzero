@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { readStatementBalances } from '@/lib/statement-balances';
 import type { SalesPeriodSourceRow } from '@/lib/sales-periods';
+import { readSourceInsights, type SourceInsights } from '@/lib/source-insights';
 
 import {
   breakdownsByCurrency,
@@ -38,6 +39,7 @@ export type ClientDashboardData = {
   guarantees: TrackGuaranteeRow[];
   lineItemsByPeriod: Record<string, StatementLineItem[]>;
   salesPeriodsByPeriod: Record<string, SalesPeriodSourceRow[]>;
+  sourceInsightsByPeriod: Record<string, SourceInsights>;
   statementPeriods: StatementPeriod[];
   trend: RevenueTrendPoint[];
 };
@@ -70,11 +72,6 @@ type BreakdownRow = {
   rowCount: number;
   units: number;
   value: number;
-};
-
-type StatementLineItemSqlRow = Omit<StatementLineItem, 'currency'> & {
-  currency: CurrencyCode;
-  period: string;
 };
 
 export async function getClientDashboardData({
@@ -176,15 +173,17 @@ export async function getClientDashboardData({
       guarantees,
       lineItemsByPeriod: {},
       salesPeriodsByPeriod: {},
+      sourceInsightsByPeriod: {},
       statementPeriods: [],
       trend: [],
     };
   }
 
   const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
-  const [breakdownRows, lineItemRows, salesPeriodRows] = await Promise.all([
-    env.DB.prepare(
-      `SELECT
+  const [breakdownRows, sourceInsightsByPeriod, salesPeriodRows] =
+    await Promise.all([
+      env.DB.prepare(
+        `SELECT
          rp.period,
          rp.currency,
          rb.dimension,
@@ -200,58 +199,15 @@ export async function getClientDashboardData({
          AND rp.client_id = ?
          AND rp.status IN ('published', 'locked')
          AND rp.currency = 'VND'
-       ORDER BY rp.period DESC, rb.dimension ASC, abs(rb.value) DESC
-       LIMIT 2000`,
-    )
-      .bind(clientId, clientId)
-      .all<BreakdownRow>(),
-    lineItemsTableReady
-      ? env.DB.prepare(
-          `SELECT
-             rp.period,
-             li.row_index AS rowIndex,
-             li.account_no AS accountNo,
-             li.contract_name AS contractName,
-             li.content_type AS contentType,
-             li.start_date AS startDate,
-             li.period_end_date AS periodEndDate,
-             li.release_title AS releaseTitle,
-             li.release_artist AS releaseArtist,
-             li.isrc,
-             li.track_title AS trackTitle,
-             li.track_version AS trackVersion,
-             li.track_artist AS trackArtist,
-             li.sales_period AS salesPeriod,
-             li.release_label AS releaseLabel,
-             li.territory,
-             li.distribution_channel AS distributionChannel,
-             li.configuration,
-             li.partner,
-             li.sales,
-             li.gross_income AS grossIncome,
-             li.royalty_rate AS royaltyRate,
-             li.net_payable AS netPayable,
-             li.source_royalty_rate AS sourceRoyaltyRate,
-             li.source_net_payable AS sourceNetPayable,
-             li.calculation_mode AS calculationMode,
-             li.royalty_rule_id AS royaltyRuleId,
-             li.applied_royalty_rate_bps AS appliedRoyaltyRateBps,
-             li.currency
-           FROM statement_line_items li
-           JOIN report_periods rp
-             ON rp.id = li.report_period_id
-           WHERE li.client_id = ?
-             AND rp.client_id = ?
-             AND rp.status IN ('published', 'locked')
-             AND rp.currency = 'VND'
-           ORDER BY rp.period DESC, li.row_index ASC
-           LIMIT 5000`,
-        )
-          .bind(clientId, clientId)
-          .all<StatementLineItemSqlRow>()
-      : Promise.resolve({ results: [] as StatementLineItemSqlRow[] }),
-    lineItemsTableReady
-      ? env.DB.prepare(`SELECT rp.period, li.sales_period AS salesPeriod,
+       ORDER BY rp.period DESC, rb.dimension ASC, abs(rb.value) DESC`,
+      )
+        .bind(clientId, clientId)
+        .all<BreakdownRow>(),
+      lineItemsTableReady
+        ? readSourceInsights(env.DB, clientId)
+        : Promise.resolve({} as Record<string, SourceInsights>),
+      lineItemsTableReady
+        ? env.DB.prepare(`SELECT rp.period, li.sales_period AS salesPeriod,
           li.period_end_date AS periodEndDate, li.start_date AS startDate,
           SUM(li.net_payable) AS netPayable, SUM(li.sales) AS sales, COUNT(*) AS rowCount
         FROM statement_line_items li JOIN report_periods rp ON rp.id = li.report_period_id
@@ -259,12 +215,12 @@ export async function getClientDashboardData({
           AND rp.status IN ('published', 'locked') AND rp.currency = 'VND'
         GROUP BY rp.period, li.sales_period, li.period_end_date, li.start_date
         ORDER BY rp.period DESC, li.sales_period ASC`)
-          .bind(clientId, clientId)
-          .all<SalesPeriodSourceRow & { period: string }>()
-      : Promise.resolve({
-          results: [] as (SalesPeriodSourceRow & { period: string })[],
-        }),
-  ]);
+            .bind(clientId, clientId)
+            .all<SalesPeriodSourceRow & { period: string }>()
+        : Promise.resolve({
+            results: [] as (SalesPeriodSourceRow & { period: string })[],
+          }),
+    ]);
 
   const salesPeriodsByPeriod: Record<string, SalesPeriodSourceRow[]> = {};
   for (const row of salesPeriodRows.results) {
@@ -274,7 +230,8 @@ export async function getClientDashboardData({
   return {
     breakdownsByPeriod: mapBreakdownsByPeriod(breakdownRows.results),
     guarantees,
-    lineItemsByPeriod: mapLineItemsByPeriod(lineItemRows.results),
+    lineItemsByPeriod: {},
+    sourceInsightsByPeriod,
     salesPeriodsByPeriod,
     statementPeriods,
     trend: mapTrend(statementPeriods),
@@ -298,6 +255,7 @@ function staticDashboardData(clientId: string): ClientDashboardData {
     guarantees: [],
     lineItemsByPeriod: {},
     salesPeriodsByPeriod: {},
+    sourceInsightsByPeriod: {},
     statementPeriods,
     trend: statementPeriods.length > 0 ? revenueTrend : [],
   };
@@ -342,61 +300,6 @@ function mapBreakdownsByPeriod(rows: BreakdownRow[]) {
       value: Number(row.value) || 0,
     } satisfies BreakdownItem);
     result[row.period][row.currency] = currencyBreakdowns;
-  }
-
-  return result;
-}
-
-function mapLineItemsByPeriod(rows: StatementLineItemSqlRow[]) {
-  const result: Record<string, StatementLineItem[]> = {};
-
-  for (const row of rows) {
-    const items = (result[row.period] ??= []);
-    items.push({
-      accountNo: row.accountNo,
-      appliedRoyaltyRateBps:
-        row.appliedRoyaltyRateBps === null ||
-        row.appliedRoyaltyRateBps === undefined
-          ? null
-          : Number(row.appliedRoyaltyRateBps) || 0,
-      calculationMode:
-        row.calculationMode === 'track_rule' ? 'track_rule' : 'excel',
-      configuration: row.configuration,
-      contractName: row.contractName,
-      contentType: row.contentType,
-      currency: row.currency,
-      distributionChannel: row.distributionChannel,
-      grossIncome:
-        row.grossIncome === null ? null : Number(row.grossIncome) || 0,
-      isrc: row.isrc,
-      netPayable: Number(row.netPayable) || 0,
-      partner: row.partner,
-      periodEndDate: row.periodEndDate,
-      releaseArtist: row.releaseArtist,
-      releaseLabel: row.releaseLabel,
-      releaseTitle: row.releaseTitle,
-      royaltyRate:
-        row.royaltyRate === null ? null : Number(row.royaltyRate) || 0,
-      royaltyRuleId: row.royaltyRuleId ?? null,
-      rowIndex: Number(row.rowIndex) || 0,
-      sales: Number(row.sales) || 0,
-      salesPeriod: row.salesPeriod,
-      sourceNetPayable:
-        row.sourceNetPayable === null || row.sourceNetPayable === undefined
-          ? Number(row.netPayable) || 0
-          : Number(row.sourceNetPayable) || 0,
-      sourceRoyaltyRate:
-        row.sourceRoyaltyRate === null || row.sourceRoyaltyRate === undefined
-          ? row.royaltyRate === null
-            ? null
-            : Number(row.royaltyRate) || 0
-          : Number(row.sourceRoyaltyRate) || 0,
-      startDate: row.startDate,
-      territory: row.territory,
-      trackArtist: row.trackArtist,
-      trackTitle: row.trackTitle,
-      trackVersion: row.trackVersion,
-    });
   }
 
   return result;

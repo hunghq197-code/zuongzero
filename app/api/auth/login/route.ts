@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 
 import {
   hashSessionToken,
+  createPasswordHash,
   safeRelativeReturnPath,
   verifyPassword,
   verifyPlainSecret,
@@ -67,7 +68,11 @@ export async function POST(request: Request) {
     return redirectToLogin(request, 'invalid', email, returnTo);
   }
 
-  const accountLimit = await consumeAuthRateLimit(env.DB, 'login_account', email);
+  const accountLimit = await consumeAuthRateLimit(
+    env.DB,
+    'login_account',
+    email,
+  );
   if (accountLimit.status !== 'allowed') {
     return rateLimitLoginResponse(request, accountLimit, email, returnTo);
   }
@@ -125,6 +130,24 @@ async function authenticateUser(email: string, password: string) {
   const superAdminEmails = getConfiguredSuperAdminEmails();
 
   if (superAdminEmails.includes(email)) {
+    const stored =
+      await env.DB.prepare(`SELECT u.id, u.email, u.display_name AS displayName, u.role,
+      u.status, pc.password_hash AS passwordHash FROM users u
+      LEFT JOIN password_credentials pc ON pc.user_id = u.id WHERE lower(u.email) = ? LIMIT 1`)
+        .bind(email)
+        .first<
+          Omit<StoredCredentialRow, 'passwordHash'> & {
+            status: string;
+            passwordHash: string | null;
+          }
+        >();
+    if (stored?.status === 'disabled') return null;
+    if (stored?.passwordHash) {
+      return stored.role === 'super_admin' &&
+        (await verifyPassword(password, stored.passwordHash))
+        ? stored
+        : null;
+    }
     const configuredPassword = env.SUPER_ADMIN_PASSWORD;
     if (
       !configuredPassword ||
@@ -140,6 +163,26 @@ async function authenticateUser(email: string, password: string) {
       role: 'super_admin',
       userId: accountUserIdForEmail(email),
     });
+
+    // Server password bootstraps each account once; it never replaces a personal password.
+    const now = new Date().toISOString();
+    const passwordHash = await createPasswordHash(password);
+    await env.DB.prepare(`INSERT INTO password_credentials
+      (id, user_id, password_hash, password_updated_at, must_change_password, created_at)
+      VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT(user_id) DO NOTHING`)
+      .bind(crypto.randomUUID(), user.id, passwordHash, now, now)
+      .run();
+    const credential = await env.DB.prepare(
+      'SELECT password_hash AS passwordHash FROM password_credentials WHERE user_id = ?',
+    )
+      .bind(user.id)
+      .first<{ passwordHash: string }>();
+    if (
+      !credential ||
+      (credential.passwordHash !== passwordHash &&
+        !(await verifyPassword(password, credential.passwordHash)))
+    )
+      return null;
 
     return {
       ...user,
@@ -196,7 +239,10 @@ function redirectToLogin(
     });
   }
   if (error === 'temporary') {
-    return new Response(response.body, { status: 503, headers: response.headers });
+    return new Response(response.body, {
+      status: 503,
+      headers: response.headers,
+    });
   }
   return response;
 }

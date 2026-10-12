@@ -1,4 +1,8 @@
 import { env } from 'cloudflare:workers';
+import {
+  clientWriteErrorResponse,
+  withClientWriteLock,
+} from '@/lib/client-write-lock';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
@@ -74,6 +78,8 @@ export async function PATCH(request: Request) {
   try {
     return await updateCustomerResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể cập nhật khách hàng lúc này.');
   }
 }
@@ -82,6 +88,8 @@ export async function DELETE(request: Request) {
   try {
     return await deleteCustomerResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể xoá khách hàng lúc này.');
   }
 }
@@ -102,56 +110,58 @@ async function updateCustomerResponse(request: Request) {
   const clientId = cleanId(body.clientId);
   if (!clientId) return jsonError('Cần chọn khách hàng hợp lệ.', 400);
 
-  const existingClient = await findClientById(env.DB, clientId);
-  if (!existingClient) return jsonError('Không tìm thấy khách hàng.', 404);
+  return withClientWriteLock(env.DB, [clientId], async (db) => {
+    const existingClient = await findClientById(db, clientId);
+    if (!existingClient) return jsonError('Không tìm thấy khách hàng.', 404);
 
-  const name = cleanText(body.name, 160) || existingClient.name;
-  const code = normalizeClientCode(body.code) || existingClient.code;
-  const status = parseCustomerStatus(body.status) ?? existingClient.status;
-  const codeConflict = await findClientCodeConflict(env.DB, clientId, code);
-  if (codeConflict) return jsonError('Mã khách hàng này đã tồn tại.', 409);
+    const name = cleanText(body.name, 160) || existingClient.name;
+    const code = normalizeClientCode(body.code) || existingClient.code;
+    const status = parseCustomerStatus(body.status) ?? existingClient.status;
+    const codeConflict = await findClientCodeConflict(env.DB, clientId, code);
+    if (codeConflict) return jsonError('Mã khách hàng này đã tồn tại.', 409);
 
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
+    const now = new Date().toISOString();
+    const actor = await ensureUserRecord(env.DB, {
+      displayName: authorization.user.displayName,
+      email: authorization.user.email,
+      lastSeenAt: now,
+      role: authorization.role,
+      userId: authorization.user.userId,
+    });
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE clients
+    await db.batch([
+      env.DB.prepare(
+        `UPDATE clients
        SET code = ?,
            legal_name = ?,
            display_name = ?,
            status = ?,
            updated_at = ?
        WHERE id = ?`,
-    ).bind(code, name, name, status, now, clientId),
-    createAuditLog(
-      actor.id,
-      clientId,
-      'client_profile_updated',
-      'client',
-      clientId,
-      {
-        code,
-        name,
-        previousCode: existingClient.code,
-        previousName: existingClient.name,
-        previousStatus: existingClient.status,
-        status,
-      },
-      now,
-    ),
-  ]);
+      ).bind(code, name, name, status, now, clientId),
+      createAuditLog(
+        actor.id,
+        clientId,
+        'client_profile_updated',
+        'client',
+        clientId,
+        {
+          code,
+          name,
+          previousCode: existingClient.code,
+          previousName: existingClient.name,
+          previousStatus: existingClient.status,
+          status,
+        },
+        now,
+      ),
+    ]);
 
-  return Response.json({
-    customers: await listManagedCustomers(env.DB),
-    overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
-    message: 'Đã cập nhật thông tin khách hàng.',
+    return Response.json({
+      customers: await listManagedCustomers(env.DB),
+      overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
+      message: 'Đã cập nhật thông tin khách hàng.',
+    });
   });
 }
 
@@ -176,85 +186,83 @@ async function deleteCustomerResponse(request: Request) {
   if (!clientId) return jsonError('Cần chọn khách hàng hợp lệ.', 400);
 
   const action = body.action === 'delete' ? 'delete' : 'archive';
-  const existingClient = await findClientById(env.DB, clientId);
-  if (!existingClient) return jsonError('Không tìm thấy khách hàng.', 404);
+  return withClientWriteLock(env.DB, [clientId], async (db) => {
+    const existingClient = await findClientById(db, clientId);
+    if (!existingClient) return jsonError('Không tìm thấy khách hàng.', 404);
 
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
+    const now = new Date().toISOString();
+    const actor = await ensureUserRecord(env.DB, {
+      displayName: authorization.user.displayName,
+      email: authorization.user.email,
+      lastSeenAt: now,
+      role: authorization.role,
+      userId: authorization.user.userId,
+    });
 
-  if (action === 'archive') {
-    await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE clients
+    if (action === 'archive') {
+      await db.batch([
+        env.DB.prepare(
+          `UPDATE clients
          SET status = 'archived',
              updated_at = ?
          WHERE id = ?`,
-      ).bind(now, clientId),
+        ).bind(now, clientId),
+        createAuditLog(
+          actor.id,
+          clientId,
+          'client_archived',
+          'client',
+          clientId,
+          {
+            code: existingClient.code,
+            name: existingClient.name,
+          },
+          now,
+        ),
+      ]);
+
+      return Response.json({
+        customers: await listManagedCustomers(env.DB),
+        overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
+        message: 'Đã lưu trữ khách hàng.',
+      });
+    }
+
+    const uploadKeys = await listUploadObjectKeys(env.DB, clientId);
+
+    const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
+    const deleteStatements = [
       createAuditLog(
         actor.id,
-        clientId,
-        'client_archived',
+        null,
+        'client_deleted',
         'client',
         clientId,
         {
           code: existingClient.code,
           name: existingClient.name,
+          uploadFileCount: uploadKeys.length,
         },
         now,
       ),
-    ]);
-
-    return Response.json({
-      customers: await listManagedCustomers(env.DB),
-      overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
-      message: 'Đã lưu trữ khách hàng.',
-    });
-  }
-
-  const uploadKeys = await listUploadObjectKeys(env.DB, clientId);
-  if (env.FILES) {
-    await Promise.all(uploadKeys.map((key) => env.FILES.delete(key)));
-  }
-
-  const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
-  const deleteStatements = [
-    createAuditLog(
-      actor.id,
-      null,
-      'client_deleted',
-      'client',
-      clientId,
-      {
-        code: existingClient.code,
-        name: existingClient.name,
-        uploadFileCount: uploadKeys.length,
-      },
-      now,
-    ),
-    env.DB.prepare(
-      `DELETE FROM auth_sessions
+      env.DB.prepare(
+        `DELETE FROM auth_sessions
        WHERE user_id IN (
          SELECT user_id
          FROM client_users
          WHERE client_id = ?
        )`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM account_invites
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM account_invites
        WHERE user_id IN (
          SELECT user_id
          FROM client_users
          WHERE client_id = ?
        )`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `UPDATE users
+      ).bind(clientId),
+      env.DB.prepare(
+        `UPDATE users
        SET status = 'disabled'
        WHERE role = 'client'
          AND id IN (
@@ -262,63 +270,74 @@ async function deleteCustomerResponse(request: Request) {
            FROM client_users
            WHERE client_id = ?
          )`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM track_guarantee_recoupments
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM track_guarantee_recoupments
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM track_guarantees
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM track_guarantees
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM revenue_breakdowns
+      ).bind(clientId),
+      env.DB.prepare(
+        'DELETE FROM track_royalty_rules WHERE client_id = ?',
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM revenue_breakdowns
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM statements
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM statements
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM uploads
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM uploads
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM report_periods
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM report_periods
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM client_users
+      ).bind(clientId),
+      env.DB.prepare(
+        `DELETE FROM client_users
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `UPDATE audit_logs
+      ).bind(clientId),
+      env.DB.prepare(
+        `UPDATE audit_logs
        SET client_id = NULL
        WHERE client_id = ?`,
-    ).bind(clientId),
-    env.DB.prepare(
-      `DELETE FROM clients
-       WHERE id = ?`,
-    ).bind(clientId),
-  ];
-
-  if (lineItemsTableReady) {
-    deleteStatements.splice(
-      7,
-      0,
-      env.DB.prepare(
-        `DELETE FROM statement_line_items
-         WHERE client_id = ?`,
       ).bind(clientId),
-    );
-  }
+      env.DB.prepare(
+        `DELETE FROM clients
+       WHERE id = ?`,
+      ).bind(clientId),
+    ];
 
-  await env.DB.batch(deleteStatements);
+    if (lineItemsTableReady) {
+      deleteStatements.splice(
+        7,
+        0,
+        env.DB.prepare(
+          `DELETE FROM statement_line_items
+         WHERE client_id = ?`,
+        ).bind(clientId),
+      );
+    }
 
-  return Response.json({
-    customers: await listManagedCustomers(env.DB),
-    overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
-    message: 'Đã xoá khách hàng và dữ liệu liên quan.',
+    await db.batch(deleteStatements);
+    if (env.FILES) {
+      try {
+        await Promise.all(uploadKeys.map((key) => env.FILES.delete(key)));
+      } catch {
+        console.error('[admin-customers] orphan file cleanup deferred');
+      }
+    }
+
+    return Response.json({
+      customers: await listManagedCustomers(env.DB),
+      overview: await getAdminOverviewData(env.DB, currentCalendarQuarter()),
+      message: 'Đã xoá khách hàng và dữ liệu liên quan.',
+    });
   });
 }
 

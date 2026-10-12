@@ -13,6 +13,10 @@ import {
   type TrackRoyaltyRuleStatus,
 } from '@/lib/royalty-rules';
 import { ensureUserRecord } from '@/lib/user-records';
+import {
+  clientWriteErrorResponse,
+  withClientWriteLock,
+} from '@/lib/client-write-lock';
 
 type RoyaltyRuleBody = {
   clientId?: unknown;
@@ -89,6 +93,8 @@ export async function POST(request: Request) {
   try {
     return await saveRoyaltyRuleResponse(request, null);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể tạo tỷ lệ lúc này.');
   }
 }
@@ -101,6 +107,8 @@ export async function PATCH(request: Request) {
     if (!ruleId) return jsonError('Cần chọn tỷ lệ hợp lệ.', 400);
     return await saveRoyaltyRuleResponse(request, ruleId, body);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể cập nhật tỷ lệ lúc này.');
   }
 }
@@ -157,42 +165,52 @@ async function saveRoyaltyRuleResponse(
     return jsonError('Tỷ lệ phải nằm trong khoảng 0 đến 100%.', 400);
   }
 
-  const client = await findClient(env.DB, clientId);
-  if (!client || client.status === 'archived') {
-    return jsonError('Khách hàng không hợp lệ hoặc đã lưu trữ.', 400);
-  }
-  if (ruleId && !(await findRule(env.DB, ruleId))) {
+  const previousRule = ruleId ? await findRule(env.DB, ruleId) : null;
+  if (ruleId && !previousRule)
     return jsonError('Không tìm thấy quy tắc tỷ lệ.', 404);
-  }
+  return withClientWriteLock(
+    env.DB,
+    [clientId, ...(previousRule ? [previousRule.clientId] : [])],
+    async (db) => {
+      const client = await findClient(db, clientId);
+      if (!client || client.status === 'archived') {
+        return jsonError('Khách hàng không hợp lệ hoặc đã lưu trữ.', 400);
+      }
+      const currentRule = ruleId ? await findRule(db, ruleId) : null;
+      if (ruleId && !currentRule) {
+        return jsonError('Không tìm thấy quy tắc tỷ lệ.', 404);
+      }
+      if (currentRule && currentRule.clientId !== previousRule?.clientId)
+        return jsonError('Tỷ lệ đã thay đổi. Hãy tải lại và thử lại.', 409);
 
-  if (status === 'active') {
-    const overlap = await findOverlappingRule(env.DB, {
-      clientId,
-      effectiveFromPeriod,
-      effectiveToPeriod,
-      excludeRuleId: ruleId,
-      trackExternalKey,
-    });
-    if (overlap) {
-      return jsonError(
-        'ISRC này đã có tỷ lệ active bị trùng khoảng hiệu lực cho khách hàng.',
-        409,
-      );
-    }
-  }
+      if (status === 'active') {
+        const overlap = await findOverlappingRule(db, {
+          clientId,
+          effectiveFromPeriod,
+          effectiveToPeriod,
+          excludeRuleId: ruleId,
+          trackExternalKey,
+        });
+        if (overlap) {
+          return jsonError(
+            'ISRC này đã có tỷ lệ active bị trùng khoảng hiệu lực cho khách hàng.',
+            409,
+          );
+        }
+      }
 
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
-  const targetId = ruleId ?? crypto.randomUUID();
-  const mutation = ruleId
-    ? env.DB.prepare(
-        `UPDATE track_royalty_rules
+      const now = new Date().toISOString();
+      const actor = await ensureUserRecord(db, {
+        displayName: authorization.user.displayName,
+        email: authorization.user.email,
+        lastSeenAt: now,
+        role: authorization.role,
+        userId: authorization.user.userId,
+      });
+      const targetId = ruleId ?? crypto.randomUUID();
+      const mutation = ruleId
+        ? env.DB.prepare(
+            `UPDATE track_royalty_rules
            SET client_id = ?,
                track_title = ?,
                track_external_id = ?,
@@ -204,21 +222,21 @@ async function saveRoyaltyRuleResponse(
                notes = ?,
                updated_at = ?
            WHERE id = ?`,
-      ).bind(
-        clientId,
-        trackTitle,
-        trackExternalId,
-        trackExternalKey,
-        royaltyRateBps,
-        effectiveFromPeriod,
-        effectiveToPeriod,
-        status,
-        notes,
-        now,
-        targetId,
-      )
-    : env.DB.prepare(
-        `INSERT INTO track_royalty_rules (
+          ).bind(
+            clientId,
+            trackTitle,
+            trackExternalId,
+            trackExternalKey,
+            royaltyRateBps,
+            effectiveFromPeriod,
+            effectiveToPeriod,
+            status,
+            notes,
+            now,
+            targetId,
+          )
+        : env.DB.prepare(
+            `INSERT INTO track_royalty_rules (
              id,
              client_id,
              track_title,
@@ -234,48 +252,50 @@ async function saveRoyaltyRuleResponse(
              updated_at
            )
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        targetId,
-        clientId,
-        trackTitle,
-        trackExternalId,
-        trackExternalKey,
-        royaltyRateBps,
-        effectiveFromPeriod,
-        effectiveToPeriod,
-        status,
-        notes,
-        actor.id,
-        now,
-        now,
-      );
+          ).bind(
+            targetId,
+            clientId,
+            trackTitle,
+            trackExternalId,
+            trackExternalKey,
+            royaltyRateBps,
+            effectiveFromPeriod,
+            effectiveToPeriod,
+            status,
+            notes,
+            actor.id,
+            now,
+            now,
+          );
 
-  await env.DB.batch([
-    mutation,
-    createAuditLog(
-      env.DB,
-      actor.id,
-      clientId,
-      ruleId ? 'track_royalty_rule_updated' : 'track_royalty_rule_created',
-      targetId,
-      {
-        clientCode: client.code,
-        clientName: client.name,
-        effectiveFromPeriod,
-        effectiveToPeriod,
-        royaltyRateBps,
-        status,
-        trackExternalId,
-        trackTitle,
-      },
-      now,
-    ),
-  ]);
+      await db.batch([
+        mutation,
+        createAuditLog(
+          env.DB,
+          actor.id,
+          clientId,
+          ruleId ? 'track_royalty_rule_updated' : 'track_royalty_rule_created',
+          targetId,
+          {
+            clientCode: client.code,
+            clientName: client.name,
+            effectiveFromPeriod,
+            effectiveToPeriod,
+            royaltyRateBps,
+            status,
+            trackExternalId,
+            trackTitle,
+          },
+          now,
+        ),
+      ]);
 
-  return Response.json({
-    message: ruleId ? 'Đã cập nhật tỷ lệ chia.' : 'Đã tạo tỷ lệ chia.',
-    rules: await listTrackRoyaltyRules(env.DB),
-  });
+      return Response.json({
+        message: ruleId ? 'Đã cập nhật tỷ lệ chia.' : 'Đã tạo tỷ lệ chia.',
+        rules: await listTrackRoyaltyRules(env.DB),
+      });
+    },
+  );
 }
 
 async function authorizeAdmin(): Promise<AdminAuthorization> {

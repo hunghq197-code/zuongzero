@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   CheckCircle2,
-  ChevronDown,
   Disc3,
   Download,
   FileSpreadsheet,
@@ -64,7 +63,6 @@ import {
 } from '@/lib/reporting-periods';
 import type { DashboardBreakdownsByPeriod } from '@/lib/client-dashboard-data';
 import { createEmptyCurrencyBreakdowns } from '@/lib/royalty-breakdowns';
-import { SETTLEMENT_THRESHOLD_VND } from '@/lib/settlements';
 import { downloadStatementExport } from '@/lib/statement-export-download';
 import type { TrackGuaranteeRow } from '@/lib/guarantees';
 import { type StatementLineItem } from '@/lib/statement-line-items';
@@ -181,10 +179,6 @@ function statementExportUrl(reportPeriodId: string, format: 'excel' | 'pdf') {
 }
 
 function makeQuarterFinancialSummary(activePeriod: StatementPeriod) {
-  const revenueReduction = Math.max(
-    activePeriod.grossRevenue - activePeriod.revenue,
-    0,
-  );
   const quarterNet =
     activePeriod.revenue -
     activePeriod.costs -
@@ -193,7 +187,6 @@ function makeQuarterFinancialSummary(activePeriod: StatementPeriod) {
 
   return {
     quarterNet,
-    revenueReduction,
     totalBalance: activePeriod.opening + quarterNet,
   };
 }
@@ -346,6 +339,7 @@ export function RoyaltyDashboard({
   guarantees = [],
   lineItemsByPeriod = {},
   salesPeriodsByPeriod = {},
+  sourceInsightsByPeriod,
   statementPeriods: statementPeriodsProp,
   trend: trendProp,
   userEmail,
@@ -357,6 +351,7 @@ export function RoyaltyDashboard({
   guarantees?: TrackGuaranteeRow[];
   lineItemsByPeriod?: Record<string, StatementLineItem[]>;
   salesPeriodsByPeriod?: Record<string, SalesPeriodSourceRow[]>;
+  sourceInsightsByPeriod?: Record<string, SourceInsights>;
   statementPeriods?: StatementPeriod[];
   trend?: RevenueTrendPoint[];
   userEmail: string;
@@ -423,8 +418,10 @@ export function RoyaltyDashboard({
     ? (lineItemsByPeriod[activePeriod.period] ?? EMPTY_LINE_ITEMS)
     : EMPTY_LINE_ITEMS;
   const sourceInsights = useMemo(
-    () => makeSourceInsights(activeLineItems),
-    [activeLineItems],
+    () =>
+      sourceInsightsByPeriod?.[activePeriod.period] ??
+      makeSourceInsights(activeLineItems),
+    [activeLineItems, activePeriod.period, sourceInsightsByPeriod],
   );
   const salesPeriods = useMemo(
     () =>
@@ -696,13 +693,13 @@ export function RoyaltyDashboard({
                 </div>
               </div>
 
-              <div className="grid sm:grid-cols-2 xl:grid-cols-4 sm:divide-x sm:divide-border">
+              <dl className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
                 <FinancialSummaryValue
                   label="Tổng doanh thu"
                   value={formatMoney(activePeriod.grossRevenue)}
                 />
                 <FinancialSummaryValue
-                  label="Số dư kỳ trước chuyển sang"
+                  label="Số dư kỳ trước"
                   value={formatMoney(activePeriod.opening)}
                 />
                 <FinancialSummaryValue
@@ -711,69 +708,18 @@ export function RoyaltyDashboard({
                 />
                 <FinancialSummaryValue
                   emphasized
-                  label="Tổng số dư đến kỳ này"
+                  label="Số dư kỳ này"
                   value={formatMoney(financialSummary.totalBalance)}
                 />
-              </div>
-
-              <div className="border-t border-border bg-muted/25 px-4 py-4 md:px-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="flex items-center gap-2 font-semibold">
-                    <WalletCards className="size-4 text-primary" />
-                    Thanh toán
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Ngưỡng chuyển khoản {formatMoney(SETTLEMENT_THRESHOLD_VND)}
-                  </p>
-                </div>
-                <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <PaymentSummaryValue
-                    label="Cần thanh toán"
-                    value={formatMoney(activePeriod.payable)}
-                  />
-                  <PaymentSummaryValue
-                    label="Đã thanh toán"
-                    value={formatMoney(activePeriod.paid)}
-                  />
-                  <PaymentSummaryValue
-                    label="Số dư chuyển kỳ sau"
-                    value={formatMoney(activePeriod.carryForward)}
-                  />
-                </dl>
-              </div>
-
-              <details className="group border-t border-border">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold hover:bg-muted/30 md:px-5 [&::-webkit-details-marker]:hidden">
-                  <span>Chi tiết cách tính</span>
-                  <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                </summary>
-                <dl className="grid border-t border-border bg-muted/15 sm:grid-cols-2 lg:grid-cols-3">
-                  <FinancialDetailValue
-                    label="Giảm trừ doanh thu"
-                    value={formatMoney(financialSummary.revenueReduction)}
-                  />
-                  <FinancialDetailValue
-                    label="GM đã khấu trừ"
-                    value={formatMoney(activePeriod.costs)}
-                  />
-                  <FinancialDetailValue
-                    label="Dự phòng giữ lại"
-                    value={formatMoney(activePeriod.reservesWithheld)}
-                  />
-                  <FinancialDetailValue
-                    label="Dự phòng hoàn lại"
-                    value={`+${formatMoney(activePeriod.reservesReleased)}`}
-                  />
-                  <FinancialDetailValue
-                    label="Số dư đầu kỳ"
-                    value={formatMoney(activePeriod.opening)}
-                  />
-                  <FinancialDetailValue
-                    label="Chuyển kỳ sau"
-                    value={formatMoney(activePeriod.carryForward)}
-                  />
-                </dl>
-              </details>
+                <FinancialSummaryValue
+                  label="Đã thanh toán"
+                  value={formatMoney(activePeriod.paid)}
+                />
+                <FinancialSummaryValue
+                  label="Số dư chuyển kỳ sau"
+                  value={formatMoney(activePeriod.carryForward)}
+                />
+              </dl>
             </section>
 
             <section
@@ -1117,43 +1063,13 @@ function FinancialSummaryValue({
   value: string;
 }) {
   return (
-    <div className={emphasized ? 'min-w-0 bg-[#eafaf7] p-5' : 'min-w-0 p-5'}>
-      <p className="text-xs font-semibold uppercase text-muted-foreground">
-        {label}
-      </p>
-      <p className="font-display mt-2 break-words text-2xl font-semibold leading-tight">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function PaymentSummaryValue({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-base font-semibold">{value}</dd>
-    </div>
-  );
-}
-
-function FinancialDetailValue({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0 sm:border-r md:px-5">
+    <div
+      className={`min-w-0 px-4 py-4 md:px-5 ${emphasized ? 'bg-[#eafaf7]' : 'bg-white'}`}
+    >
       <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="shrink-0 text-sm font-semibold">{value}</dd>
+      <dd className="font-display mt-2 break-words text-xl font-semibold leading-tight tabular-nums">
+        {value}
+      </dd>
     </div>
   );
 }

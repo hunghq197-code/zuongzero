@@ -1,7 +1,7 @@
 import { hasStatementLineItemsTable } from '@/lib/statement-line-items';
+import { buildStatementBulkInserts } from './statement-bulk-inserts';
 
 const SNAPSHOT_VERSION = 1;
-const RESTORE_BATCH_SIZE = 40;
 
 type SnapshotReportPeriod = {
   clientId: string;
@@ -282,6 +282,7 @@ export function parseStatementImportSnapshot(
 export async function restoreStatementImportSnapshot(
   db: D1Database,
   snapshot: StatementImportSnapshot,
+  finalStatements: D1PreparedStatement[] = [],
 ) {
   const statements: D1PreparedStatement[] = [
     db
@@ -417,55 +418,45 @@ export async function restoreStatementImportSnapshot(
   }
 
   statements.push(
-    ...snapshot.breakdowns.map((row) =>
-      db
-        .prepare(
-          `INSERT INTO revenue_breakdowns (
-             id, client_id, report_period_id, dimension, label, value,
-             percentage, units, row_count, created_at
-           )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          row.id,
-          row.clientId,
-          row.reportPeriodId,
-          row.dimension,
-          row.label,
-          row.value,
-          row.percentage,
-          row.units,
-          row.rowCount,
-          row.createdAt,
-        ),
+    ...buildStatementBulkInserts(
+      db,
+      'revenue_breakdowns',
+      snapshot.breakdowns.map((row) => [
+        row.id,
+        row.clientId,
+        row.reportPeriodId,
+        row.dimension,
+        row.label,
+        row.value,
+        row.percentage,
+        row.units,
+        row.rowCount,
+        row.createdAt,
+      ]),
     ),
-    ...snapshot.lineItems.map((row) => buildLineItemInsert(db, row)),
-    ...snapshot.recoupments.map((row) =>
-      db
-        .prepare(
-          `INSERT INTO track_guarantee_recoupments (
-             id, guarantee_id, client_id, report_period_id, source_upload_id,
-             track_title, revenue_amount, amount, created_at
-           )
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          row.id,
-          row.guaranteeId,
-          row.clientId,
-          row.reportPeriodId,
-          row.sourceUploadId,
-          row.trackTitle,
-          row.revenueAmount,
-          row.amount,
-          row.createdAt,
-        ),
+    ...buildStatementBulkInserts(
+      db,
+      'statement_line_items',
+      snapshot.lineItems.map(lineItemValues),
+    ),
+    ...buildStatementBulkInserts(
+      db,
+      'track_guarantee_recoupments',
+      snapshot.recoupments.map((row) => [
+        row.id,
+        row.guaranteeId,
+        row.clientId,
+        row.reportPeriodId,
+        row.sourceUploadId,
+        row.trackTitle,
+        row.revenueAmount,
+        row.amount,
+        row.createdAt,
+      ]),
     ),
   );
 
-  for (let index = 0; index < statements.length; index += RESTORE_BATCH_SIZE) {
-    await db.batch(statements.slice(index, index + RESTORE_BATCH_SIZE));
-  }
+  await db.batch([...statements, ...finalStatements]);
 }
 
 async function readSnapshotLineItems(db: D1Database, reportPeriodId: string) {
@@ -515,54 +506,40 @@ async function readSnapshotLineItems(db: D1Database, reportPeriodId: string) {
   return rows.results;
 }
 
-function buildLineItemInsert(db: D1Database, row: SnapshotLineItem) {
-  return db
-    .prepare(
-      `INSERT INTO statement_line_items (
-         id, client_id, report_period_id, source_upload_id, row_index,
-         account_no, contract_name, content_type, start_date, period_end_date,
-         release_title, release_artist, isrc, track_title, track_version,
-         track_artist, sales_period, release_label, territory,
-         distribution_channel, configuration, partner, sales, gross_income,
-         royalty_rate, net_payable, source_royalty_rate, source_net_payable,
-         calculation_mode, royalty_rule_id, applied_royalty_rate_bps,
-         currency, created_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      row.id,
-      row.clientId,
-      row.reportPeriodId,
-      row.sourceUploadId,
-      row.rowIndex,
-      row.accountNo,
-      row.contractName,
-      row.contentType,
-      row.startDate,
-      row.periodEndDate,
-      row.releaseTitle,
-      row.releaseArtist,
-      row.isrc,
-      row.trackTitle,
-      row.trackVersion,
-      row.trackArtist,
-      row.salesPeriod,
-      row.releaseLabel,
-      row.territory,
-      row.distributionChannel,
-      row.configuration,
-      row.partner,
-      row.sales,
-      row.grossIncome,
-      row.royaltyRate,
-      row.netPayable,
-      row.sourceRoyaltyRate,
-      row.sourceNetPayable,
-      row.calculationMode,
-      row.royaltyRuleId,
-      row.appliedRoyaltyRateBps,
-      row.currency,
-      row.createdAt,
-    );
+function lineItemValues(row: SnapshotLineItem) {
+  return [
+    row.id,
+    row.clientId,
+    row.reportPeriodId,
+    row.sourceUploadId,
+    row.rowIndex,
+    row.accountNo,
+    row.contractName,
+    row.contentType,
+    row.startDate,
+    row.periodEndDate,
+    row.releaseTitle,
+    row.releaseArtist,
+    row.isrc,
+    row.trackTitle,
+    row.trackVersion,
+    row.trackArtist,
+    row.salesPeriod,
+    row.releaseLabel,
+    row.territory,
+    row.distributionChannel,
+    row.configuration,
+    row.partner,
+    row.sales,
+    row.grossIncome,
+    row.royaltyRate,
+    row.netPayable,
+    row.sourceRoyaltyRate,
+    row.sourceNetPayable,
+    row.calculationMode,
+    row.royaltyRuleId,
+    row.appliedRoyaltyRateBps,
+    row.currency,
+    row.createdAt,
+  ];
 }

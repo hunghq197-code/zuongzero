@@ -1,6 +1,49 @@
 # Zuong Zero Artist Portal - Implementation Log
 
-Cap nhat ngay 2026-10-05, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
+Cap nhat ngay 2026-10-12, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
+
+## Phat Hanh An Toan Du Lieu Va Dashboard 6 Chi So - 2026-10-12
+
+Trang thai: DEPLOYED PRODUCTION theo xac nhan "deploy va commit len git". Cac muc NOT DEPLOYED ben duoi ghi nhan giai doan demo truoc khi duoc xac nhan.
+
+- `git fetch origin` xac nhan `main`/`origin/main` cung `c339b8c`; Wrangler OAuth dung account `2b6f84a024bc49c8d450f9bead71a702`. Khong can login lai, khong thay DNS/secrets.
+- Doc schema production xac nhan OTP, limiter, credentials, line items va royalty rules da co; index credential user la UNIQUE. Chi apply `drizzle/0014_client_write_locks.sql` len `royalty-dashboard-db`, sau do doc lai sqlite_master xac nhan bang khoa. Khong chay lai migration cu hay sua user/statement/file.
+- Chay lai `npm test` dat 96/96 (35 unit + 18 contract + 22 auth + 21 business) va `npm run build` dat. TypeScript/targeted lint va Playwright 16/16 financial summary + royalty workflow desktop/mobile da dat tren dung source truoc release. Build van co canh bao chunk lon co san.
+- Lenh deploy: `node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.cloudflare.jsonc --env= --keep-vars`.
+- Worker `royalty-dashboard`, version moi `3c514f56-93bb-487c-b4d1-fb2b91519456`, startup 16 ms; domain `https://artistportal.zuongzeroent.com`, URL Worker `https://royalty-dashboard.hung-hq197.workers.dev`. Giu vars/secrets, D1/R2 bindings va cron `0 2 15 * *`; khong deploy staging.
+- Version truoc deploy `96f84c58-2cdc-4a77-9eab-cfbac5f341cf`. Rollback code cu khong tham gia lock/credential rieng; phai chot ke hoach auth truoc rollback, khong xoa bang khoa hay rollback du lieu D1/R2.
+- SHA256 build `dist/server/index.js`: `2edd53127d48fefe8e169d67a29f8ce78a3aba8ed2d2b9232d9d8e60ca094eeb`. Source build tu working tree tren `c339b8c`; commit source cu the duoc bo sung sau buoc commit.
+- `npm run test:production` dat 16/16; smoke URL Worker dat 16/16. Auth pages tra 200, API nhay cam tra 401 khi khong co phien/header gia mao.
+- Hash JS admin, JS dashboard client va CSS tren domain khop ban build; HTML login tham chieu CSS moi. Kiem tra chi doc, khong gui OTP/reset/mail that hoac dang nhap/nhap file/thanh toan tren production.
+- Chua xac nhan dashboard co session va workbook that tren production. Can nguoi dung dang nhap, xem 6 chi so va thu doi/reset password rieng qua inbox. Credential da co duoc giu, khong reset bang server secret; super admin active da ton tai co the dung Quen mat khau neu khong nho password.
+- Tai lieu chi tiet va cac gioi han: `SAFETY_AND_REPORTING_2026-10-12.md`. Commit/push bao gom source/test/.md, loai tru `.env*`, `.wrangler`, `dist`, `outputs`, database va file Excel.
+
+## Rut Gon Tong Quan Tai Chinh Client - 2026-10-12
+
+Trang thai: CODE DONE, LOCAL TESTED, NOT DEPLOYED. Nguoi dung yeu cau giu chi 6 chi so, khong them cac muc tai chinh phu.
+
+- Khoi Tong quan tai chinh gom dung 6 gia tri theo thu tu: Tong doanh thu, So du ky truoc, Thuc nhan trong quy, So du ky nay, Da thanh toan, So du chuyen ky sau.
+- Bo khu Thanh toan rieng, Can thanh toan, nguong chuyen khoan va Chi tiet cach tinh lap lai. Giu quy bao cao/status o header, chart/GM ledger/export va cac tinh nang khac khong thay doi.
+- Giu cong thuc thuc nhan = revenue - GM - reserve withheld + reserve released; so du ky nay = opening + thuc nhan (truoc thanh toan). Gia tri da tra/carry doc dung du lieu cu; khong sua backend, GM, payment status hay file export.
+- Mot grid/thong ke phang, 3 cot desktop, 2 cot tablet, 1 cot mobile. Nhan tieng Viet rut gon; dt/dd cho tung chi so, so tien tabular, khong them card con/nut/tooltip huong dan.
+- Them Playwright `tests/browser/financial-summary.test.mjs`: 16/16 cho unpaid/paid/empty/large amounts tai 1440/768/390/320 px; dung 6 nhan, dung gia tri va khong tran ngang. Royalty workflow runner dat, doi quy/thang va rule preview/commit van dung. Da xem screenshots trong `outputs/financial-summary-2026-10-12/` (ignored).
+- Them contract test chan viec them lai metric/note vao overview. `npm test` 96/96 (35 unit + 18 contract + 22 auth + 21 business), TypeScript, targeted lint, build va `git diff --check` dat. Build van co canh bao chunk lon co san. Chi dung du lieu gia, khong thao tac production.
+- Giu toan bo thay doi an toan du lieu cua dot truoc; chua commit/push/deploy. App local `http://127.0.0.1:3213/login` va component demo cong 3212. Chi scope UI tai chinh client trong luot nay.
+
+## An Toan Du Lieu Va Bao Cao - 2026-10-12
+
+Trang thai: CODE DONE, LOCAL TESTED, NOT DEPLOYED. Theo yeu cau trien khai cac muc con thieu voi cach dung don gian nhat. Source goc `c339b8c`; khong commit/push/deploy, thay secrets, mat khau that hay du lieu production.
+
+- Dong bo clone hien co bang fast-forward tu `1ef3e41` len `c339b8c`, da doc tai lieu moi nhat ngay 05/10 truoc khi trien khai.
+- Them `client_write_locks`/migration 0014: khoa lease theo client, owner check trong batch, tu het han; upload, rollback, payment/status/delete, GM, rules va customer mutations dung chung khoa. Request xung dot tra 409, missing table tra 503. Khong them nut/quy trinh moi.
+- Import/restore D1 va audit/status cung mot batch; JSON bulk inserts <=512 KiB thay per-row inserts de tranh hang nghin statements. R2/D1 khong transaction chung: import that bai co the con object mo coi, khong co du lieu D1 ghi mot phan. Xoa workbook cua client chi sau D1 thanh cong; xoa rules truoc parent client.
+- GM: neu client co GM va statement quy sau, chan nhap/sua/xoa/rollback quy truoc, xu ly du lieu tu quy moi nhat truoc. Khong tu rebuild lich su GM hay thay khoan da thanh toan.
+- Dashboard: bo cap 2.000 breakdown; SQL aggregate toan bo source rows cho insight/ISRC theo client/quy, khong dua raw 5.000 rows vao browser. Giu chart/bang/phan trang cu va top/Others cua breakdown parser. Chua lazy-load tung quy/nhom rat lon.
+- Super admin: credential PBKDF2 rieng, bootstrap mot lan tu server password neu chua co, khong fallback server secret sau khi da co password rieng. Mo form doi password hien co va recovery cho account active da bootstrap. Doi/reset thu hoi OTP/reset links/session; token consume/credential update co check trong transaction. Khong tu doi mat khau/secret that.
+- `npm test` dat 95/95 (35 unit + 17 contract + 22 auth + 21 business), TypeScript/targeted lint/build dat. Tests gia 5.101 rows, loi giua import/rollback, concurrent payment, lease stale, client isolation, >5.000 source rows, >2.000 breakdowns va super-admin recovery dat. Recovery ho tro ca super admin active da ton tai nhung chua bootstrap password, khong tu tao super admin moi. D1/R2/email chi dung Miniflare/mock.
+- Playwright product-ux va royalty-workflow desktop/mobile dat; fixture 35 bai hat dung source insights tong hop moi. Anh local da kiem tra. Auth feedback local dat 7/7 khi chay lai rieng; lan dau Chrome capture screenshot bi loi, khong phai loi response ung dung.
+- Chi apply 0014 len D1 local `site-creator-d1`, khong remote. App demo cong 3213, component preview 3212 duoc dung sau test. Ban production ghi nhan truoc van `96f84c58`.
+- Huong dan bootstrap, migration, rollout, gioi han va cac viec chua test bang du lieu that: `SAFETY_AND_REPORTING_2026-10-12.md`. Email/inbox that, workbook that va dien tap khoi phuc D1/R2 chua thuc hien trong luot nay.
 
 ## Commit Va Push GitHub - 2026-10-05
 

@@ -34,7 +34,15 @@ import {
   SETTLEMENT_THRESHOLD_VND,
   summarizeSettlement,
 } from '@/lib/settlements';
-import { planTrackGuaranteeRecoupments } from '@/lib/guarantees';
+import {
+  findGuaranteeSuccessor,
+  planTrackGuaranteeRecoupments,
+} from '@/lib/guarantees';
+import {
+  clientWriteErrorResponse,
+  withClientWriteLock,
+} from '@/lib/client-write-lock';
+import { buildStatementBulkInserts } from '@/lib/statement-bulk-inserts';
 import {
   applyTrackRoyaltyRules,
   listApplicableTrackRoyaltyRules,
@@ -55,7 +63,6 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const ALLOWED_MIME_TYPES = new Set([XLSX_MIME, 'application/octet-stream']);
-const IMPORT_BATCH_SIZE = 40;
 
 type UploadClient = {
   code: string;
@@ -102,6 +109,8 @@ export async function POST(request: Request) {
   try {
     return await uploadResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể xử lý upload lúc này.');
   }
 }
@@ -162,172 +171,196 @@ async function uploadResponse(request: Request) {
   });
   if (resolvedTargets instanceof Response) return resolvedTargets;
 
-  const ruleAppliedTargets = await applyRoyaltyRulesToTargets({
-    db: env.DB,
-    period,
-    targets: resolvedTargets,
-  });
-  if (ruleAppliedTargets instanceof Response) return ruleAppliedTargets;
-
-  const bulkUploadId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const storeLineItems = await hasStatementLineItemsTable(env.DB);
-  const uploadTargets = await prepareUploadTargets({
-    db: env.DB,
-    importStrategy,
-    period,
-    storeLineItems,
-    targets: ruleAppliedTargets,
-  });
-  if (uploadTargets instanceof Response) return uploadTargets;
-  const sha256 = await hashBuffer(buffer);
-  const preview = await buildUploadPreview({
-    db: env.DB,
-    filename: file.name,
-    importStrategy,
-    period,
-    targets: uploadTargets,
-    uploadMode,
-    warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
-  });
-  const previewToken = await createImportConfirmationToken({
-    fileSha256: sha256,
-    preview,
-  });
-
-  if (uploadAction === 'preview') {
-    return Response.json({
-      preview,
-      previewToken,
-      status: 'preview',
-    });
-  }
-
-  if (readRequiredText(formData, 'previewToken') !== previewToken) {
-    return jsonError(
-      'Dữ liệu hoặc cấu hình đã thay đổi sau bước kiểm tra. Hãy kiểm tra lại file trước khi nhập.',
-      409,
-    );
-  }
-
-  const uploader = await ensureUserRecord(env.DB, {
-    displayName: user.displayName,
-    email: user.email,
-    lastSeenAt: now,
-    role: adminAccess.role,
-    userId: user.userId,
-  });
-
-  const statements: D1PreparedStatement[] = [];
-  for (const target of uploadTargets) {
-    const objectKey = `clients/${target.client.id}/periods/${period}/uploads/${target.uploadId}.xlsx`;
-    const rollbackSnapshotKey = statementImportSnapshotKey({
-      clientId: target.client.id,
-      period,
-      uploadId: target.uploadId,
-    });
-    const rollbackSnapshot = await captureStatementImportSnapshot({
-      clientId: target.client.id,
-      db: env.DB,
-      period,
-    });
-    await env.FILES.put(rollbackSnapshotKey, JSON.stringify(rollbackSnapshot), {
-      httpMetadata: {
-        contentType: 'application/json',
-      },
-      customMetadata: {
-        clientId: target.client.id,
+  return withClientWriteLock(
+    env.DB,
+    resolvedTargets.map((target) => target.client.id),
+    async (db) => {
+      for (const target of resolvedTargets) {
+        const current = await db
+          .prepare(
+            "SELECT code, legal_name AS legalName, display_name AS name FROM clients WHERE id = ? AND status = 'active'",
+          )
+          .bind(target.client.id)
+          .first<{ code: string; legalName: string; name: string }>();
+        if (!current)
+          return jsonError(
+            'Khách hàng đã thay đổi hoặc không còn hoạt động. Hãy tải lại và kiểm tra file.',
+            409,
+          );
+        target.client = { ...target.client, ...current };
+      }
+      const ruleAppliedTargets = await applyRoyaltyRulesToTargets({
+        db,
         period,
-        purpose: 'statement-import-rollback',
-        uploadId: target.uploadId,
-      },
-    });
-    await env.FILES.put(objectKey, buffer, {
-      httpMetadata: {
-        contentType: XLSX_MIME,
-      },
-      customMetadata: {
-        bulkUploadId,
-        clientCodeFromFile: target.clientCodeFromFile ?? '',
-        clientId: target.client.id,
-        originalFilename: file.name,
-        period,
-        sha256,
+        targets: resolvedTargets,
+      });
+      if (ruleAppliedTargets instanceof Response) return ruleAppliedTargets;
+
+      const bulkUploadId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const storeLineItems = await hasStatementLineItemsTable(db);
+      const uploadTargets = await prepareUploadTargets({
+        db,
         importStrategy,
-        uploadMode,
-        uploadedBy: uploader.id,
-      },
-    });
-
-    statements.push(
-      ...(await buildImportStatements({
-        byteSize: file.size,
-        bulkUploadId,
-        db: env.DB,
-        filename: file.name,
-        importSummary: buildImportSummary({
-          clientCount: uploadTargets.length,
-          currencies: parsedWorkbook.currencies,
-          importStrategy,
-          mergeStats: target.mergeStats,
-          rollbackSnapshotKey,
-          rowCount: target.rowCount,
-          royaltyRuleStats: target.royaltyRuleStats,
-          storeLineItems,
-          totalRowCount: parsedWorkbook.rowCount,
-          uploadMode,
-          warnings: parsedWorkbook.warnings,
-        }),
-        objectKey,
-        parsedStatements: target.parsedStatements,
         period,
-        replacedUploadId: target.existingUploadId,
-        selectedClient: target.client,
-        sha256,
-        stagingReportPeriodId: `${target.client.id}:${period}:staging`,
         storeLineItems,
-        uploadId: target.uploadId,
+        targets: ruleAppliedTargets,
+      });
+      if (uploadTargets instanceof Response) return uploadTargets;
+      const sha256 = await hashBuffer(buffer);
+      const preview = await buildUploadPreview({
+        db,
+        filename: file.name,
         importStrategy,
+        period,
+        targets: uploadTargets,
         uploadMode,
-        uploaderId: uploader.id,
-        now,
-      })),
-    );
-  }
-  await runBatchInChunks(env.DB, statements);
+        warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
+      });
+      const previewToken = await createImportConfirmationToken({
+        fileSha256: sha256,
+        preview,
+      });
 
-  const customerSummaries = await Promise.all(
-    uploadTargets.map(async (target) => ({
-      ...(await readCustomerUploadSummary(env.DB, target.client.id)),
-      clientCode: target.client.code,
-      clientId: target.client.id,
-      clientName: target.client.name,
-    })),
+      if (uploadAction === 'preview') {
+        return Response.json({
+          preview,
+          previewToken,
+          status: 'preview',
+        });
+      }
+
+      if (readRequiredText(formData, 'previewToken') !== previewToken) {
+        return jsonError(
+          'Dữ liệu hoặc cấu hình đã thay đổi sau bước kiểm tra. Hãy kiểm tra lại file trước khi nhập.',
+          409,
+        );
+      }
+
+      const uploader = await ensureUserRecord(db, {
+        displayName: user.displayName,
+        email: user.email,
+        lastSeenAt: now,
+        role: adminAccess.role,
+        userId: user.userId,
+      });
+
+      const statements: D1PreparedStatement[] = [];
+      for (const target of uploadTargets) {
+        const objectKey = `clients/${target.client.id}/periods/${period}/uploads/${target.uploadId}.xlsx`;
+        const rollbackSnapshotKey = statementImportSnapshotKey({
+          clientId: target.client.id,
+          period,
+          uploadId: target.uploadId,
+        });
+        const rollbackSnapshot = await captureStatementImportSnapshot({
+          clientId: target.client.id,
+          db,
+          period,
+        });
+        await env.FILES.put(
+          rollbackSnapshotKey,
+          JSON.stringify(rollbackSnapshot),
+          {
+            httpMetadata: {
+              contentType: 'application/json',
+            },
+            customMetadata: {
+              clientId: target.client.id,
+              period,
+              purpose: 'statement-import-rollback',
+              uploadId: target.uploadId,
+            },
+          },
+        );
+        await env.FILES.put(objectKey, buffer, {
+          httpMetadata: {
+            contentType: XLSX_MIME,
+          },
+          customMetadata: {
+            bulkUploadId,
+            clientCodeFromFile: target.clientCodeFromFile ?? '',
+            clientId: target.client.id,
+            originalFilename: file.name,
+            period,
+            sha256,
+            importStrategy,
+            uploadMode,
+            uploadedBy: uploader.id,
+          },
+        });
+
+        statements.push(
+          ...(await buildImportStatements({
+            byteSize: file.size,
+            bulkUploadId,
+            db,
+            filename: file.name,
+            importSummary: buildImportSummary({
+              clientCount: uploadTargets.length,
+              currencies: parsedWorkbook.currencies,
+              importStrategy,
+              mergeStats: target.mergeStats,
+              rollbackSnapshotKey,
+              rowCount: target.rowCount,
+              royaltyRuleStats: target.royaltyRuleStats,
+              storeLineItems,
+              totalRowCount: parsedWorkbook.rowCount,
+              uploadMode,
+              warnings: parsedWorkbook.warnings,
+            }),
+            objectKey,
+            parsedStatements: target.parsedStatements,
+            period,
+            replacedUploadId: target.existingUploadId,
+            selectedClient: target.client,
+            sha256,
+            stagingReportPeriodId: `${target.client.id}:${period}:staging`,
+            storeLineItems,
+            uploadId: target.uploadId,
+            importStrategy,
+            uploadMode,
+            uploaderId: uploader.id,
+            now,
+          })),
+        );
+      }
+      await db.batch(statements);
+
+      const customerSummaries = await Promise.all(
+        uploadTargets.map(async (target) => ({
+          ...(await readCustomerUploadSummary(db, target.client.id)),
+          clientCode: target.client.code,
+          clientId: target.client.id,
+          clientName: target.client.name,
+        })),
+      );
+      const firstCustomer = customerSummaries[0] ?? null;
+
+      return Response.json({
+        currencies: parsedWorkbook.currencies,
+        customer: uploadMode === 'single' ? firstCustomer : null,
+        customers: customerSummaries,
+        importedClients: uploadTargets.length,
+        importedRows: parsedWorkbook.rowCount,
+        statementRows: uploadTargets.reduce(
+          (total, target) => total + target.rowCount,
+          0,
+        ),
+        royaltyRuleStats: sumRoyaltyRuleStats(uploadTargets),
+        status: 'imported',
+        uploadId:
+          uploadMode === 'single' ? uploadTargets[0]?.uploadId : bulkUploadId,
+        warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
+        message: importSuccessMessage({
+          importStrategy,
+          period,
+          targets: uploadTargets,
+          uploadMode,
+        }),
+      });
+    },
   );
-  const firstCustomer = customerSummaries[0] ?? null;
-
-  return Response.json({
-    currencies: parsedWorkbook.currencies,
-    customer: uploadMode === 'single' ? firstCustomer : null,
-    customers: customerSummaries,
-    importedClients: uploadTargets.length,
-    importedRows: parsedWorkbook.rowCount,
-    statementRows: uploadTargets.reduce(
-      (total, target) => total + target.rowCount,
-      0,
-    ),
-    royaltyRuleStats: sumRoyaltyRuleStats(uploadTargets),
-    status: 'imported',
-    uploadId:
-      uploadMode === 'single' ? uploadTargets[0]?.uploadId : bulkUploadId,
-    warnings: uploadWarnings(parsedWorkbook.warnings, storeLineItems),
-    message: importSuccessMessage({
-      importStrategy,
-      period,
-      targets: uploadTargets,
-      uploadMode,
-    }),
-  });
 }
 
 function parseUploadedWorkbook(buffer: ArrayBuffer, uploadMode: UploadMode) {
@@ -605,6 +638,18 @@ async function prepareUploadTargets({
       );
       const existing = await findExistingStatement(db, reportPeriodId);
       const statementExists = Boolean(existing?.sourceUploadId);
+
+      const gmSuccessor = await findGuaranteeSuccessor(
+        db,
+        target.client.id,
+        period,
+      );
+      if (gmSuccessor) {
+        return jsonError(
+          `${target.client.name}: có GM và dữ liệu kỳ ${gmSuccessor.period}. Hãy hoàn tác hoặc xoá dữ liệu từ kỳ mới nhất trước khi nhập lại kỳ trước.`,
+          409,
+        );
+      }
 
       const successor = await findFinalizedSuccessor(
         db,
@@ -1174,40 +1219,26 @@ async function buildImportStatements({
       );
     }
 
+    const breakdownRows: Array<Array<string | number | null>> = [];
     for (const key of breakdownKeys) {
       for (const item of parsedStatement.breakdowns[key]) {
-        statements.push(
-          db
-            .prepare(
-              `INSERT INTO revenue_breakdowns (
-                 id,
-                 client_id,
-                 report_period_id,
-                 dimension,
-                 label,
-                 value,
-                 percentage,
-                 units,
-                 row_count,
-                 created_at
-               )
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .bind(
-              stableBreakdownId(reportPeriodId, key, item.name),
-              selectedClient.id,
-              reportPeriodId,
-              breakdownKeyToDimension(key),
-              item.name,
-              item.value,
-              item.percentage,
-              item.units,
-              item.rows,
-              now,
-            ),
-        );
+        breakdownRows.push([
+          stableBreakdownId(reportPeriodId, key, item.name),
+          selectedClient.id,
+          reportPeriodId,
+          breakdownKeyToDimension(key),
+          item.name,
+          item.value,
+          item.percentage,
+          item.units,
+          item.rows,
+          now,
+        ]);
       }
     }
+    statements.push(
+      ...buildStatementBulkInserts(db, 'revenue_breakdowns', breakdownRows),
+    );
 
     if (storeLineItems) {
       statements.push(
@@ -1280,91 +1311,45 @@ function buildStatementLineItemStatements({
   reportPeriodId: string;
   sourceUploadId: string;
 }) {
-  return items.map((item) =>
-    db
-      .prepare(
-        `INSERT INTO statement_line_items (
-           id,
-           client_id,
-           report_period_id,
-           source_upload_id,
-           row_index,
-           account_no,
-           contract_name,
-           content_type,
-           start_date,
-           period_end_date,
-           release_title,
-           release_artist,
-           isrc,
-           track_title,
-           track_version,
-           track_artist,
-           sales_period,
-           release_label,
-           territory,
-           distribution_channel,
-           configuration,
-           partner,
-           sales,
-           gross_income,
-           royalty_rate,
-           net_payable,
-           source_royalty_rate,
-           source_net_payable,
-           calculation_mode,
-           royalty_rule_id,
-           applied_royalty_rate_bps,
-           currency,
-           created_at
-         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        crypto.randomUUID(),
-        clientId,
-        reportPeriodId,
-        sourceUploadId,
-        item.rowIndex,
-        item.accountNo || clientCode,
-        item.contractName,
-        item.contentType,
-        item.startDate,
-        item.periodEndDate,
-        item.releaseTitle,
-        item.releaseArtist,
-        item.isrc,
-        item.trackTitle,
-        item.trackVersion,
-        item.trackArtist,
-        item.salesPeriod,
-        item.releaseLabel,
-        item.territory,
-        item.distributionChannel,
-        item.configuration,
-        item.partner,
-        item.sales,
-        item.grossIncome,
-        item.royaltyRate,
-        item.netPayable,
-        item.sourceRoyaltyRate ?? item.royaltyRate,
-        item.sourceNetPayable ?? item.netPayable,
-        item.calculationMode ?? 'excel',
-        item.royaltyRuleId ?? null,
-        item.appliedRoyaltyRateBps ?? null,
-        item.currency,
-        now,
-      ),
+  return buildStatementBulkInserts(
+    db,
+    'statement_line_items',
+    items.map((item) => [
+      crypto.randomUUID(),
+      clientId,
+      reportPeriodId,
+      sourceUploadId,
+      item.rowIndex,
+      item.accountNo || clientCode,
+      item.contractName,
+      item.contentType,
+      item.startDate,
+      item.periodEndDate,
+      item.releaseTitle,
+      item.releaseArtist,
+      item.isrc,
+      item.trackTitle,
+      item.trackVersion,
+      item.trackArtist,
+      item.salesPeriod,
+      item.releaseLabel,
+      item.territory,
+      item.distributionChannel,
+      item.configuration,
+      item.partner,
+      item.sales,
+      item.grossIncome,
+      item.royaltyRate,
+      item.netPayable,
+      item.sourceRoyaltyRate ?? item.royaltyRate,
+      item.sourceNetPayable ?? item.netPayable,
+      item.calculationMode ?? 'excel',
+      item.royaltyRuleId ?? null,
+      item.appliedRoyaltyRateBps ?? null,
+      item.currency,
+      now,
+    ]),
   );
-}
-
-async function runBatchInChunks(
-  db: D1Database,
-  statements: D1PreparedStatement[],
-) {
-  for (let index = 0; index < statements.length; index += IMPORT_BATCH_SIZE) {
-    await db.batch(statements.slice(index, index + IMPORT_BATCH_SIZE));
-  }
 }
 
 async function readCustomerUploadSummary(db: D1Database, clientId: string) {

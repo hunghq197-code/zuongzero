@@ -13,7 +13,14 @@ import {
   REPORT_PERIOD_PATTERN,
 } from '@/lib/reporting-periods';
 import { LOCAL_PREVIEW_DOMAIN, normalizeEmail } from '@/lib/identity';
-import { buildReverseGuaranteeRecoupmentStatements } from '@/lib/guarantees';
+import {
+  buildReverseGuaranteeRecoupmentStatements,
+  findGuaranteeSuccessor,
+} from '@/lib/guarantees';
+import {
+  clientWriteErrorResponse,
+  withClientWriteLock,
+} from '@/lib/client-write-lock';
 import { hasStatementLineItemsTable } from '@/lib/statement-line-items';
 import { summarizeSettlement } from '@/lib/settlements';
 import {
@@ -109,6 +116,8 @@ export async function PATCH(request: Request) {
   try {
     return await updateStatementResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể cập nhật statement lúc này.');
   }
 }
@@ -117,6 +126,8 @@ export async function DELETE(request: Request) {
   try {
     return await deleteStatementResponse(request);
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     return serverErrorResponse(error, 'Không thể xoá statement lúc này.');
   }
 }
@@ -144,79 +155,129 @@ async function updateStatementResponse(request: Request) {
     return jsonError('Cần chọn statement và hành động hợp lệ.', 400);
   }
 
-  const statement = await findStatementTarget(env.DB, reportPeriodId);
-  if (!statement) return jsonError('Không tìm thấy statement.', 404);
+  const target = await findStatementTarget(env.DB, reportPeriodId);
+  if (!target) return jsonError('Không tìm thấy statement.', 404);
+  return withClientWriteLock(env.DB, [target.clientId], async (db) => {
+    const statement = await findStatementTarget(db, reportPeriodId);
+    if (!statement) return jsonError('Không tìm thấy statement.', 404);
 
-  const changesLedger = isPaymentAction(action)
-    ? statement.paymentStatus !== (action === 'mark_paid' ? 'paid' : 'unpaid')
-    : action === 'unpublish' ||
-      !['published', 'locked'].includes(statement.status);
-  if (changesLedger) {
-    const successor = await findFinalizedSuccessor(
-      env.DB,
-      statement.clientId,
-      statement.period,
-    );
-    if (successor)
-      return jsonError(
-        `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi thay đổi số dư kỳ trước.`,
-        409,
+    const changesLedger = isPaymentAction(action)
+      ? statement.paymentStatus !== (action === 'mark_paid' ? 'paid' : 'unpaid')
+      : action === 'unpublish' ||
+        !['published', 'locked'].includes(statement.status);
+    if (changesLedger) {
+      const successor = await findFinalizedSuccessor(
+        env.DB,
+        statement.clientId,
+        statement.period,
       );
-  }
-  if (action === 'unpublish' && statement.paymentStatus === 'paid') {
-    return jsonError(
-      'Hãy hoàn tác trạng thái thanh toán trước khi ẩn statement.',
-      409,
-    );
-  }
-
-  if (
-    statement.status === 'locked' &&
-    action !== 'publish' &&
-    !isPaymentAction(action)
-  ) {
-    return jsonError('Statement đã lock. Hãy mở lại trước khi chỉnh.', 400);
-  }
-
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
-
-  if (isPaymentAction(action)) {
-    if (!['published', 'locked'].includes(statement.status)) {
+      if (successor)
+        return jsonError(
+          `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi thay đổi số dư kỳ trước.`,
+          409,
+        );
+    }
+    if (action === 'unpublish' && statement.paymentStatus === 'paid') {
       return jsonError(
-        'Chỉ cập nhật thanh toán cho statement đã publish.',
+        'Hãy hoàn tác trạng thái thanh toán trước khi ẩn statement.',
         409,
       );
     }
-    const opening = await readOpeningBalance(
-      env.DB,
-      statement.clientId,
-      statement.period,
-    );
-    const settlement = summarizeSettlement({
-      costs: Number(statement.costs) || 0,
-      opening,
-      reservesReleased: Number(statement.reservesReleased) || 0,
-      reservesWithheld: Number(statement.reservesWithheld) || 0,
-      revenue: Number(statement.revenue) || 0,
+
+    if (
+      statement.status === 'locked' &&
+      action !== 'publish' &&
+      !isPaymentAction(action)
+    ) {
+      return jsonError('Statement đã lock. Hãy mở lại trước khi chỉnh.', 400);
+    }
+
+    const now = new Date().toISOString();
+    const actor = await ensureUserRecord(db, {
+      displayName: authorization.user.displayName,
+      email: authorization.user.email,
+      lastSeenAt: now,
+      role: authorization.role,
+      userId: authorization.user.userId,
     });
 
-    if (action === 'mark_paid' && settlement.status === 'carried_forward') {
-      return jsonError(
-        'Statement chưa đủ ngưỡng thanh toán và đang chuyển sang kỳ sau.',
-        400,
+    if (isPaymentAction(action)) {
+      if (!['published', 'locked'].includes(statement.status)) {
+        return jsonError(
+          'Chỉ cập nhật thanh toán cho statement đã publish.',
+          409,
+        );
+      }
+      const opening = await readOpeningBalance(
+        env.DB,
+        statement.clientId,
+        statement.period,
       );
-    }
+      const settlement = summarizeSettlement({
+        costs: Number(statement.costs) || 0,
+        opening,
+        reservesReleased: Number(statement.reservesReleased) || 0,
+        reservesWithheld: Number(statement.reservesWithheld) || 0,
+        revenue: Number(statement.revenue) || 0,
+      });
 
-    const paymentStatus = action === 'mark_paid' ? 'paid' : 'unpaid';
-    // Repeated mark_paid must not overwrite the original payment snapshot.
-    if (paymentStatus === statement.paymentStatus) {
+      if (action === 'mark_paid' && settlement.status === 'carried_forward') {
+        return jsonError(
+          'Statement chưa đủ ngưỡng thanh toán và đang chuyển sang kỳ sau.',
+          400,
+        );
+      }
+
+      const paymentStatus = action === 'mark_paid' ? 'paid' : 'unpaid';
+      // Repeated mark_paid must not overwrite the original payment snapshot.
+      if (paymentStatus === statement.paymentStatus) {
+        return Response.json({
+          overview: await getAdminOverviewData(env.DB, statement.period),
+          statements: await listAdminStatements(env.DB, {
+            period: statement.period,
+          }),
+          message: statementMessage(action),
+        });
+      }
+      await db.batch([
+        env.DB.prepare(`UPDATE statements SET opening_balance = ?, closing_balance = ?
+        WHERE report_period_id = ?`).bind(
+          opening,
+          paymentStatus === 'paid' ? 0 : settlement.payable,
+          reportPeriodId,
+        ),
+        env.DB.prepare(
+          `UPDATE report_periods
+         SET payment_status = ?,
+             paid_at = ?,
+             paid_by_user_id = ?,
+             updated_at = ?
+         WHERE id = ?
+           AND currency = 'VND'`,
+        ).bind(
+          paymentStatus,
+          paymentStatus === 'paid' ? now : null,
+          paymentStatus === 'paid' ? actor.id : null,
+          now,
+          reportPeriodId,
+        ),
+        createAuditLog(
+          actor.id,
+          statement.clientId,
+          `admin_statement_${action}`,
+          'report_period',
+          reportPeriodId,
+          {
+            currency: statement.currency,
+            payable: settlement.payable,
+            period: statement.period,
+            previousPaymentStatus: statement.paymentStatus,
+            paymentStatus,
+          },
+          now,
+        ),
+      ]);
+
       return Response.json({
         overview: await getAdminOverviewData(env.DB, statement.period),
         statements: await listAdminStatements(env.DB, {
@@ -225,25 +286,30 @@ async function updateStatementResponse(request: Request) {
         message: statementMessage(action),
       });
     }
-    await env.DB.batch([
-      env.DB.prepare(`UPDATE statements SET opening_balance = ?, closing_balance = ?
-        WHERE report_period_id = ?`).bind(
-        opening,
-        paymentStatus === 'paid' ? 0 : settlement.payable,
-        reportPeriodId,
-      ),
+
+    const nextStatus = statementStatusForAction(action);
+
+    await db.batch([
       env.DB.prepare(
         `UPDATE report_periods
-         SET payment_status = ?,
-             paid_at = ?,
-             paid_by_user_id = ?,
-             updated_at = ?
-         WHERE id = ?
-           AND currency = 'VND'`,
+       SET status = ?,
+           published_at = CASE
+             WHEN ? = 'published' THEN COALESCE(published_at, ?)
+             WHEN ? = 'locked' THEN COALESCE(published_at, ?)
+             ELSE NULL
+           END,
+           locked_at = CASE WHEN ? = 'locked' THEN ? ELSE NULL END,
+           updated_at = ?
+       WHERE id = ?
+         AND currency = 'VND'`,
       ).bind(
-        paymentStatus,
-        paymentStatus === 'paid' ? now : null,
-        paymentStatus === 'paid' ? actor.id : null,
+        nextStatus,
+        nextStatus,
+        now,
+        nextStatus,
+        now,
+        nextStatus,
+        now,
         now,
         reportPeriodId,
       ),
@@ -255,10 +321,9 @@ async function updateStatementResponse(request: Request) {
         reportPeriodId,
         {
           currency: statement.currency,
-          payable: settlement.payable,
           period: statement.period,
-          previousPaymentStatus: statement.paymentStatus,
-          paymentStatus,
+          previousStatus: statement.status,
+          status: nextStatus,
         },
         now,
       ),
@@ -271,56 +336,6 @@ async function updateStatementResponse(request: Request) {
       }),
       message: statementMessage(action),
     });
-  }
-
-  const nextStatus = statementStatusForAction(action);
-
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE report_periods
-       SET status = ?,
-           published_at = CASE
-             WHEN ? = 'published' THEN COALESCE(published_at, ?)
-             WHEN ? = 'locked' THEN COALESCE(published_at, ?)
-             ELSE NULL
-           END,
-           locked_at = CASE WHEN ? = 'locked' THEN ? ELSE NULL END,
-           updated_at = ?
-       WHERE id = ?
-         AND currency = 'VND'`,
-    ).bind(
-      nextStatus,
-      nextStatus,
-      now,
-      nextStatus,
-      now,
-      nextStatus,
-      now,
-      now,
-      reportPeriodId,
-    ),
-    createAuditLog(
-      actor.id,
-      statement.clientId,
-      `admin_statement_${action}`,
-      'report_period',
-      reportPeriodId,
-      {
-        currency: statement.currency,
-        period: statement.period,
-        previousStatus: statement.status,
-        status: nextStatus,
-      },
-      now,
-    ),
-  ]);
-
-  return Response.json({
-    overview: await getAdminOverviewData(env.DB, statement.period),
-    statements: await listAdminStatements(env.DB, {
-      period: statement.period,
-    }),
-    message: statementMessage(action),
   });
 }
 
@@ -350,106 +365,121 @@ async function deleteStatementResponse(request: Request) {
     return jsonError('Cần chọn statement hợp lệ.', 400);
   }
 
-  const statement = await findStatementDeleteTarget(env.DB, reportPeriodId);
-  if (!statement) return jsonError('Không tìm thấy statement.', 404);
+  const target = await findStatementDeleteTarget(env.DB, reportPeriodId);
+  if (!target) return jsonError('Không tìm thấy statement.', 404);
+  return withClientWriteLock(env.DB, [target.clientId], async (db) => {
+    const statement = await findStatementDeleteTarget(db, reportPeriodId);
+    if (!statement) return jsonError('Không tìm thấy statement.', 404);
 
-  if (statement.paymentStatus === 'paid' || statement.status === 'locked') {
-    return jsonError(
-      'Hãy mở khóa và hoàn tác trạng thái thanh toán trước khi xoá statement.',
-      409,
-    );
-  }
-  const successor = await findFinalizedSuccessor(
-    env.DB,
-    statement.clientId,
-    statement.period,
-  );
-  if (successor)
-    return jsonError(
-      `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi xoá kỳ trước.`,
-      409,
-    );
-
-  const now = new Date().toISOString();
-  const actor = await ensureUserRecord(env.DB, {
-    displayName: authorization.user.displayName,
-    email: authorization.user.email,
-    lastSeenAt: now,
-    role: authorization.role,
-    userId: authorization.user.userId,
-  });
-
-  const guaranteeReversalStatements =
-    await buildReverseGuaranteeRecoupmentStatements(
-      env.DB,
-      reportPeriodId,
-      now,
-    );
-  const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
-
-  const deleteStatements = [
-    ...guaranteeReversalStatements,
-    env.DB.prepare(
-      `DELETE FROM revenue_breakdowns
-       WHERE report_period_id = ?`,
-    ).bind(reportPeriodId),
-    env.DB.prepare(
-      `DELETE FROM statements
-       WHERE report_period_id = ?`,
-    ).bind(reportPeriodId),
-    env.DB.prepare(
-      `DELETE FROM report_periods
-       WHERE id = ?`,
-    ).bind(reportPeriodId),
-    createAuditLog(
-      actor.id,
+    const gmSuccessor = await findGuaranteeSuccessor(
+      db,
       statement.clientId,
-      'admin_statement_delete',
-      'report_period',
-      reportPeriodId,
-      {
-        currency: statement.currency,
-        clientCode: statement.clientCode,
-        clientName: statement.clientName,
-        filename: statement.filename,
-        period: statement.period,
-        previousStatus: statement.status,
-      },
-      now,
-    ),
-  ];
-
-  if (lineItemsTableReady) {
-    deleteStatements.splice(
-      guaranteeReversalStatements.length + 1,
-      0,
-      env.DB.prepare(
-        `DELETE FROM statement_line_items
-         WHERE report_period_id = ?`,
-      ).bind(reportPeriodId),
+      statement.period,
     );
-  }
+    if (gmSuccessor) {
+      return jsonError(
+        `Có GM và dữ liệu kỳ ${gmSuccessor.period}. Hãy xử lý dữ liệu từ kỳ mới nhất trước khi xoá kỳ trước.`,
+        409,
+      );
+    }
 
-  await env.DB.batch(deleteStatements);
-
-  if (statement.sourceUploadId) {
-    const uploadStillUsed = await isUploadStillUsed(
+    if (statement.paymentStatus === 'paid' || statement.status === 'locked') {
+      return jsonError(
+        'Hãy mở khóa và hoàn tác trạng thái thanh toán trước khi xoá statement.',
+        409,
+      );
+    }
+    const successor = await findFinalizedSuccessor(
       env.DB,
-      statement.sourceUploadId,
+      statement.clientId,
+      statement.period,
     );
+    if (successor)
+      return jsonError(
+        `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi xoá kỳ trước.`,
+        409,
+      );
 
-    if (!uploadStillUsed) {
-      if (env.FILES && statement.objectKey) {
-        await env.FILES.delete(statement.objectKey);
-      }
+    const now = new Date().toISOString();
+    const actor = await ensureUserRecord(db, {
+      displayName: authorization.user.displayName,
+      email: authorization.user.email,
+      lastSeenAt: now,
+      role: authorization.role,
+      userId: authorization.user.userId,
+    });
 
-      await env.DB.batch([
+    const guaranteeReversalStatements =
+      await buildReverseGuaranteeRecoupmentStatements(
+        env.DB,
+        reportPeriodId,
+        now,
+      );
+    const lineItemsTableReady = await hasStatementLineItemsTable(env.DB);
+
+    const deleteStatements = [
+      ...guaranteeReversalStatements,
+      env.DB.prepare(
+        `DELETE FROM revenue_breakdowns
+       WHERE report_period_id = ?`,
+      ).bind(reportPeriodId),
+      env.DB.prepare(
+        `DELETE FROM statements
+       WHERE report_period_id = ?`,
+      ).bind(reportPeriodId),
+      env.DB.prepare(
+        `DELETE FROM report_periods
+       WHERE id = ?`,
+      ).bind(reportPeriodId),
+      createAuditLog(
+        actor.id,
+        statement.clientId,
+        'admin_statement_delete',
+        'report_period',
+        reportPeriodId,
+        {
+          currency: statement.currency,
+          clientCode: statement.clientCode,
+          clientName: statement.clientName,
+          filename: statement.filename,
+          period: statement.period,
+          previousStatus: statement.status,
+        },
+        now,
+      ),
+    ];
+
+    if (lineItemsTableReady) {
+      deleteStatements.splice(
+        guaranteeReversalStatements.length + 1,
+        0,
         env.DB.prepare(
-          `DELETE FROM uploads
+          `DELETE FROM statement_line_items
+         WHERE report_period_id = ?`,
+        ).bind(reportPeriodId),
+      );
+    }
+
+    await db.batch(deleteStatements);
+
+    if (statement.sourceUploadId) {
+      const uploadStillUsed = await isUploadStillUsed(
+        env.DB,
+        statement.sourceUploadId,
+      );
+
+      if (!uploadStillUsed) {
+        if (env.FILES && statement.objectKey) {
+          await env.FILES.delete(statement.objectKey);
+        }
+
+        await db.batch([
+          env.DB.prepare(
+            `DELETE FROM uploads
            WHERE id = ?`,
-        ).bind(statement.sourceUploadId),
-        env.DB.prepare(
-          `DELETE FROM report_periods
+          ).bind(statement.sourceUploadId),
+          env.DB.prepare(
+            `DELETE FROM report_periods
            WHERE id = ?
              AND currency IN ('IMPORT', 'MULTI')
              AND NOT EXISTS (
@@ -457,20 +487,21 @@ async function deleteStatementResponse(request: Request) {
                FROM uploads
                WHERE report_period_id = ?
              )`,
-        ).bind(
-          statement.uploadReportPeriodId ?? '',
-          statement.uploadReportPeriodId ?? '',
-        ),
-      ]);
+          ).bind(
+            statement.uploadReportPeriodId ?? '',
+            statement.uploadReportPeriodId ?? '',
+          ),
+        ]);
+      }
     }
-  }
 
-  return Response.json({
-    overview: await getAdminOverviewData(env.DB, statement.period),
-    statements: await listAdminStatements(env.DB, {
-      period: statement.period,
-    }),
-    message: 'Đã xoá statement, breakdown và dữ liệu dòng liên quan.',
+    return Response.json({
+      overview: await getAdminOverviewData(env.DB, statement.period),
+      statements: await listAdminStatements(env.DB, {
+        period: statement.period,
+      }),
+      message: 'Đã xoá statement, breakdown và dữ liệu dòng liên quan.',
+    });
   });
 }
 

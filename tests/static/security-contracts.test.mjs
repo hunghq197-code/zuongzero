@@ -259,7 +259,7 @@ test('forgot password sends the right recovery email for activated and pending a
   );
 
   assert.match(forgotPasswordRoute, /LEFT JOIN password_credentials/);
-  assert.match(forgotPasswordRoute, /purpose = user\.credentialId/);
+  assert.match(forgotPasswordRoute, /purpose\s*=\s*user\.credentialId/);
   assert.match(forgotPasswordRoute, /'password_reset'/);
   assert.match(forgotPasswordRoute, /'account_activation'/);
   assert.match(forgotPasswordRoute, /sendPasswordResetEmail/);
@@ -354,4 +354,45 @@ test('auth throttling is durable, atomic and runs before credentials or email wo
   assert.match(verify, /attempt_count = attempt_count \+ 1/);
   assert.match(verify, /AND attempt_count < \?/);
   assert.doesNotMatch(verify, /SET attempt_count = \?/);
+});
+
+void test('financial mutations share a fenced customer lease and import/restore do not split commits', () => {
+  for (const path of [
+    'app/api/admin/uploads/route.ts', 'app/api/admin/statements/route.ts',
+    'app/api/admin/uploads/rollback/route.ts', 'app/api/admin/guarantees/route.ts',
+    'app/api/admin/royalty-rules/route.ts', 'app/api/admin/customers/route.ts',
+    'lib/royalty-rule-import.ts',
+  ]) assert.match(readSource(path), /withClientWriteLock/);
+  const lock = readSource('lib/client-write-lock.ts');
+  assert.match(lock, /RETURNING client_id/);
+  assert.match(lock, /owner_token = \?2 AND expires_at/);
+  assert.match(lock, /DELETE FROM client_write_locks WHERE owner_token/);
+  assert.doesNotMatch(readSource('app/api/admin/uploads/route.ts'), /runBatchInChunks|IMPORT_BATCH_SIZE/);
+  assert.doesNotMatch(readSource('lib/statement-import-snapshots.ts'), /RESTORE_BATCH_SIZE/);
+  assert.match(readSource('lib/statement-bulk-inserts.ts'), /json_each/);
+  assert.match(readSource('app/api/admin/uploads/route.ts'), /findGuaranteeSuccessor/);
+});
+
+void test('client insights use full SQL aggregates and personal super-admin passwords have no server fallback', () => {
+  const dashboard = readSource('lib/client-dashboard-data.ts');
+  assert.doesNotMatch(dashboard, /LIMIT 2000|LIMIT 5000/);
+  assert.match(dashboard, /readSourceInsights/);
+  assert.match(readSource('lib/source-insights.ts'), /SUM\(li.net_payable\)/);
+  const login = readSource('app/api/auth/login/route.ts');
+  assert.ok(login.indexOf('if (stored?.passwordHash)') < login.indexOf('const configuredPassword'));
+  assert.match(login, /ON CONFLICT\(user_id\) DO NOTHING/);
+  assert.doesNotMatch(readSource('app/account/page.tsx'), /passwordManagedByServer/);
+  assert.match(readSource('app/api/auth/reset-password/route.ts'), /reset-link-invalid/);
+});
+
+void test('client financial overview contains only the six agreed metrics', () => {
+  const source = readSource('components/royalty-dashboard.tsx');
+  const start = source.indexOf('aria-labelledby="financial-summary-title"');
+  const end = source.indexOf('id="client-statements"', start);
+  const summary = source.slice(start, end);
+  assert.equal((summary.match(/<FinancialSummaryValue\b/g) ?? []).length, 6);
+  for (const label of ['Tổng doanh thu', 'Số dư kỳ trước', 'Thực nhận trong quý', 'Số dư kỳ này', 'Đã thanh toán', 'Số dư chuyển kỳ sau']) {
+    assert.ok(summary.includes(`label="${label}"`));
+  }
+  assert.doesNotMatch(summary, /Chi tiết cách tính|Cần thanh toán|Ngưỡng chuyển khoản|<details/);
 });

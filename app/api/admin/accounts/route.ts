@@ -179,7 +179,7 @@ async function createAccountResponse(request: Request) {
 
   if (getConfiguredSuperAdminEmails().includes(email)) {
     return jsonError(
-      'Tài khoản super admin gốc được quản lý bằng cấu hình server, không chỉnh trong form này.',
+      'Không thể chỉnh sửa super admin từ mục này.',
       400,
     );
   }

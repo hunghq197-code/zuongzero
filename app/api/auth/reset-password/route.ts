@@ -46,9 +46,18 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   const passwordHash = await createPasswordHash(password);
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO password_credentials (
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`SELECT json(CASE WHEN EXISTS (
+      SELECT 1 FROM account_invites ai JOIN users u ON u.id = ai.user_id
+      WHERE ai.id = ? AND ai.purpose = 'password_reset' AND ai.status = 'pending'
+        AND ai.expires_at > ? AND u.status = 'active'
+    ) THEN 'true' ELSE 'reset-link-invalid' END)`).bind(
+        invite.id,
+        new Date().toISOString(),
+      ),
+      env.DB.prepare(
+        `INSERT INTO password_credentials (
          id,
          user_id,
          password_hash,
@@ -61,20 +70,35 @@ export async function POST(request: Request) {
          password_hash = excluded.password_hash,
          password_updated_at = excluded.password_updated_at,
          must_change_password = 0`,
-    ).bind(crypto.randomUUID(), invite.userId, passwordHash, now, now),
-    env.DB.prepare(
-      `UPDATE account_invites
+      ).bind(crypto.randomUUID(), invite.userId, passwordHash, now, now),
+      env.DB.prepare(
+        `UPDATE account_invites
        SET status = 'used',
            used_at = ?
        WHERE id = ?
          AND purpose = 'password_reset'
          AND status = 'pending'`,
-    ).bind(now, invite.id),
-    env.DB.prepare(
-      `DELETE FROM auth_sessions
+      ).bind(now, invite.id),
+      env.DB.prepare(
+        `DELETE FROM auth_sessions
        WHERE user_id = ?`,
-    ).bind(invite.userId),
-  ]);
+      ).bind(invite.userId),
+      env.DB.prepare(
+        "UPDATE auth_login_otps SET status = 'revoked' WHERE user_id = ? AND status IN ('pending','used')",
+      ).bind(invite.userId),
+      env.DB.prepare(
+        "UPDATE account_invites SET status = 'revoked' WHERE user_id = ? AND purpose = 'password_reset' AND status = 'pending'",
+      ).bind(invite.userId),
+    ]);
+  } catch (error) {
+    const detail =
+      error instanceof Error
+        ? `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`
+        : '';
+    if (detail.includes('malformed JSON'))
+      return redirectToReset(request, 'invalid', token);
+    return redirectToReset(request, 'config', token);
+  }
 
   const url = new URL('/login', request.url);
   url.searchParams.set('reset', 'changed');

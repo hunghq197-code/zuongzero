@@ -4,6 +4,11 @@ import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { getAdminAccess } from '@/lib/admin-auth';
 import { ensureUserRecord } from '@/lib/user-records';
 import { findFinalizedSuccessor } from '@/lib/statement-balances';
+import { findGuaranteeSuccessor } from '@/lib/guarantees';
+import {
+  clientWriteErrorResponse,
+  withClientWriteLock,
+} from '@/lib/client-write-lock';
 import {
   parseStatementImportSnapshot,
   restoreStatementImportSnapshot,
@@ -56,8 +61,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const target = await env.DB.prepare(
-      `SELECT
+    const scope = await env.DB.prepare(
+      "SELECT client_id AS clientId FROM report_periods WHERE id = ? AND currency = 'VND'",
+    )
+      .bind(reportPeriodId)
+      .first<{ clientId: string }>();
+    if (!scope)
+      return Response.json(
+        { message: 'Không tìm thấy statement.' },
+        { status: 404 },
+      );
+    return await withClientWriteLock(env.DB, [scope.clientId], async (db) => {
+      const target = await db
+        .prepare(
+          `SELECT
          rp.client_id AS clientId,
          rp.period,
          rp.status,
@@ -73,168 +90,184 @@ export async function POST(request: Request) {
        WHERE rp.id = ?
          AND rp.currency = 'VND'
        LIMIT 1`,
-    )
-      .bind(reportPeriodId)
-      .first<RollbackTarget>();
+        )
+        .bind(reportPeriodId)
+        .first<RollbackTarget>();
 
-    if (!target) {
-      return Response.json(
-        { message: 'Không tìm thấy statement đang hoạt động.' },
-        { status: 404 },
+      if (!target) {
+        return Response.json(
+          { message: 'Không tìm thấy statement đang hoạt động.' },
+          { status: 404 },
+        );
+      }
+
+      if (target.currentUploadId !== uploadId) {
+        return Response.json(
+          {
+            message:
+              'Phiên bản này không còn là dữ liệu hiện tại. Hãy tải lại lịch sử trước khi hoàn tác.',
+          },
+          { status: 409 },
+        );
+      }
+
+      if (target.status === 'locked') {
+        return Response.json(
+          { message: 'Statement đang khóa. Hãy mở khóa trước khi hoàn tác.' },
+          { status: 409 },
+        );
+      }
+
+      if (target.paymentStatus === 'paid') {
+        return Response.json(
+          {
+            message:
+              'Statement đã thanh toán. Hãy hoàn tác trạng thái thanh toán trước khi hoàn tác dữ liệu.',
+          },
+          { status: 409 },
+        );
+      }
+
+      const gmSuccessor = await findGuaranteeSuccessor(
+        db,
+        target.clientId,
+        target.period,
       );
-    }
+      if (gmSuccessor)
+        return Response.json(
+          {
+            message: `Có GM và dữ liệu kỳ ${gmSuccessor.period}. Hãy hoàn tác dữ liệu từ kỳ mới nhất trước.`,
+          },
+          { status: 409 },
+        );
 
-    if (target.currentUploadId !== uploadId) {
-      return Response.json(
-        {
-          message:
-            'Phiên bản này không còn là dữ liệu hiện tại. Hãy tải lại lịch sử trước khi hoàn tác.',
-        },
-        { status: 409 },
+      const successor = await findFinalizedSuccessor(
+        env.DB,
+        target.clientId,
+        target.period,
       );
-    }
+      if (successor) {
+        return Response.json(
+          {
+            message: `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi hoàn tác dữ liệu kỳ trước.`,
+          },
+          { status: 409 },
+        );
+      }
 
-    if (target.status === 'locked') {
-      return Response.json(
-        { message: 'Statement đang khóa. Hãy mở khóa trước khi hoàn tác.' },
-        { status: 409 },
-      );
-    }
-
-    if (target.paymentStatus === 'paid') {
-      return Response.json(
-        {
-          message:
-            'Statement đã thanh toán. Hãy hoàn tác trạng thái thanh toán trước khi hoàn tác dữ liệu.',
-        },
-        { status: 409 },
-      );
-    }
-
-    const successor = await findFinalizedSuccessor(
-      env.DB,
-      target.clientId,
-      target.period,
-    );
-    if (successor) {
-      return Response.json(
-        {
-          message: `Kỳ ${successor.period} đã thanh toán hoặc đã khóa. Hãy mở lại kỳ sau trước khi hoàn tác dữ liệu kỳ trước.`,
-        },
-        { status: 409 },
-      );
-    }
-
-    const newerActiveUpload = await env.DB.prepare(
-      `SELECT id
+      const newerActiveUpload = await env.DB.prepare(
+        `SELECT id
        FROM uploads
        WHERE client_id = ?
          AND id <> ?
          AND status = 'imported'
          AND created_at > ?
        LIMIT 1`,
-    )
-      .bind(target.clientId, uploadId, target.currentUploadCreatedAt)
-      .first<{ id: string }>();
-    if (newerActiveUpload) {
-      return Response.json(
-        {
-          message:
-            'Khách hàng này có lần nhập mới hơn. Hãy hoàn tác phiên bản mới nhất trước để bảo toàn số dư GM.',
-        },
-        { status: 409 },
-      );
-    }
+      )
+        .bind(target.clientId, uploadId, target.currentUploadCreatedAt)
+        .first<{ id: string }>();
+      if (newerActiveUpload) {
+        return Response.json(
+          {
+            message:
+              'Khách hàng này có lần nhập mới hơn. Hãy hoàn tác phiên bản mới nhất trước để bảo toàn số dư GM.',
+          },
+          { status: 409 },
+        );
+      }
 
-    const summary = parseSummary(target.validationSummary);
-    const snapshotKey = readSummaryText(summary, 'rollbackSnapshotKey');
-    if (!snapshotKey) {
-      return Response.json(
-        { message: 'Phiên bản này không có snapshot để hoàn tác.' },
-        { status: 409 },
-      );
-    }
+      const summary = parseSummary(target.validationSummary);
+      const snapshotKey = readSummaryText(summary, 'rollbackSnapshotKey');
+      if (!snapshotKey) {
+        return Response.json(
+          { message: 'Phiên bản này không có snapshot để hoàn tác.' },
+          { status: 409 },
+        );
+      }
 
-    const snapshotObject = await env.FILES.get(snapshotKey);
-    if (!snapshotObject) {
-      return Response.json(
-        { message: 'Không tìm thấy snapshot hoàn tác trong kho file.' },
-        { status: 409 },
-      );
-    }
+      const snapshotObject = await env.FILES.get(snapshotKey);
+      if (!snapshotObject) {
+        return Response.json(
+          { message: 'Không tìm thấy snapshot hoàn tác trong kho file.' },
+          { status: 409 },
+        );
+      }
 
-    const snapshot = parseSnapshotText(await snapshotObject.text(), {
-      clientId: target.clientId,
-      period: target.period,
-      reportPeriodId,
-    });
-    if (!snapshot) {
-      return Response.json(
-        {
-          message: 'Snapshot hoàn tác không hợp lệ hoặc không đúng statement.',
-        },
-        { status: 409 },
-      );
-    }
+      const snapshot = parseSnapshotText(await snapshotObject.text(), {
+        clientId: target.clientId,
+        period: target.period,
+        reportPeriodId,
+      });
+      if (!snapshot) {
+        return Response.json(
+          {
+            message:
+              'Snapshot hoàn tác không hợp lệ hoặc không đúng statement.',
+          },
+          { status: 409 },
+        );
+      }
 
-    const now = new Date().toISOString();
-    const actor = await ensureUserRecord(env.DB, {
-      displayName: user.displayName,
-      email: user.email,
-      lastSeenAt: now,
-      role: access.role,
-      userId: user.userId,
-    });
+      const now = new Date().toISOString();
+      const actor = await ensureUserRecord(db, {
+        displayName: user.displayName,
+        email: user.email,
+        lastSeenAt: now,
+        role: access.role,
+        userId: user.userId,
+      });
 
-    await restoreStatementImportSnapshot(env.DB, snapshot);
-    const finalStatements = [
-      env.DB.prepare(
-        `UPDATE uploads
-         SET status = 'rolled_back'
-         WHERE id = ?`,
-      ).bind(uploadId),
-    ];
-    if (snapshot.statement?.sourceUploadId) {
-      finalStatements.push(
+      const finalStatements = [
         env.DB.prepare(
           `UPDATE uploads
+         SET status = 'rolled_back'
+         WHERE id = ?`,
+        ).bind(uploadId),
+      ];
+      if (snapshot.statement?.sourceUploadId) {
+        finalStatements.push(
+          env.DB.prepare(
+            `UPDATE uploads
            SET status = 'imported'
            WHERE id = ?`,
-        ).bind(snapshot.statement.sourceUploadId),
-      );
-    }
-    finalStatements.push(
-      env.DB.prepare(
-        `INSERT INTO audit_logs (
+          ).bind(snapshot.statement.sourceUploadId),
+        );
+      }
+      finalStatements.push(
+        env.DB.prepare(
+          `INSERT INTO audit_logs (
            id, actor_user_id, client_id, action, target_type, target_id,
            metadata, created_at
          )
          VALUES (?, ?, ?, 'admin_statement_upload_rolled_back', 'upload', ?, ?, ?)`,
-      ).bind(
-        crypto.randomUUID(),
-        actor.id,
-        target.clientId,
-        uploadId,
-        JSON.stringify({
-          period: target.period,
-          restoredUploadId: snapshot.statement?.sourceUploadId ?? null,
-          rolledBackUploadId: uploadId,
-          snapshotCapturedAt: snapshot.capturedAt,
-          snapshotKey,
-        }),
-        now,
-      ),
-    );
-    await env.DB.batch(finalStatements);
+        ).bind(
+          crypto.randomUUID(),
+          actor.id,
+          target.clientId,
+          uploadId,
+          JSON.stringify({
+            period: target.period,
+            restoredUploadId: snapshot.statement?.sourceUploadId ?? null,
+            rolledBackUploadId: uploadId,
+            snapshotCapturedAt: snapshot.capturedAt,
+            snapshotKey,
+          }),
+          now,
+        ),
+      );
+      await restoreStatementImportSnapshot(db, snapshot, finalStatements);
 
-    return Response.json({
-      message: snapshot.statement
-        ? 'Đã hoàn tác về phiên bản statement trước đó.'
-        : 'Đã hoàn tác lần tạo statement; kỳ này trở về trạng thái chưa có dữ liệu.',
-      restoredUploadId: snapshot.statement?.sourceUploadId ?? null,
-      status: 'rolled_back',
+      return Response.json({
+        message: snapshot.statement
+          ? 'Đã hoàn tác về phiên bản statement trước đó.'
+          : 'Đã hoàn tác lần tạo statement; kỳ này trở về trạng thái chưa có dữ liệu.',
+        restoredUploadId: snapshot.statement?.sourceUploadId ?? null,
+        status: 'rolled_back',
+      });
     });
   } catch (error) {
+    const locked = clientWriteErrorResponse(error);
+    if (locked) return locked;
     const errorId = crypto.randomUUID();
     console.error(`[admin-upload-rollback:${errorId}]`, error);
     return Response.json(

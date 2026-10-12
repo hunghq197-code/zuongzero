@@ -39,6 +39,7 @@ export default async function Home() {
       guarantees={dashboardData.guarantees}
       lineItemsByPeriod={dashboardData.lineItemsByPeriod}
       salesPeriodsByPeriod={dashboardData.salesPeriodsByPeriod}
+      sourceInsightsByPeriod={dashboardData.sourceInsightsByPeriod}
       statementPeriods={dashboardData.statementPeriods}
       trend={dashboardData.trend}
       userEmail={user.email}

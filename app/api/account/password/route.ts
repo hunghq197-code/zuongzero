@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers';
 
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { getConfiguredSuperAdminEmails } from '@/lib/admin-auth';
 import {
   createPasswordHash,
   hashSessionToken,
@@ -25,10 +24,6 @@ export async function POST(request: Request) {
       new URL('/login?return_to=%2Faccount', request.url),
       303,
     );
-  }
-
-  if (getConfiguredSuperAdminEmails().includes(user.email.toLowerCase())) {
-    return redirectToAccount(request, 'managed');
   }
 
   if (!env.DB) {
@@ -73,20 +68,44 @@ export async function POST(request: Request) {
   const token = readCookie(request.headers.get('cookie'), SESSION_COOKIE_NAME);
   const tokenHash = token ? await hashSessionToken(token) : null;
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE password_credentials
+  try {
+    await env.DB.batch([
+      env.DB.prepare(`SELECT json(CASE WHEN EXISTS (
+      SELECT 1 FROM password_credentials pc JOIN users u ON u.id = pc.user_id
+      WHERE pc.id = ? AND pc.password_hash = ? AND u.status = 'active'
+    ) THEN 'true' ELSE 'password-changed-concurrently' END)`).bind(
+        credential.id,
+        credential.passwordHash,
+      ),
+      env.DB.prepare(
+        `UPDATE password_credentials
        SET password_hash = ?,
            password_updated_at = ?,
            must_change_password = 0
        WHERE id = ?`,
-    ).bind(await createPasswordHash(newPassword), now, credential.id),
-    env.DB.prepare(
-      `DELETE FROM auth_sessions
+      ).bind(await createPasswordHash(newPassword), now, credential.id),
+      env.DB.prepare(
+        `DELETE FROM auth_sessions
        WHERE user_id = ?
          AND (? IS NULL OR token_hash != ?)`,
-    ).bind(user.userId, tokenHash, tokenHash),
-  ]);
+      ).bind(user.userId, tokenHash, tokenHash),
+      env.DB.prepare(
+        "UPDATE auth_login_otps SET status = 'revoked' WHERE user_id = ? AND status IN ('pending','used')",
+      ).bind(user.userId),
+      env.DB.prepare(
+        "UPDATE account_invites SET status = 'revoked' WHERE user_id = ? AND purpose = 'password_reset' AND status = 'pending'",
+      ).bind(user.userId),
+    ]);
+  } catch (error) {
+    const detail =
+      error instanceof Error
+        ? `${error.message} ${error.cause instanceof Error ? error.cause.message : ''}`
+        : '';
+    return redirectToAccount(
+      request,
+      detail.includes('malformed JSON') ? 'current_invalid' : 'config',
+    );
+  }
 
   return redirectToAccount(request, 'changed');
 }
@@ -97,7 +116,6 @@ function redirectToAccount(
     | 'changed'
     | 'config'
     | 'current_invalid'
-    | 'managed'
     | 'password_length'
     | 'password_match',
 ) {

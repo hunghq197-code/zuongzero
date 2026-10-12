@@ -4,6 +4,7 @@ import { env } from 'cloudflare:workers';
 import { POST as login } from '../../app/api/auth/login/route';
 import { POST as recover } from '../../app/api/auth/forgot-password/route';
 import { POST as verify } from '../../app/api/auth/verify-login/route';
+import { POST as reset } from '../../app/api/auth/reset-password/route';
 import {
   AUTH_RATE_POLICIES,
   authRequestIp,
@@ -17,6 +18,7 @@ const testWorker = {
     if (path === '/api/auth/login') return login(request);
     if (path === '/api/auth/forgot-password') return recover(request);
     if (path === '/api/auth/verify-login') return verify(request);
+    if (path === '/api/auth/reset-password') return reset(request);
     if (path === '/test/ip') {
       return Response.json({ ip: authRequestIp(request) });
     }
