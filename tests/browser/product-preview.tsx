@@ -71,7 +71,9 @@ function PaginationPreview() {
 }
 
 const previewParams = new URLSearchParams(window.location.search);
-const view = previewParams.get('view');
+const view =
+  previewParams.get('view') ??
+  (previewParams.has('period') ? 'financial' : null);
 const isPaid = previewParams.get('payment') === 'paid';
 const financialPeriods = [
   {
@@ -115,6 +117,20 @@ if (previewParams.get('amount') === 'large') {
     carryForward: 9_753_086_430_999,
   });
 }
+if (previewParams.get('history') === 'many') {
+  financialPeriods.push(
+    ...Array.from({ length: 12 }, (_, index) => {
+      const quarterIndex = 2026 * 4 - index;
+      const year = Math.floor(quarterIndex / 4);
+      const quarter = (quarterIndex % 4) + 1;
+      return {
+        ...financialPeriods[0],
+        id: `finance-history-${index}`,
+        period: `${year}-Q${quarter}`,
+      };
+    }),
+  );
+}
 createRoot(document.getElementById('root')!).render(
   view === 'pagination' ? (
     <PaginationPreview />
@@ -136,6 +152,7 @@ createRoot(document.getElementById('root')!).render(
       accessLevel="viewer"
       clientId="preview-client"
       clientName="Nghệ sĩ thử nghiệm"
+      initialPeriod={previewParams.get('period') ?? undefined}
       userEmail="preview@example.com"
       statementPeriods={
         view === 'financial'

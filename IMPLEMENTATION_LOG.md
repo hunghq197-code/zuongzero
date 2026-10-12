@@ -2,6 +2,19 @@
 
 Cap nhat ngay 2026-10-12, timezone van hanh: Asia/Bangkok / Asia/Saigon (UTC+7).
 
+## Lien Ket Xem Lai Bao Cao Theo Quy - 2026-10-12
+
+Trang thai: CODE DONE, LOCAL TESTED, NOT DEPLOYED. Source goc `7e8b605`; khong commit/push/deploy trong tac vu nay.
+
+- Ten quy trong Lich su bao cao la lien ket. Click thuong doi ngay dashboard/bieu do sang quy do, dong bo bo chon quy va dua man hinh/focus len tong quan; khong tai lai trang hay them trang/nut moi.
+- URL `/?period=2026-Q2#client-overview` ho tro mo tab moi, tai lai, copy link va Back/Forward. Bo chon quy cung cap nhat URL. Ton trong reduced motion, Enter va thao tac Ctrl/Cmd-click mac dinh cua lien ket.
+- Trang root doc query period dung dinh dang va giu quy khi chuyen den dang nhap. Dashboard chi chon quy nam trong danh sach cua client da duoc xac thuc; query khong ton tai quay ve quy mac dinh. Khong nhan client ID tu URL, khong doi query/quyen cong bo hay tinh toan tai chinh.
+- PDF/Excel cua tung dong lich su van tai dung report ID cua dong do, ke ca dashboard dang xem quy khac. Phan trang lich su cu duoc giu nguyen.
+- `npm test` 97/97 (35 unit + 19 contract + 22 auth + 21 business); TypeScript, targeted lint va build dat. Build van co canh bao chunk >500 KB co san.
+- Playwright `tests/browser/statement-history.test.mjs` 16/16 desktop/mobile: so lieu/bieu do Q2/Q3, keyboard/focus, URL, Back/Forward/reload/tab moi, export hai dinh dang, invalid/missing quarter/empty dashboard va lich su >10 dong. Financial summary regression 16/16 va royalty workflow desktop/mobile dat; screenshots synthetic trong `outputs/statement-history-2026-10-12/` da xem.
+- App local xac nhan request chua dang nhap `/?period=2026-Q2` tra 307 den `/login?return_to=%2F%3Fperiod%3D2026-Q2`. Khong gui email that hay ghi du lieu production.
+- Demo component: `http://127.0.0.1:3212/tests/browser/product-preview.html?view=financial`; app local: `http://127.0.0.1:3213/login`. Ban production van la release `3c514f56` ben duoi.
+
 ## Phat Hanh An Toan Du Lieu Va Dashboard 6 Chi So - 2026-10-12
 
 Trang thai: DEPLOYED PRODUCTION theo xac nhan "deploy va commit len git". Cac muc NOT DEPLOYED ben duoi ghi nhan giai doan demo truoc khi duoc xac nhan.

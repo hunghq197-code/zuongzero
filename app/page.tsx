@@ -2,12 +2,27 @@ import { AccessRequired } from '@/components/access-required';
 import { RoyaltyDashboard } from '@/components/royalty-dashboard';
 import { getClientPortalAccess } from '@/lib/access-control';
 import { getClientDashboardData } from '@/lib/client-dashboard-data';
+import { REPORT_PERIOD_PATTERN } from '@/lib/reporting-periods';
 import { requireChatGPTUser } from './chatgpt-auth';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home() {
-  const user = await requireChatGPTUser('/');
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParams> | SearchParams;
+}) {
+  const params = (await searchParams) ?? {};
+  const initialPeriod =
+    typeof params.period === 'string' &&
+    REPORT_PERIOD_PATTERN.test(params.period)
+      ? params.period
+      : undefined;
+  const user = await requireChatGPTUser(
+    initialPeriod ? `/?period=${encodeURIComponent(initialPeriod)}` : '/',
+  );
   const access = await getClientPortalAccess(user);
 
   if (!access.allowed) {
@@ -37,6 +52,7 @@ export default async function Home() {
       clientId={access.clientId}
       clientName={access.clientName}
       guarantees={dashboardData.guarantees}
+      initialPeriod={initialPeriod}
       lineItemsByPeriod={dashboardData.lineItemsByPeriod}
       salesPeriodsByPeriod={dashboardData.salesPeriodsByPeriod}
       sourceInsightsByPeriod={dashboardData.sourceInsightsByPeriod}

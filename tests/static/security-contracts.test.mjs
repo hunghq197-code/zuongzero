@@ -396,3 +396,18 @@ void test('client financial overview contains only the six agreed metrics', () =
   }
   assert.doesNotMatch(summary, /Chi tiết cách tính|Cần thanh toán|Ngưỡng chuyển khoản|<details/);
 });
+
+void test('client history links select only published quarters already assigned to the authenticated client', () => {
+  const page = readSource('app/page.tsx');
+  const dashboard = readSource('components/royalty-dashboard.tsx');
+  const data = readSource('lib/client-dashboard-data.ts');
+  assert.match(page, /REPORT_PERIOD_PATTERN.test\(params.period\)/);
+  assert.match(page, /clientId: access.clientId/);
+  assert.match(page, /initialPeriod=\{initialPeriod\}/);
+  assert.match(dashboard, /availablePeriods.includes\(initialPeriod\)/);
+  assert.match(dashboard, /if \(!availablePeriods.includes\(period\)\) return/);
+  assert.match(dashboard, /href=\{`\?period=\$\{encodeURIComponent\(period.period\)\}#client-overview`\}/);
+  assert.match(dashboard, /addEventListener\('popstate', restorePeriod\)/);
+  assert.match(data, /WHERE rp.client_id = \?/);
+  assert.match(data, /rp.status IN \('published', 'locked'\)/);
+});

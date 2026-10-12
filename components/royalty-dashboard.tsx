@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   CheckCircle2,
@@ -337,6 +337,7 @@ export function RoyaltyDashboard({
   clientId,
   clientName,
   guarantees = [],
+  initialPeriod,
   lineItemsByPeriod = {},
   salesPeriodsByPeriod = {},
   sourceInsightsByPeriod,
@@ -349,6 +350,7 @@ export function RoyaltyDashboard({
   clientId: string;
   clientName: string;
   guarantees?: TrackGuaranteeRow[];
+  initialPeriod?: string;
   lineItemsByPeriod?: Record<string, StatementLineItem[]>;
   salesPeriodsByPeriod?: Record<string, SalesPeriodSourceRow[]>;
   sourceInsightsByPeriod?: Record<string, SourceInsights>;
@@ -382,8 +384,11 @@ export function RoyaltyDashboard({
     [clientPeriods, defaultPeriod, hasStatements],
   );
   const [selectedPeriod, setSelectedPeriod] = useState(
-    clientPeriods[0]?.period ?? defaultPeriod,
+    initialPeriod && availablePeriods.includes(initialPeriod)
+      ? initialPeriod
+      : (availablePeriods[0] ?? defaultPeriod),
   );
+  const overviewRef = useRef<HTMLElement>(null);
   const [exportingStatementId, setExportingStatementId] = useState('');
   const [exportMessage, setExportMessage] = useState('');
   const resolvedSelectedPeriod = availablePeriods.includes(selectedPeriod)
@@ -446,6 +451,39 @@ export function RoyaltyDashboard({
     clientId,
   );
   const ledgerPage = usePaginatedRows(clientPeriods);
+
+  function selectReportPeriod(period: string, openOverview = false) {
+    if (!availablePeriods.includes(period)) return;
+    setSelectedPeriod(period);
+    const url = new URL(window.location.href);
+    url.searchParams.set('period', period);
+    if (openOverview) url.hash = 'client-overview';
+    if (url.href !== window.location.href) {
+      window.history.pushState(window.history.state, '', url);
+    }
+    if (openOverview) {
+      overviewRef.current?.focus({ preventScroll: true });
+      window.scrollTo({
+        top: 0,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+      });
+    }
+  }
+
+  useEffect(() => {
+    function restorePeriod() {
+      const period = new URL(window.location.href).searchParams.get('period');
+      setSelectedPeriod(
+        period && availablePeriods.includes(period)
+          ? period
+          : (availablePeriods[0] ?? defaultPeriod),
+      );
+    }
+    window.addEventListener('popstate', restorePeriod);
+    return () => window.removeEventListener('popstate', restorePeriod);
+  }, [availablePeriods, defaultPeriod]);
 
   async function exportStatement(
     reportPeriodId: string,
@@ -574,8 +612,10 @@ export function RoyaltyDashboard({
 
           <div className="space-y-5 px-5 py-5 md:px-8 md:py-7">
             <section
-              className="music-card scroll-mt-24 overflow-hidden"
+              className="music-card scroll-mt-24 overflow-hidden focus:outline-none"
               id="client-overview"
+              ref={overviewRef}
+              tabIndex={-1}
             >
               <div className="grid lg:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="p-4 md:p-5">
@@ -617,7 +657,7 @@ export function RoyaltyDashboard({
                       </span>
                       <Select
                         onValueChange={(value) => {
-                          if (value) setSelectedPeriod(value);
+                          if (value) selectReportPeriod(value);
                         }}
                         value={resolvedSelectedPeriod}
                       >
@@ -977,7 +1017,33 @@ export function RoyaltyDashboard({
                       ledgerPage.visibleRows.map((period) => (
                         <TableRow key={period.id}>
                           <TableCell className="font-medium">
-                            {vietnamesePeriodLabel(period.period)}:{' '}
+                            <a
+                              aria-current={
+                                period.period === resolvedSelectedPeriod
+                                  ? 'true'
+                                  : undefined
+                              }
+                              aria-label={`Xem báo cáo ${vietnamesePeriodLabel(period.period)}`}
+                              className="text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+                              href={`?period=${encodeURIComponent(period.period)}#client-overview`}
+                              onClick={(event) => {
+                                if (
+                                  event.defaultPrevented ||
+                                  event.button !== 0 ||
+                                  event.ctrlKey ||
+                                  event.metaKey ||
+                                  event.shiftKey ||
+                                  event.altKey
+                                ) {
+                                  return;
+                                }
+                                event.preventDefault();
+                                selectReportPeriod(period.period, true);
+                              }}
+                            >
+                              {vietnamesePeriodLabel(period.period)}
+                            </a>
+                            :{' '}
                             {period.clientName}
                           </TableCell>
                           <TableCell>{formatNumber(period.rowCount)}</TableCell>
